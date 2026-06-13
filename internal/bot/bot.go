@@ -38,7 +38,14 @@ func (b *Bot) Start() {
 }
 
 func (b *Bot) handleMessage(msg *tgbotapi.Message) {
-	switch msg.Text {
+	text := msg.Text
+
+	// normalize command (hapus @botusername)
+	if idx := strings.Index(text, "@"); idx != -1 {
+		text = text[:idx]
+	}
+
+	switch text {
 
 	case "/start":
 		b.reply(msg.Chat.ID, "👋 Halo! Bot kamu sudah aktif.")
