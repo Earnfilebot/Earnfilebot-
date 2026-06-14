@@ -64,19 +64,27 @@ async def receive_media(message: Message, state: FSMContext):
         return
 
     # =========================
-    # DETECT FILE
+    # DETECT FILE + TYPE
     # =========================
     if message.document:
         file_id = message.document.file_id
+        ftype = "document"
+
     elif message.video:
         file_id = message.video.file_id
+        ftype = "video"
+
     else:
         file_id = message.photo[-1].file_id
+        ftype = "photo"
 
-    item = {"file_id": file_id}
+    item = {
+        "file_id": file_id,
+        "type": ftype
+    }
 
     # =========================
-    # MEDIA GROUP MODE
+    # MEDIA GROUP FIX (ANTI KE POTONG)
     # =========================
     if message.media_group_id:
         gid = message.media_group_id
@@ -86,10 +94,9 @@ async def receive_media(message: Message, state: FSMContext):
 
         media_buffer[gid].append(item)
 
-        # tunggu semua masuk
-        await asyncio.sleep(1)
+        # 🔥 delay lebih aman
+        await asyncio.sleep(1.5)
 
-        # kalau masih ada di buffer → proses
         if gid in media_buffer:
             batch = media_buffer.pop(gid)
 
@@ -101,9 +108,6 @@ async def receive_media(message: Message, state: FSMContext):
             await state.update_data(media=media)
 
     else:
-        # =========================
-        # SINGLE FILE
-        # =========================
         media = data.get("media", [])
         media.append(item)
         await state.update_data(media=media)
