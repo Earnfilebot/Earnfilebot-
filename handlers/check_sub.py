@@ -28,24 +28,24 @@ async def check_sub_callback(call: CallbackQuery):
 
         return
 
-    # HOME TEXT
+    # HOME TEXT (konsisten dengan START)
     text = f"""
-EARNFILEBOT
+𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 
-🆔 ID : {user_id}
-💰 SALDO : Rp0
+🆔 𝗜𝗗 : {user_id}
+💰 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : Rp0
 
 ━━━━━━━━━━━━━━
-ᶜᵒᵖʸʳⁱᵍʰᵗ ᵒᶠ ᴱᵃʳⁿᶠⁱˡᵉᴮᵒᵗ
+𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 """
 
-    # SAFE EDIT (hindari error kalau message tidak bisa di-edit)
+    # SAFE EDIT MESSAGE
     try:
         await call.message.edit_text(
             text,
             reply_markup=home_kb()
         )
-    except:
+    except Exception:
         await call.message.answer(
             text,
             reply_markup=home_kb()
