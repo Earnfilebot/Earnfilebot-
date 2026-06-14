@@ -16,73 +16,79 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         "Content-Type": "application/json"
     }
 
+    # 🔥 FIX ENDPOINT
+    url = f"{BAYARGG_BASE_URL}/v1/transaction/create"
+
     try:
-        url = f"{BAYARGG_BASE_URL}/transaction/create"
-
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(
-                url,
-                json=payload,
-                headers=headers
-            )
-
-        # =========================
-        # 🔥 DEBUG FULL
-        # =========================
         print("===== BAYARGG DEBUG =====")
         print("URL:", url)
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload, headers=headers)
+
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
         print("=========================")
 
-        # =========================
         # ❌ RESPONSE KOSONG
-        # =========================
         if not r.text:
             print("❌ RESPONSE KOSONG")
             return None
 
-        # =========================
-        # ❌ BUKAN JSON
-        # =========================
+        # ❌ PARSE JSON
         try:
             data = r.json()
         except Exception as e:
-            print("❌ JSON PARSE ERROR:", e)
+            print("❌ JSON ERROR:", e)
             return None
 
-        # =========================
-        # ❌ STATUS CODE ERROR
-        # =========================
+        # ❌ STATUS ERROR
         if r.status_code != 200:
             print("❌ HTTP ERROR:", data)
             return None
 
-        # =========================
-        # ❌ FORMAT SALAH
-        # =========================
+        # ❌ FORMAT
         if not isinstance(data, dict):
             print("❌ FORMAT BUKAN DICT")
             return None
 
-        if "data" not in data:
-            print("❌ FIELD 'data' TIDAK ADA:", data)
+        # 🔥 SUPPORT MULTI FORMAT API
+        result = data.get("data") or data.get("result") or data
+
+        if not isinstance(result, dict):
+            print("❌ RESULT INVALID:", result)
             return None
 
-        result = data["data"]
+        # 🔥 FLEXIBLE FIELD (biar gak kejebak beda API)
+        checkout_url = (
+            result.get("checkout_url")
+            or result.get("payment_url")
+            or result.get("invoice_url")
+        )
 
-        # =========================
-        # ❌ FIELD PENTING HILANG
-        # =========================
-        if not result.get("checkout_url") or not result.get("reference"):
+        reference = (
+            result.get("reference")
+            or result.get("id")
+            or result.get("external_id")
+        )
+
+        if not checkout_url or not reference:
             print("❌ DATA INVOICE TIDAK LENGKAP:", result)
             return None
 
-        # =========================
-        # ✅ SUCCESS
-        # =========================
-        print("✅ INVOICE BERHASIL DIBUAT")
-        return result
+        print("✅ INVOICE BERHASIL")
+        return {
+            "checkout_url": checkout_url,
+            "reference": reference
+        }
+
+    except httpx.ConnectError:
+        print("❌ GAGAL KONEK KE BAYARGG (DNS / DOMAIN SALAH)")
+        return None
+
+    except httpx.TimeoutException:
+        print("❌ TIMEOUT KE BAYARGG")
+        return None
 
     except Exception as e:
         print("❌ INVOICE ERROR:", e)
