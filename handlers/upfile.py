@@ -1,6 +1,7 @@
 import random
 import string
 
+from config import CHANNEL_ID, normalize_price
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import State, StatesGroup
