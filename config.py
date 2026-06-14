@@ -5,6 +5,8 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+BAYARGG_API_KEY = "API-9b75fe5a500d003ccca002d3f473e20615bdc413565346ad"
+BAYARGG_BASE_URL = "https://www.bayar.gg/api"
 
 # 🔥 VALIDASI WAJIB (biar error ketahuan dari awal)
 if not BOT_TOKEN:
