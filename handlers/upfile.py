@@ -1,5 +1,6 @@
 import random
 import string
+import asyncio
 
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
@@ -32,16 +33,14 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 
     await state.clear()
 
+    msg = await call.message.edit_text(
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📤 KIRIM MEDIA (foto / video / dokumen)"
+    )
+
     await state.update_data(
         media=[],
-        upload_mode=True
+        preview_msg_id=msg.message_id
     )
-
-    await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📤 KIRIM MEDIA SEKARANG\n(foto / video / dokumen)"
-    )
-
-
 # =========================
 # GENERATE CODE
 # =========================
@@ -57,12 +56,13 @@ async def receive_media(message: Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # ❌ kalau bukan mode upload → ignore (biar gak numpuk)
+    # ❌ ignore kalau bukan mode upload
     if not data.get("upload_mode"):
         return
 
     media = data.get("media", [])
 
+    # ambil file_id
     if message.document:
         file_id = message.document.file_id
     elif message.video:
@@ -73,22 +73,42 @@ async def receive_media(message: Message, state: FSMContext):
     media.append(file_id)
     await state.update_data(media=media)
 
+    # 🔥 HAPUS MEDIA USER (BIAR CLEAN CHAT)
+    try:
+        await message.delete()
+    except:
+        pass
+
+    total = len(media)
+
+    text = f"""
+𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
+
+📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚 𝗠𝗘𝗗𝗜𝗔
+📊 𝗖𝗢𝗨𝗡𝗧 : {total}
+"""
+
     kb = InlineKeyboardBuilder()
     kb.button(text="💾 SAVE", callback_data="save_upfile")
     kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
     kb.adjust(2)
 
-    await message.answer(
-        f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
+    preview_id = data.get("preview_msg_id")
 
-📦 MEDIA RECEIVED
-📊 COUNT : {len(media)}
-""",
-        reply_markup=kb.as_markup()
-    )
-
-
+    # 🔥 UPDATE 1 MESSAGE (ANTI NUMPUK)
+    if preview_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=preview_id,
+                text=text,
+                reply_markup=kb.as_markup()
+            )
+        except:
+            pass
+    else:
+        msg = await message.answer(text, reply_markup=kb.as_markup())
+        await state.update_data(preview_msg_id=msg.message_id)
 # =========================
 # CANCEL → BACK HOME CLEAN
 # =========================
@@ -247,3 +267,17 @@ async def save_file(event, state: FSMContext, price=None):
         await bot.send_message(CHANNEL_ID, text)
     except:
         pass
+
+async def show_progress(message, total):
+    for i in range(1, total + 1):
+
+        text = f"""
+𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
+
+⏳ 𝗨𝗣𝗟𝗢𝗔𝗗𝗜𝗡𝗚 𝗣𝗥𝗢𝗖𝗘𝗦𝗦
+────────────────
+📊 𝗣𝗥𝗢𝗚𝗥𝗘𝗦𝗦 : {i}/{total}
+"""
+
+        await message.edit_text(text)
+        await asyncio.sleep(0.25)
