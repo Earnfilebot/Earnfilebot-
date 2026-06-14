@@ -5,18 +5,25 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-BAYARGG_API_KEY = "API-9b75fe5a500d003ccca002d3f473e20615bdc413565346ad"
-BAYARGG_BASE_URL = "https://www.bayar.gg/api"
+BAYARGG_API_KEY = os.getenv("BAYARGG_API_KEY")
 
-# 🔥 VALIDASI WAJIB (biar error ketahuan dari awal)
+# 🔥 FIX ENDPOINT
+BAYARGG_BASE_URL = "https://api.bayar.gg"
+
+# =========================
+# VALIDASI
+# =========================
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN belum di-set di .env")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL belum di-set di .env")
 
+if not BAYARGG_API_KEY:
+    raise ValueError("BAYARGG_API_KEY belum di-set di .env")
 
-CHANNEL_ID = -1003721009353  # group post
+
+CHANNEL_ID = -1003721009353
 
 
 # =========================
