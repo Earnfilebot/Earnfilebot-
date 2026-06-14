@@ -19,40 +19,41 @@ async def start_cmd(message: Message):
     # FORCE SUB
     if not await check_force_sub(message.bot, user_id):
         await message.answer(
-            "❌ Kamu belum join semua channel.\n\nSilakan join lalu klik CHECK.",
+            "❌ Kamu belum join semua channel.\n\nSilakan join dulu lalu klik CHECK.",
             reply_markup=join_kb()
         )
         return
 
-    # SAVE USER
     pool = await get_pool()
 
+    # SAVE USER (lebih aman pakai INSERT ON CONFLICT)
     await pool.execute(
         """
         INSERT INTO users (telegram_id, username)
         VALUES ($1, $2)
-        ON CONFLICT (telegram_id) DO NOTHING
+        ON CONFLICT (telegram_id) DO UPDATE
+        SET username = EXCLUDED.username
         """,
         user_id,
         username
     )
 
-    # AMBIL SALDO
+    # AMBIL SALDO (aman kalau null)
     user = await pool.fetchrow(
         "SELECT balance FROM users WHERE telegram_id = $1",
         user_id
     )
 
-    balance = user["balance"] if user else 0
+    balance = user["balance"] if user and user["balance"] is not None else 0
 
     text = f"""
-EARNFILEBOT
+𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 
-🆔 ID : {user_id}
-💰 SALDO : Rp{balance}
+🆔 𝗜𝗗 : {user_id}
+💰 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : Rp{balance}
 
-━━━━━━━━━━━━━━
-ᶜᵒᵖʸʳⁱᵍʰᵗ ᵒᶠ ᴱᵃʳⁿᶠⁱˡᵉᴮᵒᵗ
+────────────────
+𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 """
 
     await message.answer(
