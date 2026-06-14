@@ -7,6 +7,8 @@ from keyboards.menu import home_kb
 from keyboards.join import join_kb
 from database import get_pool
 
+from utils.ui import USER_UI
+
 router = Router()
 
 
@@ -26,7 +28,7 @@ async def start_cmd(message: Message):
 
     pool = await get_pool()
 
-    # SAVE USER (lebih aman pakai INSERT ON CONFLICT)
+    # SAVE USER
     await pool.execute(
         """
         INSERT INTO users (telegram_id, username)
@@ -38,7 +40,6 @@ async def start_cmd(message: Message):
         username
     )
 
-    # AMBIL SALDO (aman kalau null)
     user = await pool.fetchrow(
         "SELECT balance FROM users WHERE telegram_id = $1",
         user_id
@@ -56,7 +57,20 @@ async def start_cmd(message: Message):
 𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 """
 
-    await message.answer(
+    # ❌ hapus pesan /start biar clean
+    try:
+        await message.delete()
+    except:
+        pass
+
+    # ✔ kirim 1 UI dashboard
+    msg = await message.answer(
         text,
         reply_markup=home_kb()
     )
+
+    # ✔ simpan UI (INI PENTING UNTUK HOME UI SYSTEM)
+    USER_UI[user_id] = {
+        "chat_id": msg.chat.id,
+        "message_id": msg.message_id
+    }
