@@ -251,7 +251,7 @@ async def save_file(event, state: FSMContext, price=None):
 
 📦 𝗠𝗘𝗗𝗜𝗔 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗
 ────────────────
-🔑 𝗖𝗢𝗗𝗘   : `{code}`
+🔑 𝗖𝗢𝗗𝗘   : <pre>{code}</pre>
 📊 𝗠𝗘𝗗𝗜𝗔  : {media_count}
 💰 𝗦𝗬𝗦𝗧𝗘𝗠 : {file_type.upper()} {price}
 👤 𝗖𝗥𝗘𝗔𝗧𝗘 : {user.full_name}
