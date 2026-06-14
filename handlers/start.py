@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from utils.force_sub import check_force_sub
 from keyboards.menu import home_kb
+from keyboards.join import join_kb
 from database import get_pool
 
 router = Router()
@@ -12,13 +13,17 @@ router = Router()
 @router.message(CommandStart())
 async def start_cmd(message: Message):
 
+    user_id = message.from_user.id
+    username = message.from_user.username
+
     # Force Subscribe
     if not await check_force_sub(
         message.bot,
-        message.from_user.id
+        user_id
     ):
         await message.answer(
-            "❌ Join semua channel terlebih dahulu."
+            "❌ Join semua channel terlebih dahulu.",
+            reply_markup=join_kb()
         )
         return
 
@@ -35,15 +40,23 @@ async def start_cmd(message: Message):
         ON CONFLICT (telegram_id)
         DO NOTHING
         """,
-        message.from_user.id,
-        message.from_user.username
+        user_id,
+        username
     )
+
+    # Ambil saldo dari DB
+    user = await pool.fetchrow(
+        "SELECT balance FROM users WHERE telegram_id = $1",
+        user_id
+    )
+
+    balance = user["balance"] if user else 0
 
     text = f"""
 EARNFILEBOT
 
-🆔 ID : {message.from_user.id}
-💰 SALDO : Rp0
+🆔 ID : {user_id}
+💰 SALDO : Rp{balance}
 
 ᶜᵒᵖʸʳⁱᵍʰᵗ ᵒᶠ ᴱᵃʳⁿᶠⁱˡᵉᴮᵒᵗ
 """
