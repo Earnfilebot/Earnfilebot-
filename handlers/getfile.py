@@ -132,8 +132,6 @@ async def payment_ui(message: Message, file):
 # =========================
 # MAIN GET FILE
 # =========================
-from aiogram.types import InputMediaPhoto, InputMediaVideo, InputMediaDocument
-
 
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
