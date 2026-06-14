@@ -1,4 +1,5 @@
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
 
 from utils.payment import create_bayargg_invoice
@@ -6,10 +7,7 @@ from utils.payment import create_bayargg_invoice
 router = Router()
 
 
-# =========================
-# TEST PAYMENT COMMAND
-# =========================
-@router.message()
+@router.message(Command("pay"))
 async def test_payment(message: Message):
     result = await create_bayargg_invoice(
         amount=10000,
@@ -22,7 +20,7 @@ async def test_payment(message: Message):
         return
 
     await message.answer(
-        "✅ Invoice berhasil dibuat\n\n"
-        f"🔗 Link: {result['checkout_url']}\n"
-        f"🧾 Ref: {result['reference']}"
+        "✅ Invoice berhasil dibuat\n"
+        f"🔗 {result['checkout_url']}\n"
+        f"🧾 {result['reference']}"
     )
