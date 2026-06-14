@@ -176,7 +176,6 @@ async def payment_ui(message: Message, file):
 # =========================
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
-
     try:
         if not message.text:
             await message.answer("❌ Kirim kode saja")
@@ -212,12 +211,11 @@ async def receive_code(message: Message, state: FSMContext):
 
         if not media_list:
             media_list = [{
-                "file_id": file.get("file_id"),
-                "file_type": file.get("file_type", "photo")
+                "file_id": file.get("file_id")
             }]
 
         # =========================
-        # BUILD MEDIA GROUP (ANTI ERROR)
+        # BUILD MEDIA GROUP (NO TYPE GUESS)
         # =========================
         group = []
 
@@ -235,32 +233,30 @@ async def receive_code(message: Message, state: FSMContext):
 
             cap = caption if i == 0 else None
 
+            # 🔥 langsung brute (tanpa normalize_type)
+            media_obj = None
+
             try:
-                ftype = normalize_type(m.get("file_type"), fid)
+                media_obj = InputMediaVideo(media=fid, caption=cap)
+            except:
+                pass
 
-                if ftype == "video":
-                    group.append(InputMediaVideo(media=fid, caption=cap))
-
-                elif ftype == "document":
-                    group.append(InputMediaDocument(media=fid, caption=cap))
-
-                else:
-                    group.append(InputMediaPhoto(media=fid, caption=cap))
-
-            except Exception as e:
-                print("PRIMARY BUILD FAIL:", e)
-
-                # 🔥 fallback paksa
+            if not media_obj:
                 try:
-                    group.append(InputMediaDocument(media=fid, caption=cap))
+                    media_obj = InputMediaDocument(media=fid, caption=cap)
                 except:
-                    try:
-                        group.append(InputMediaVideo(media=fid, caption=cap))
-                    except:
-                        try:
-                            group.append(InputMediaPhoto(media=fid, caption=cap))
-                        except Exception as final_err:
-                            print("TOTAL FAIL:", final_err)
+                    pass
+
+            if not media_obj:
+                try:
+                    media_obj = InputMediaPhoto(media=fid, caption=cap)
+                except:
+                    pass
+
+            if media_obj:
+                group.append(media_obj)
+            else:
+                print("BUILD FAIL:", fid)
 
         if not group:
             await message.answer("❌ Media kosong / rusak")
@@ -268,29 +264,46 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
-        # FUNCTION KIRIM (ANTI FAIL TOTAL)
+        # SAFE SEND (ANTI TELEGRAM ERROR)
         # =========================
         async def safe_send():
             try:
                 await message.answer_media_group(group)
                 return True
+
             except Exception as e:
                 print("GROUP SEND FAIL:", e)
 
                 # 🔥 fallback kirim satu-satu
-                for g in group:
+                for i, m in enumerate(media_list):
+                    fid = m.get("file_id")
+                    cap = caption if i == 0 else None
+
+                    sent = False
+
+                    # VIDEO
                     try:
-                        if isinstance(g, InputMediaPhoto):
-                            await message.answer_photo(g.media, caption=g.caption)
+                        await message.answer_video(fid, caption=cap)
+                        sent = True
+                        continue
+                    except:
+                        pass
 
-                        elif isinstance(g, InputMediaVideo):
-                            await message.answer_video(g.media, caption=g.caption)
+                    # DOCUMENT
+                    try:
+                        await message.answer_document(fid, caption=cap)
+                        sent = True
+                        continue
+                    except:
+                        pass
 
-                        elif isinstance(g, InputMediaDocument):
-                            await message.answer_document(g.media, caption=g.caption)
-
+                    # PHOTO
+                    try:
+                        await message.answer_photo(fid, caption=cap)
+                        sent = True
+                        continue
                     except Exception as err:
-                        print("SINGLE SEND FAIL:", err)
+                        print("TOTAL SEND FAIL:", err)
 
                 return False
 
