@@ -38,7 +38,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": amount,
         "description": f"Purchase file {code}",
-        "callback_url": "callback_url = "https://earnfilebot.up.railway.app/webhook/bayargg"",
+        "callback_url": "callback_url = "https://earnfilebot.up.railway.app/webhook/bayargg",
         "external_id": f"{user_id}_{code}"
     }
 
