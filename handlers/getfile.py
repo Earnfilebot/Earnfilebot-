@@ -99,25 +99,79 @@ async def create_invoice(amount: int, code: str, user_id: int):
     }
 
     headers = {
-        "Authorization": f"Bearer {BAYARGG_API_KEY}"
+        "Authorization": f"Bearer {BAYARGG_API_KEY}",
+        "Content-Type": "application/json"
     }
 
+    # 🔥 FIX ENDPOINT (INI KUNCI)
+    url = f"{BAYARGG_BASE_URL}/v1/transaction/create"
+
     try:
+        print("===== INVOICE DEBUG =====")
+        print("URL:", url)
+
         async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(
-                f"{BAYARGG_BASE_URL}/transaction/create",
-                json=payload,
-                headers=headers
-            )
+            r = await client.post(url, json=payload, headers=headers)
 
-        data = r.json()
-        print("INVOICE RESPONSE:", data)
-        return data
+        print("STATUS:", r.status_code)
+        print("RAW RESPONSE:", r.text)
+        print("=========================")
 
-    except Exception as e:
-        print("INVOICE ERROR:", e)
+        # ❌ RESPONSE KOSONG
+        if not r.text:
+            return {}
+
+        # ❌ PARSE JSON AMAN
+        try:
+            data = r.json()
+        except Exception:
+            print("❌ RESPONSE BUKAN JSON")
+            return {}
+
+        # ❌ STATUS ERROR
+        if r.status_code != 200:
+            print("❌ HTTP ERROR:", data)
+            return {}
+
+        # 🔥 AMBIL DATA FLEXIBLE
+        result = data.get("data") or data.get("result") or data
+
+        if not isinstance(result, dict):
+            return {}
+
+        # 🔥 SUPPORT MULTI KEY
+        checkout_url = (
+            result.get("checkout_url")
+            or result.get("payment_url")
+            or result.get("invoice_url")
+        )
+
+        reference = (
+            result.get("reference")
+            or result.get("id")
+            or result.get("external_id")
+        )
+
+        if not checkout_url or not reference:
+            print("❌ FIELD KURANG:", result)
+            return {}
+
+        print("✅ INVOICE SUCCESS")
+
+        return {
+            "data": {
+                "checkout_url": checkout_url,
+                "reference": reference
+            }
+        }
+
+    except httpx.ConnectError as e:
+        print("❌ DNS / DOMAIN ERROR:", e)
         return {}
 
+    except Exception as e:
+        print("❌ INVOICE ERROR:", e)
+        return {}
 
 # =========================
 # START
