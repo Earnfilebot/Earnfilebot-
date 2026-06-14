@@ -7,7 +7,7 @@ from database import connect_db
 
 from handlers.check_sub import router as check_sub_router
 from handlers.start import router as start_router
-from handlers import start, check_sub, upfile
+from handlers.upfile import router as upfile_router
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
