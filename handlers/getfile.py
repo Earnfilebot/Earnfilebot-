@@ -28,24 +28,36 @@ class GetFileState(StatesGroup):
 # =========================
 # NORMALIZE TYPE (FIX WAJIB)
 # =========================
-def normalize_type(ftype: str) -> str:
-    if not ftype:
-        return "photo"
+def normalize_type(ftype: str, file_id: str) -> str:
+    """
+    Detect tipe file dari DB + fallback dari file_id Telegram
+    """
 
-    ftype = ftype.lower()
+    if ftype:
+        ftype = ftype.lower()
 
-    if ftype in ["photo", "image", "jpg", "jpeg", "png"]:
-        return "photo"
+        if ftype in ["photo", "image", "jpg", "jpeg", "png"]:
+            return "photo"
 
-    if ftype in ["video", "mp4", "mov"]:
-        return "video"
+        if ftype in ["video", "mp4", "mov"]:
+            return "video"
 
-    if ftype in ["doc", "document", "file", "pdf", "zip"]:
+        if ftype in ["doc", "document", "file", "pdf", "zip"]:
+            return "document"
+
+    # =========================
+    # AUTO DETECT DARI FILE_ID
+    # =========================
+    if file_id.startswith("BAACAg"):  # biasanya document/video
         return "document"
 
+    if file_id.startswith("BQACAg"):  # sering video
+        return "video"
+
+    if file_id.startswith("AgACAg"):  # photo
+        return "photo"
+
     return "photo"
-
-
 # =========================
 # CREATE INVOICE
 # =========================
@@ -186,7 +198,7 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
-        # PARSE MEDIA (ANTI RUSAK)
+        # PARSE MEDIA
         # =========================
         raw_media = file.get("media")
 
@@ -205,7 +217,7 @@ async def receive_code(message: Message, state: FSMContext):
             }]
 
         # =========================
-        # BUILD MEDIA GROUP
+        # BUILD MEDIA GROUP (ANTI ERROR)
         # =========================
         group = []
 
@@ -221,10 +233,11 @@ async def receive_code(message: Message, state: FSMContext):
             if not fid:
                 continue
 
-            ftype = normalize_type(m.get("file_type"))
             cap = caption if i == 0 else None
 
             try:
+                ftype = normalize_type(m.get("file_type"), fid)
+
                 if ftype == "video":
                     group.append(InputMediaVideo(media=fid, caption=cap))
 
@@ -235,7 +248,19 @@ async def receive_code(message: Message, state: FSMContext):
                     group.append(InputMediaPhoto(media=fid, caption=cap))
 
             except Exception as e:
-                print("MEDIA BUILD ERROR:", e)
+                print("PRIMARY BUILD FAIL:", e)
+
+                # 🔥 fallback paksa
+                try:
+                    group.append(InputMediaDocument(media=fid, caption=cap))
+                except:
+                    try:
+                        group.append(InputMediaVideo(media=fid, caption=cap))
+                    except:
+                        try:
+                            group.append(InputMediaPhoto(media=fid, caption=cap))
+                        except Exception as final_err:
+                            print("TOTAL FAIL:", final_err)
 
         if not group:
             await message.answer("❌ Media kosong / rusak")
@@ -243,15 +268,37 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
+        # FUNCTION KIRIM (ANTI FAIL TOTAL)
+        # =========================
+        async def safe_send():
+            try:
+                await message.answer_media_group(group)
+                return True
+            except Exception as e:
+                print("GROUP SEND FAIL:", e)
+
+                # 🔥 fallback kirim satu-satu
+                for g in group:
+                    try:
+                        if isinstance(g, InputMediaPhoto):
+                            await message.answer_photo(g.media, caption=g.caption)
+
+                        elif isinstance(g, InputMediaVideo):
+                            await message.answer_video(g.media, caption=g.caption)
+
+                        elif isinstance(g, InputMediaDocument):
+                            await message.answer_document(g.media, caption=g.caption)
+
+                    except Exception as err:
+                        print("SINGLE SEND FAIL:", err)
+
+                return False
+
+        # =========================
         # FREE FILE
         # =========================
         if file["type"] == "free":
-            try:
-                await message.answer_media_group(group)
-            except Exception as e:
-                print("SEND ERROR FREE:", e)
-                await message.answer("❌ Gagal kirim media")
-
+            await safe_send()
             await state.clear()
             return
 
@@ -270,12 +317,7 @@ async def receive_code(message: Message, state: FSMContext):
         # =========================
         group[0].caption = f"{file['code']} • UNLOCKED"
 
-        try:
-            await message.answer_media_group(group)
-        except Exception as e:
-            print("SEND ERROR PAID:", e)
-            await message.answer("❌ Gagal kirim media")
-
+        await safe_send()
         await state.clear()
 
     except Exception as e:
