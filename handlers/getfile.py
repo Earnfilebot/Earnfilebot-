@@ -133,6 +133,9 @@ async def payment_ui(message: Message, file):
 # MAIN GET FILE
 # =========================
 
+from aiogram.types import InputMediaPhoto, InputMediaVideo, InputMediaDocument
+
+
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
 
@@ -157,7 +160,7 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     # =========================
-    # FIX MEDIA STRUCTURE
+    # MEDIA STRUCTURE FIX
     # =========================
     media_list = file.get("media")
 
@@ -179,7 +182,7 @@ async def receive_code(message: Message, state: FSMContext):
 """
 
     # =========================
-    # FUNCTION BUILDER (ANTI ERROR)
+    # BUILD GROUP FUNCTION
     # =========================
     def build_group():
         group = []
@@ -187,45 +190,50 @@ async def receive_code(message: Message, state: FSMContext):
         for i, m in enumerate(media_list):
 
             fid = m.get("file_id")
-            ftype = (m.get("file_type") or "photo").lower()
-
-            cap = caption if i == 0 else None
-
             if not fid:
                 continue
 
-            # PHOTO
-            if ftype == "photo":
-                group.append(
-                    InputMediaPhoto(media=fid, caption=cap)
-                )
+            ftype = (m.get("file_type") or "photo").lower()
+            cap = caption if i == 0 else None
 
-            # VIDEO
-            elif ftype == "video":
-                group.append(
-                    InputMediaVideo(media=fid, caption=cap)
-                )
+            try:
+                if ftype == "video":
+                    group.append(InputMediaVideo(media=fid, caption=cap))
 
-            # DOCUMENT (PDF, ZIP, etc)
-            elif ftype == "document":
-                group.append(
-                    InputMediaDocument(media=fid, caption=cap)
-                )
+                elif ftype == "document":
+                    group.append(InputMediaDocument(media=fid, caption=cap))
 
-            # fallback safety
-            else:
-                group.append(
-                    InputMediaDocument(media=fid, caption=cap)
-                )
+                else:
+                    group.append(InputMediaPhoto(media=fid, caption=cap))
+
+            except Exception as e:
+                print("MEDIA BUILD ERROR:", e)
 
         return group
 
     # =========================
-    # FREE FILE
+    # BUILD MEDIA
+    # =========================
+    group = build_group()
+
+    if not group:
+        await message.answer("❌ Media kosong / rusak di database")
+        await state.clear()
+        return
+
+    # =========================
+    # FREE / PAID CHECK
     # =========================
     if file["type"] == "free":
 
-        await message.answer_media_group(build_group())
+        try:
+            print("TRY SEND MEDIA (FREE)")
+            await message.answer_media_group(group)
+            print("SUCCESS SEND MEDIA (FREE)")
+
+        except Exception as e:
+            print("SEND MEDIA ERROR (FREE):", e)
+
         await state.clear()
         return
 
@@ -242,11 +250,15 @@ async def receive_code(message: Message, state: FSMContext):
     # =========================
     # UNLOCKED FILE
     # =========================
-    group = build_group()
-
-    # ubah caption unlocked
     if group:
         group[0].caption = f"{file['code']} • UNLOCKED"
 
-    await message.answer_media_group(group)
+    try:
+        print("TRY SEND MEDIA (PAID)")
+        await message.answer_media_group(group)
+        print("SUCCESS SEND MEDIA (PAID)")
+
+    except Exception as e:
+        print("SEND MEDIA ERROR (PAID):", e)
+
     await state.clear()
