@@ -104,7 +104,7 @@ async def create_invoice(amount: int, code: str, user_id: int):
     }
 
     # 🔥 FIX ENDPOINT (INI KUNCI)
-    url = f"{BAYARGG_BASE_URL}/v1/transaction/create"
+    url = f"{BAYARGG_BASE_URL}/transaction/create"
 
     try:
         print("===== INVOICE DEBUG =====")
