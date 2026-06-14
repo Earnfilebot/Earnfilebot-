@@ -15,6 +15,8 @@ router = Router()
 @router.message(CommandStart())
 async def start_cmd(message: Message):
 
+    await state.clear()
+
     user_id = message.from_user.id
     username = message.from_user.username
 
