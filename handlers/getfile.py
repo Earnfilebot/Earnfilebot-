@@ -2,7 +2,12 @@ import asyncio
 import httpx
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InputMediaPhoto
+from aiogram.types import (
+    Message, CallbackQuery,
+    InputMediaPhoto,
+    InputMediaVideo,
+    InputMediaDocument
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -20,7 +25,7 @@ class GetFileState(StatesGroup):
 
 
 # =========================
-# PAYMENT CREATE (BAYARGG)
+# CREATE INVOICE
 # =========================
 async def create_invoice(amount: int, code: str, user_id: int):
 
@@ -67,7 +72,7 @@ async def is_paid(user_id: int, code: str):
 
     row = await pool.fetchrow(
         """
-        SELECT * FROM payments
+        SELECT 1 FROM payments
         WHERE user_id=$1 AND code=$2 AND status='paid'
         """,
         user_id,
@@ -125,7 +130,7 @@ async def payment_ui(message: Message, file):
 
 
 # =========================
-# MAIN GETFILE
+# MAIN GET FILE
 # =========================
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
@@ -150,13 +155,21 @@ async def receive_code(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    media_ids = file.get("media_ids") or [file["file_id"]]
+    # =========================
+    # AMBIL MEDIA (WAJIB ADA TYPE)
+    # =========================
+    media_list = file.get("media") or [
+        {
+            "file_id": file["file_id"],
+            "file_type": "photo"
+        }
+    ]
 
     caption = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
 🔑 CODE  : {file['code']}
-📦 MEDIA : {file['media_count']}
+📦 MEDIA : {len(media_list)}
 👤 OWNER : {file['creator']}
 """
 
@@ -165,13 +178,23 @@ async def receive_code(message: Message, state: FSMContext):
     # =========================
     if file["type"] == "free":
 
-        group = [
-            InputMediaPhoto(
-                media=fid,
-                caption=caption if i == 0 else None
-            )
-            for i, fid in enumerate(media_ids)
-        ]
+        group = []
+
+        for i, m in enumerate(media_list):
+
+            fid = m["file_id"]
+            ftype = m.get("file_type", "photo")
+
+            cap = caption if i == 0 else None
+
+            if ftype == "video":
+                group.append(InputMediaVideo(media=fid, caption=cap))
+
+            elif ftype == "document":
+                group.append(InputMediaDocument(media=fid, caption=cap))
+
+            else:
+                group.append(InputMediaPhoto(media=fid, caption=cap))
 
         await message.answer_media_group(group)
         await state.clear()
@@ -183,7 +206,6 @@ async def receive_code(message: Message, state: FSMContext):
     paid = await is_paid(message.from_user.id, code)
 
     if not paid:
-
         await payment_ui(message, file)
         await state.clear()
         return
@@ -191,13 +213,23 @@ async def receive_code(message: Message, state: FSMContext):
     # =========================
     # UNLOCKED FILE
     # =========================
-    group = [
-        InputMediaPhoto(
-            media=fid,
-            caption=f"{file['code']} • UNLOCKED" if i == 0 else None
-        )
-        for i, fid in enumerate(media_ids)
-    ]
+    group = []
+
+    for i, m in enumerate(media_list):
+
+        fid = m["file_id"]
+        ftype = m.get("file_type", "photo")
+
+        cap = f"{file['code']} • UNLOCKED" if i == 0 else None
+
+        if ftype == "video":
+            group.append(InputMediaVideo(media=fid, caption=cap))
+
+        elif ftype == "document":
+            group.append(InputMediaDocument(media=fid, caption=cap))
+
+        else:
+            group.append(InputMediaPhoto(media=fid, caption=cap))
 
     await message.answer_media_group(group)
     await state.clear()
