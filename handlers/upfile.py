@@ -10,9 +10,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
 from config import CHANNEL_ID
-from utils.ui_manager import update_ui
-from utils.home import build_home
-from keyboards.menu import home_kb
 
 router = Router()
 
@@ -39,9 +36,11 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 
     await state.update_data(
         media=[],
-        upload_mode=True,   # 🔥 FIX PENTING
+        upload_mode=True,
         preview_msg_id=msg.message_id
     )
+
+
 # =========================
 # GENERATE CODE
 # =========================
@@ -50,7 +49,7 @@ def generate_code():
 
 
 # =========================
-# RECEIVE MEDIA (LOCKED MODE)
+# RECEIVE MEDIA (ANTI NUMPUK + 1 MESSAGE UI)
 # =========================
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
@@ -70,8 +69,10 @@ async def receive_media(message: Message, state: FSMContext):
         file_id = message.photo[-1].file_id
 
     media.append(file_id)
+
     await state.update_data(media=media)
 
+    # hapus pesan user biar clean
     try:
         await message.delete()
     except:
@@ -83,6 +84,7 @@ async def receive_media(message: Message, state: FSMContext):
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
 📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚
+────────────────
 📊 𝗖𝗢𝗨𝗡𝗧 : {total}
 """
 
@@ -103,8 +105,10 @@ async def receive_media(message: Message, state: FSMContext):
             )
         except:
             pass
+
+
 # =========================
-# CANCEL → BACK HOME CLEAN
+# CANCEL
 # =========================
 @router.callback_query(F.data == "cancel_upfile")
 async def cancel(call: CallbackQuery, state: FSMContext):
@@ -113,13 +117,7 @@ async def cancel(call: CallbackQuery, state: FSMContext):
 
     await call.answer("Upload dibatalkan", show_alert=True)
 
-    user_id = call.from_user.id
-    balance = 0
-
-    await call.message.edit_text(
-        build_home(user_id, balance),
-        reply_markup=home_kb()
-    )
+    await call.message.edit_text("𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n❌ CANCELLED")
 
 
 # =========================
@@ -128,15 +126,15 @@ async def cancel(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "save_upfile")
 async def choose_type(call: CallbackQuery, state: FSMContext):
 
+    await state.set_state(UploadState.wait_type)
+
     kb = InlineKeyboardBuilder()
     kb.button(text="🆓 FREE", callback_data="type_free")
     kb.button(text="💰 PAID", callback_data="type_paid")
     kb.adjust(2)
 
-    await state.set_state(UploadState.wait_type)
-
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📦 PILIH TYPE",
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📦 PILIH TYPE",
         reply_markup=kb.as_markup()
     )
 
@@ -154,7 +152,7 @@ async def set_type(call: CallbackQuery, state: FSMContext):
         await state.set_state(UploadState.wait_price)
 
         await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n💰 MASUKKAN HARGA\nContoh: 10000 / 10.000"
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n💰 MASUKKAN HARGA"
         )
     else:
         await save_file(call, state, price=0)
@@ -166,7 +164,7 @@ async def set_type(call: CallbackQuery, state: FSMContext):
 @router.message(UploadState.wait_price)
 async def input_price(message: Message, state: FSMContext):
 
-    raw = "".join(filter(str.isdigit, message.text))
+    raw = "".join(filter(str.isdigit, message.text or ""))
 
     if not raw:
         await message.answer("❌ Format salah")
@@ -174,21 +172,21 @@ async def input_price(message: Message, state: FSMContext):
 
     price = int(raw)
 
+    await state.update_data(price=price)
+
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ DONE", callback_data="done_upfile")
     kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
     kb.adjust(2)
 
-    await state.update_data(price=price)
-
     await message.answer(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n⚙️ KONFIRMASI",
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n⚙️ KONFIRMASI",
         reply_markup=kb.as_markup()
     )
 
 
 # =========================
-# DONE
+# DONE + PROGRESS
 # =========================
 @router.callback_query(F.data == "done_upfile")
 async def done(call: CallbackQuery, state: FSMContext):
@@ -201,10 +199,11 @@ async def done(call: CallbackQuery, state: FSMContext):
         return
 
     await show_progress(call.message, len(media))
-
     await save_file(call, state)
+
+
 # =========================
-# SAVE CORE + POST GROUP
+# SAVE CORE
 # =========================
 async def save_file(event, state: FSMContext, price=None):
 
@@ -215,7 +214,7 @@ async def save_file(event, state: FSMContext, price=None):
 
     media = data.get("media", [])
     if not media:
-        await event.answer("❌ 𝗧𝗜𝗗𝗔𝗞 𝗔𝗗𝗔 𝗠𝗘𝗗𝗜𝗔")
+        await event.answer("❌ Tidak ada media")
         return
 
     file_id = media[0]
@@ -229,10 +228,7 @@ async def save_file(event, state: FSMContext, price=None):
 
     await pool.execute(
         """
-        INSERT INTO files (
-            code, file_id, owner_id,
-            media_count, price, type, creator
-        )
+        INSERT INTO files (code, file_id, owner_id, media_count, price, type, creator)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         """,
         code,
@@ -254,26 +250,25 @@ async def save_file(event, state: FSMContext, price=None):
 🔑 𝗖𝗢𝗗𝗘
 <code>{code}</code>
 
-📊 𝗠𝗘𝗗𝗜𝗔  : {media_count}
+📊 𝗠𝗘𝗗𝗜𝗔 : {media_count}
 💰 𝗦𝗬𝗦𝗧𝗘𝗠 : {file_type.upper()} {price}
 👤 𝗖𝗥𝗘𝗔𝗧𝗘 : {user.full_name}
-
-━━━━━━━━━━━━━━━━
-𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 """
 
-    # USER UPDATE
     try:
         await event.message.edit_text(text, parse_mode="HTML")
     except:
         pass
 
-    # GROUP POST
     try:
         await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
     except:
         pass
 
+
+# =========================
+# PROGRESS ANIMATION
+# =========================
 async def show_progress(message, total):
 
     for i in range(1, total + 1):
