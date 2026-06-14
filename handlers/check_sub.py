@@ -13,7 +13,7 @@ async def check_sub_callback(call: CallbackQuery):
 
     user_id = call.from_user.id
 
-    # cek force subscribe
+    # FORCE SUB CHECK
     if not await check_force_sub(call.bot, user_id):
 
         await call.answer(
@@ -28,17 +28,25 @@ async def check_sub_callback(call: CallbackQuery):
 
         return
 
-    # tampilkan home
+    # HOME TEXT
     text = f"""
 EARNFILEBOT
 
 🆔 ID : {user_id}
 💰 SALDO : Rp0
 
+━━━━━━━━━━━━━━
 ᶜᵒᵖʸʳⁱᵍʰᵗ ᵒᶠ ᴱᵃʳⁿᶠⁱˡᵉᴮᵒᵗ
 """
 
-    await call.message.edit_text(
-        text,
-        reply_markup=home_kb()
-    )
+    # SAFE EDIT (hindari error kalau message tidak bisa di-edit)
+    try:
+        await call.message.edit_text(
+            text,
+            reply_markup=home_kb()
+        )
+    except:
+        await call.message.answer(
+            text,
+            reply_markup=home_kb()
+        )
