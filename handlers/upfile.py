@@ -8,8 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
-
-CHANNEL_ID = -1003721009353
+from config import CHANNEL_ID
 
 router = Router()
 
@@ -23,19 +22,38 @@ class UploadState(StatesGroup):
 
 
 # =========================
-# CODE GENERATOR (AMAN)
+# ENTRY UPFILE (INI YANG KAMU LUPA)
+# =========================
+@router.callback_query(F.data == "upfile")
+async def start_upfile(call: CallbackQuery, state: FSMContext):
+
+    await state.clear()
+    await state.update_data(media=[])
+
+    await call.message.edit_text(
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📤 SILAKAN KIRIM MEDIA (foto / video / dokumen)"
+    )
+
+
+# =========================
+# CODE GENERATOR
 # =========================
 def generate_code():
     return "EF_" + "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
 
 
 # =========================
-# STEP 1 - RECEIVE MEDIA
+# RECEIVE MEDIA
 # =========================
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
 
     data = await state.get_data()
+
+    # ❗ kalau belum start upfile → ignore
+    if "media" not in data:
+        return
+
     media = data.get("media", [])
 
     if message.document:
@@ -57,15 +75,15 @@ async def receive_media(message: Message, state: FSMContext):
         f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 
-📦 𝗠𝗘𝗗𝗜𝗔 𝗥𝗘𝗖𝗘𝗜𝗩𝗘𝗗
-📊 𝗖𝗢𝗨𝗡𝗧 : {len(media)}
+📦 MEDIA RECEIVED
+📊 COUNT: {len(media)}
 """,
         reply_markup=kb.as_markup()
     )
 
 
 # =========================
-# CANCEL → HOME
+# CANCEL
 # =========================
 @router.callback_query(F.data == "cancel_upfile")
 async def cancel(call: CallbackQuery, state: FSMContext):
@@ -75,12 +93,12 @@ async def cancel(call: CallbackQuery, state: FSMContext):
     await call.answer("Upload dibatalkan", show_alert=True)
 
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n❌ 𝗨𝗣𝗟𝗢𝗔𝗗 𝗖𝗔𝗡𝗖𝗘𝗟𝗟𝗘𝗗"
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n❌ UPLOAD CANCELLED"
     )
 
 
 # =========================
-# SAVE → TYPE SELECT
+# SAVE → TYPE
 # =========================
 @router.callback_query(F.data == "save_upfile")
 async def choose_type(call: CallbackQuery, state: FSMContext):
@@ -93,7 +111,7 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
     await state.set_state(UploadState.wait_type)
 
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📦 𝗖𝗛𝗢𝗢𝗦𝗘 𝗧𝗬𝗣𝗘",
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📦 CHOOSE TYPE",
         reply_markup=kb.as_markup()
     )
 
@@ -111,7 +129,7 @@ async def set_type(call: CallbackQuery, state: FSMContext):
         await state.set_state(UploadState.wait_price)
 
         await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n💰 𝗜𝗡𝗣𝗨𝗧 𝗣𝗥𝗜𝗖𝗘\nContoh: 10000 / 10.000"
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n💰 INPUT PRICE\nContoh: 10000 / 10.000"
         )
     else:
         await save_file(call, state, price=0)
@@ -139,7 +157,7 @@ async def input_price(message: Message, state: FSMContext):
     await state.update_data(price=price)
 
     await message.answer(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n⚙️ 𝗖𝗢𝗡𝗙𝗜𝗥𝗠 𝗦𝗔𝗩𝗘",
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n⚙️ CONFIRM SAVE",
         reply_markup=kb.as_markup()
     )
 
@@ -154,7 +172,7 @@ async def done(call: CallbackQuery, state: FSMContext):
 
 
 # =========================
-# SAVE CORE (DB + GROUP POST)
+# SAVE CORE
 # =========================
 async def save_file(event, state: FSMContext, price=None):
 
@@ -165,13 +183,13 @@ async def save_file(event, state: FSMContext, price=None):
 
     media = data.get("media", [])
     file_id = media[0]
+
     media_count = len(media)
 
     file_type = data.get("type", "free")
     price = price if price is not None else data.get("price", 0)
 
     code = generate_code()
-
     user = event.from_user
 
     await pool.execute(
@@ -196,21 +214,16 @@ async def save_file(event, state: FSMContext, price=None):
     text = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 
-📦 𝗠𝗘𝗗𝗜𝗔 𝗦𝗨𝗖𝗖𝗘𝗦 𝗦𝗔𝗩𝗘𝗗
+📦 MEDIA SUCCESS SAVED
 
-🔑 𝗖𝗢𝗗𝗘 : {code}
-📊 𝗠𝗘𝗗𝗜𝗔 : {media_count}
-💰 𝗦𝗬𝗦𝗧𝗘𝗠 : {file_type.upper()} {price}
-👤 𝗖𝗥𝗘𝗔𝗧𝗘 : {user.full_name}
-
-━━━━━━━━━━━━━━
-𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
+🔑 CODE : {code}
+📊 MEDIA : {media_count}
+💰 SYSTEM : {file_type.upper()} {price}
+👤 CREATE : {user.full_name}
 """
 
-    # user
     await event.message.edit_text(text)
 
-    # group post (SAFE)
     try:
         await bot.send_message(CHANNEL_ID, text)
     except:
