@@ -148,7 +148,8 @@ def build_media(file_id: str, caption=None):
 @router.message(GetFileState.wait_code)
 async def get_file(message: Message, state: FSMContext):
 
-    # ❌ anti crash non-text
+    print("GETFILE TRIGGERED:", message.text)  # 👈 DEBUG DI SINI
+
     if not message.text:
         await message.answer("❌ Kirim KODE saja (text)")
         return
@@ -163,9 +164,7 @@ async def get_file(message: Message, state: FSMContext):
     )
 
     if not file:
-        await message.answer(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n❌ CODE TIDAK DITEMUKAN"
-        )
+        await message.answer("❌ CODE TIDAK DITEMUKAN")
         await state.clear()
         return
 
@@ -181,29 +180,17 @@ async def get_file(message: Message, state: FSMContext):
 👤 OWNER : {file['creator']}
 """
 
-    # =========================
-    # FREE FILE
-    # =========================
     if file["type"] == "free":
 
-        group = []
-        for i, fid in enumerate(media_ids):
-
-            # hanya photo safe version
-            group.append(
-                InputMediaPhoto(
-                    media=fid,
-                    caption=caption if i == 0 else None
-                )
-            )
+        group = [
+            InputMediaPhoto(media=fid, caption=caption if i == 0 else None)
+            for i, fid in enumerate(media_ids)
+        ]
 
         await message.answer_media_group(group)
         await state.clear()
         return
 
-    # =========================
-    # PAID FILE
-    # =========================
     paid = await is_paid(message.from_user.id, code)
 
     if not paid:
@@ -211,21 +198,10 @@ async def get_file(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # =========================
-    # UNLOCKED
-    # =========================
     group = [
-        InputMediaPhoto(
-            media=fid,
-            caption=f"{file['code']} • UNLOCKED" if i == 0 else None
-        )
+        InputMediaPhoto(media=fid, caption=f"{file['code']} • UNLOCKED" if i == 0 else None)
         for i, fid in enumerate(media_ids)
     ]
 
     await message.answer_media_group(group)
     await state.clear()
-
-@router.message(GetFileState.wait_code)
-async def get_file(message: Message, state: FSMContext):
-
-    print("GETFILE TRIGGERED:", message.text)
