@@ -18,23 +18,37 @@ from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 router = Router()
 
 
+# =========================
+# CLEAN FILE ID (ULTRA FIX)
+# =========================
 def clean_file_id(fid):
+    # unwrap dict berkali-kali
     while isinstance(fid, dict):
         fid = fid.get("file_id")
+
+    # 🔥 kalau string JSON → decode lagi
+    if isinstance(fid, str) and fid.startswith("["):
+        try:
+            data = json.loads(fid)
+            if isinstance(data, list) and data:
+                return clean_file_id(data[0].get("file_id"))
+        except:
+            return None
 
     if not isinstance(fid, str):
         return None
 
     fid = fid.strip()
 
-    # 🔥 VALIDASI KERAS
-    if not fid.startswith("BA") and not fid.startswith("CA"):
+    # 🔥 support semua prefix Telegram valid
+    if not fid.startswith(("BA", "CA", "Ag", "BQ")):
         return None
 
-    if len(fid) < 30:
+    if len(fid) < 20:
         return None
 
     return fid
+
 
 # =========================
 # STATE
@@ -44,12 +58,9 @@ class GetFileState(StatesGroup):
 
 
 # =========================
-# NORMALIZE TYPE (FIX WAJIB)
+# NORMALIZE TYPE
 # =========================
 def normalize_type(ftype: str, file_id: str) -> str:
-    """
-    Detect tipe file dari DB + fallback dari file_id Telegram
-    """
 
     if ftype:
         ftype = ftype.lower()
@@ -63,19 +74,19 @@ def normalize_type(ftype: str, file_id: str) -> str:
         if ftype in ["doc", "document", "file", "pdf", "zip"]:
             return "document"
 
-    # =========================
-    # AUTO DETECT DARI FILE_ID
-    # =========================
-    if file_id.startswith("BAACAg"):  # biasanya document/video
-        return "document"
-
-    if file_id.startswith("BQACAg"):  # sering video
-        return "video"
-
-    if file_id.startswith("AgACAg"):  # photo
+    # fallback dari file_id
+    if file_id.startswith("AgACAg"):
         return "photo"
 
-    return "photo"
+    if file_id.startswith("BAACAg"):
+        return "document"
+
+    if file_id.startswith("BQACAg"):
+        return "video"
+
+    return "document"
+
+
 # =========================
 # CREATE INVOICE
 # =========================
@@ -109,7 +120,7 @@ async def create_invoice(amount: int, code: str, user_id: int):
 
 
 # =========================
-# START GETFILE
+# START
 # =========================
 @router.callback_query(F.data == "getfile")
 async def getfile_start(call: CallbackQuery, state: FSMContext):
@@ -121,7 +132,7 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 
 
 # =========================
-# CHECK PAID
+# CHECK PAYMENT
 # =========================
 async def is_paid(user_id: int, code: str):
     pool = await get_pool()
@@ -190,7 +201,7 @@ async def payment_ui(message: Message, file):
 
 
 # =========================
-# MAIN GET FILE
+# MAIN GETFILE
 # =========================
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
@@ -215,9 +226,9 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
-        # PARSE MEDIA
+        # PARSE MEDIA (ULTRA FIX)
         # =========================
-        raw_media = file.get("media")
+        raw_media = file.get("media") or file.get("file_id")
 
         if isinstance(raw_media, str):
             try:
@@ -225,13 +236,21 @@ async def receive_code(message: Message, state: FSMContext):
             except:
                 raw_media = []
 
+        # 🔥 FIX STRING DALAM STRING
+        if isinstance(raw_media, list) and len(raw_media) == 1:
+            first = raw_media[0]
+            if isinstance(first, dict) and isinstance(first.get("file_id"), str):
+                try:
+                    raw_media = json.loads(first["file_id"])
+                except:
+                    pass
+
         media_list = raw_media if isinstance(raw_media, list) else []
 
         if not media_list:
-            media_list = [{
-                "file_id": file.get("file_id"),
-                "type": file.get("type")
-            }]
+            await message.answer("❌ Media kosong")
+            await state.clear()
+            return
 
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
@@ -241,11 +260,11 @@ async def receive_code(message: Message, state: FSMContext):
         )
 
         # =========================
-        # BUILD MEDIA GROUP (MAX 10)
+        # BUILD GROUP
         # =========================
         group = []
 
-        for i, m in enumerate(media_list[:10]):  # 🔥 Telegram max 10
+        for i, m in enumerate(media_list[:10]):
             fid = clean_file_id(m.get("file_id"))
 
             if not fid:
@@ -258,18 +277,15 @@ async def receive_code(message: Message, state: FSMContext):
             try:
                 if ftype == "photo":
                     group.append(InputMediaPhoto(media=fid, caption=cap))
-
                 elif ftype == "video":
                     group.append(InputMediaVideo(media=fid, caption=cap))
-
                 else:
                     group.append(InputMediaDocument(media=fid, caption=cap))
-
             except Exception as e:
                 print("BUILD ERROR:", e)
 
         if not group:
-            await message.answer("❌ Media kosong / rusak")
+            await message.answer("❌ Semua media rusak")
             await state.clear()
             return
 
@@ -280,14 +296,11 @@ async def receive_code(message: Message, state: FSMContext):
             try:
                 await message.answer_media_group(group)
                 return True
-
             except Exception as e:
                 print("GROUP SEND FAIL:", e)
 
-                # 🔥 fallback kirim satu-satu (INI PENYELAMAT)
                 for i, m in enumerate(media_list):
                     fid = clean_file_id(m.get("file_id"))
-
                     if not fid:
                         continue
 
@@ -297,20 +310,17 @@ async def receive_code(message: Message, state: FSMContext):
                     try:
                         if ftype == "photo":
                             await message.answer_photo(fid, caption=cap)
-
                         elif ftype == "video":
                             await message.answer_video(fid, caption=cap)
-
                         else:
                             await message.answer_document(fid, caption=cap)
-
                     except Exception as err:
                         print("TOTAL SEND FAIL:", err)
 
                 return False
 
         # =========================
-        # FREE FILE
+        # FREE
         # =========================
         if file["type"] == "free":
             await safe_send()
@@ -318,7 +328,7 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
-        # CHECK PAYMENT
+        # PAYMENT
         # =========================
         paid = await is_paid(message.from_user.id, code)
 
