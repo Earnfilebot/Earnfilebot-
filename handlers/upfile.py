@@ -247,28 +247,30 @@ async def save_file(event, state: FSMContext, price=None):
     await state.clear()
 
     text = f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
+𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
 📦 𝗠𝗘𝗗𝗜𝗔 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗
 ────────────────
-🔑 𝗖𝗢𝗗𝗘   : <pre>{code}</pre>
+🔑 𝗖𝗢𝗗𝗘
+<code>{code}</code>
+
 📊 𝗠𝗘𝗗𝗜𝗔  : {media_count}
 💰 𝗦𝗬𝗦𝗧𝗘𝗠 : {file_type.upper()} {price}
 👤 𝗖𝗥𝗘𝗔𝗧𝗘 : {user.full_name}
 
 ━━━━━━━━━━━━━━━━
-𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
+𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 """
 
-    # user UI update
+    # USER UPDATE
     try:
-        await event.message.edit_text(text)
+        await event.message.edit_text(text, parse_mode="HTML")
     except:
         pass
 
-    # group post
+    # GROUP POST
     try:
-        await bot.send_message(CHANNEL_ID, text)
+        await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
     except:
         pass
 
