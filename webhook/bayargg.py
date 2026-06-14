@@ -6,16 +6,21 @@ app = FastAPI()
 
 @app.post("/webhook/bayargg")
 async def bayargg_webhook(req: Request):
-
     data = await req.json()
+    print("WEBHOOK MASUK:", data)  # 🔥 DEBUG
 
-    reference = data["reference"]
-    status = data["status"]
+    payload = data.get("data", data)
+
+    reference = payload.get("reference")
+    status = payload.get("status")
+
+    if not reference or not status:
+        print("❌ DATA INVALID")
+        return {"ok": False}
 
     pool = await get_pool()
 
-    if status == "success":
-
+    if status.lower() == "success":
         await pool.execute(
             """
             UPDATE payments
@@ -24,5 +29,9 @@ async def bayargg_webhook(req: Request):
             """,
             reference
         )
+        print("✅ PAYMENT UPDATED:", reference)
+
+    else:
+        print("⏳ STATUS:", status)
 
     return {"ok": True}
