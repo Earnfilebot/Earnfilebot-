@@ -1,4 +1,5 @@
 import asyncio
+import json
 import httpx
 
 from aiogram import Router, F
@@ -25,12 +26,32 @@ class GetFileState(StatesGroup):
 
 
 # =========================
+# NORMALIZE TYPE (FIX WAJIB)
+# =========================
+def normalize_type(ftype: str) -> str:
+    if not ftype:
+        return "photo"
+
+    ftype = ftype.lower()
+
+    if ftype in ["photo", "image", "jpg", "jpeg", "png"]:
+        return "photo"
+
+    if ftype in ["video", "mp4", "mov"]:
+        return "video"
+
+    if ftype in ["doc", "document", "file", "pdf", "zip"]:
+        return "document"
+
+    return "photo"
+
+
+# =========================
 # CREATE INVOICE
 # =========================
 async def create_invoice(amount: int, code: str, user_id: int):
-
     payload = {
-        "amount": amount,
+        "amount": int(amount),
         "description": f"Purchase file {code}",
         "callback_url": "https://earnfilebot.up.railway.app/webhook/bayargg",
         "external_id": f"{user_id}_{code}"
@@ -40,14 +61,21 @@ async def create_invoice(amount: int, code: str, user_id: int):
         "Authorization": f"Bearer {BAYARGG_API_KEY}"
     }
 
-    async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{BAYARGG_BASE_URL}/transaction/create",
-            json=payload,
-            headers=headers
-        )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                f"{BAYARGG_BASE_URL}/transaction/create",
+                json=payload,
+                headers=headers
+            )
 
-    return r.json()
+        data = r.json()
+        print("INVOICE RESPONSE:", data)
+        return data
+
+    except Exception as e:
+        print("INVOICE ERROR:", e)
+        return {}
 
 
 # =========================
@@ -55,7 +83,6 @@ async def create_invoice(amount: int, code: str, user_id: int):
 # =========================
 @router.callback_query(F.data == "getfile")
 async def getfile_start(call: CallbackQuery, state: FSMContext):
-
     await state.set_state(GetFileState.wait_code)
 
     await call.message.edit_text(
@@ -67,7 +94,6 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 # CHECK PAID
 # =========================
 async def is_paid(user_id: int, code: str):
-
     pool = await get_pool()
 
     row = await pool.fetchrow(
@@ -86,19 +112,23 @@ async def is_paid(user_id: int, code: str):
 # PAYMENT UI
 # =========================
 async def payment_ui(message: Message, file):
-
     invoice = await create_invoice(
         amount=file["price"],
         code=file["code"],
         user_id=message.from_user.id
     )
 
-    if not invoice.get("data"):
+    data = invoice.get("data")
+    if not data:
         await message.answer("❌ Gagal membuat invoice")
         return
 
-    pay_url = invoice["data"]["checkout_url"]
-    reference = invoice["data"]["reference"]
+    pay_url = data.get("checkout_url")
+    reference = data.get("reference")
+
+    if not pay_url or not reference:
+        await message.answer("❌ Invoice invalid")
+        return
 
     pool = await get_pool()
 
@@ -121,10 +151,10 @@ async def payment_ui(message: Message, file):
 🔑 CODE : {file['code']}
 💰 PRICE: Rp{file['price']}
 
-💳 BAYARGG PAYMENT
+💳 BAYAR:
 👉 {pay_url}
 
-⚡ Setelah bayar file akan otomatis unlock
+⚡ Setelah bayar file otomatis unlock
 """
     )
 
@@ -132,68 +162,66 @@ async def payment_ui(message: Message, file):
 # =========================
 # MAIN GET FILE
 # =========================
-
-from aiogram.types import InputMediaPhoto, InputMediaVideo, InputMediaDocument
-
-
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
 
-    print("GETFILE TRIGGERED:", message.text)
+    try:
+        if not message.text:
+            await message.answer("❌ Kirim kode saja")
+            return
 
-    if not message.text:
-        await message.answer("❌ Kirim kode saja")
-        return
+        code = message.text.strip().upper()
+        print("GETFILE:", code)
 
-    code = message.text.strip().upper()
+        pool = await get_pool()
 
-    pool = await get_pool()
+        file = await pool.fetchrow(
+            "SELECT * FROM files WHERE code=$1",
+            code
+        )
 
-    file = await pool.fetchrow(
-        "SELECT * FROM files WHERE code=$1",
-        code
-    )
+        if not file:
+            await message.answer("❌ CODE TIDAK DITEMUKAN")
+            await state.clear()
+            return
 
-    if not file:
-        await message.answer("❌ CODE TIDAK DITEMUKAN")
-        await state.clear()
-        return
+        # =========================
+        # PARSE MEDIA (ANTI RUSAK)
+        # =========================
+        raw_media = file.get("media")
 
-    # =========================
-    # MEDIA STRUCTURE FIX
-    # =========================
-    media_list = file.get("media")
+        if isinstance(raw_media, str):
+            try:
+                raw_media = json.loads(raw_media)
+            except:
+                raw_media = []
 
-    if not media_list:
-        media_list = [{
-            "file_id": file.get("file_id"),
-            "file_type": file.get("file_type", "photo")
-        }]
+        media_list = raw_media if isinstance(raw_media, list) else []
 
-    # =========================
-    # CAPTION
-    # =========================
-    caption = f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
+        if not media_list:
+            media_list = [{
+                "file_id": file.get("file_id"),
+                "file_type": file.get("file_type", "photo")
+            }]
 
-🔑 CODE  : {file['code']}
-📦 MEDIA : {len(media_list)}
-👤 OWNER : {file['creator']}
-"""
-
-    # =========================
-    # BUILD GROUP FUNCTION
-    # =========================
-    def build_group():
+        # =========================
+        # BUILD MEDIA GROUP
+        # =========================
         group = []
 
-        for i, m in enumerate(media_list):
+        caption = (
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+            f"🔑 CODE  : {file['code']}\n"
+            f"📦 MEDIA : {len(media_list)}\n"
+            f"👤 OWNER : {file['creator']}"
+        )
 
+        for i, m in enumerate(media_list):
             fid = m.get("file_id")
             if not fid:
                 continue
 
-            ftype = (m.get("file_type") or "photo").lower()
+            ftype = normalize_type(m.get("file_type"))
             cap = caption if i == 0 else None
 
             try:
@@ -209,56 +237,48 @@ async def receive_code(message: Message, state: FSMContext):
             except Exception as e:
                 print("MEDIA BUILD ERROR:", e)
 
-        return group
+        if not group:
+            await message.answer("❌ Media kosong / rusak")
+            await state.clear()
+            return
 
-    # =========================
-    # BUILD MEDIA
-    # =========================
-    group = build_group()
+        # =========================
+        # FREE FILE
+        # =========================
+        if file["type"] == "free":
+            try:
+                await message.answer_media_group(group)
+            except Exception as e:
+                print("SEND ERROR FREE:", e)
+                await message.answer("❌ Gagal kirim media")
 
-    if not group:
-        await message.answer("❌ Media kosong / rusak di database")
-        await state.clear()
-        return
+            await state.clear()
+            return
 
-    # =========================
-    # FREE / PAID CHECK
-    # =========================
-    if file["type"] == "free":
+        # =========================
+        # CHECK PAYMENT
+        # =========================
+        paid = await is_paid(message.from_user.id, code)
 
-        try:
-            print("TRY SEND MEDIA (FREE)")
-            await message.answer_media_group(group)
-            print("SUCCESS SEND MEDIA (FREE)")
+        if not paid:
+            await payment_ui(message, file)
+            await state.clear()
+            return
 
-        except Exception as e:
-            print("SEND MEDIA ERROR (FREE):", e)
-
-        await state.clear()
-        return
-
-    # =========================
-    # PAID CHECK
-    # =========================
-    paid = await is_paid(message.from_user.id, code)
-
-    if not paid:
-        await payment_ui(message, file)
-        await state.clear()
-        return
-
-    # =========================
-    # UNLOCKED FILE
-    # =========================
-    if group:
+        # =========================
+        # UNLOCKED
+        # =========================
         group[0].caption = f"{file['code']} • UNLOCKED"
 
-    try:
-        print("TRY SEND MEDIA (PAID)")
-        await message.answer_media_group(group)
-        print("SUCCESS SEND MEDIA (PAID)")
+        try:
+            await message.answer_media_group(group)
+        except Exception as e:
+            print("SEND ERROR PAID:", e)
+            await message.answer("❌ Gagal kirim media")
+
+        await state.clear()
 
     except Exception as e:
-        print("SEND MEDIA ERROR (PAID):", e)
-
-    await state.clear()
+        print("FATAL GETFILE ERROR:", e)
+        await message.answer("❌ Terjadi error")
+        await state.clear()
