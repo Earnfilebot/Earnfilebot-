@@ -217,7 +217,7 @@ async def save_file(event, state: FSMContext, price=None):
         await event.answer("❌ Tidak ada media")
         return
 
-    file_id = media[0]
+    media_json = [{"file_id": m} for m in media]
     media_count = len(media)
 
     file_type = data.get("type", "free")
@@ -232,7 +232,7 @@ async def save_file(event, state: FSMContext, price=None):
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         """,
         code,
-        file_id,
+        json.dumps(media_json),
         user.id,
         media_count,
         price,
