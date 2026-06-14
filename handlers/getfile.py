@@ -224,3 +224,8 @@ async def get_file(message: Message, state: FSMContext):
 
     await message.answer_media_group(group)
     await state.clear()
+
+@router.message(GetFileState.wait_code)
+async def get_file(message: Message, state: FSMContext):
+
+    print("GETFILE TRIGGERED:", message.text)
