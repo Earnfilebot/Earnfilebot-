@@ -1,21 +1,16 @@
 import asyncio
-from math import ceil
+import httpx
 
 from aiogram import Router, F
-from aiogram.types import (
-    Message, CallbackQuery,
-    InputMediaPhoto
-)
+from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
-import httpx
-
 router = Router()
+
 
 # =========================
 # STATE
@@ -25,15 +20,9 @@ class GetFileState(StatesGroup):
 
 
 # =========================
-# CACHE PAGE
+# PAYMENT CREATE (BAYARGG)
 # =========================
-PAGE_CACHE = {}
-
-
-# =========================
-# BAYARGG INVOICE
-# =========================
-async def create_bayargg_invoice(amount: int, code: str, user_id: int):
+async def create_invoice(amount: int, code: str, user_id: int):
 
     payload = {
         "amount": amount,
@@ -62,11 +51,10 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 @router.callback_query(F.data == "getfile")
 async def getfile_start(call: CallbackQuery, state: FSMContext):
 
-    await state.clear()
     await state.set_state(GetFileState.wait_code)
 
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n🔑 KIRIM KODE FILE"
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n🔑 KIRIM KODE FILE SEKARANG"
     )
 
 
@@ -78,19 +66,23 @@ async def is_paid(user_id: int, code: str):
     pool = await get_pool()
 
     row = await pool.fetchrow(
-        "SELECT * FROM payments WHERE user_id=$1 AND code=$2 AND status='paid'",
-        user_id, code
+        """
+        SELECT * FROM payments
+        WHERE user_id=$1 AND code=$2 AND status='paid'
+        """,
+        user_id,
+        code
     )
 
     return bool(row)
 
 
 # =========================
-# PAYMENT UI (BAYARGG)
+# PAYMENT UI
 # =========================
 async def payment_ui(message: Message, file):
 
-    invoice = await create_bayargg_invoice(
+    invoice = await create_invoice(
         amount=file["price"],
         code=file["code"],
         user_id=message.from_user.id
@@ -133,25 +125,15 @@ async def payment_ui(message: Message, file):
 
 
 # =========================
-# BUILD MEDIA
-# =========================
-def build_media(file_id: str, caption=None):
-    return InputMediaPhoto(
-        media=file_id,
-        caption=caption
-    )
-
-
-# =========================
-# MAIN GET FILE
+# MAIN GETFILE
 # =========================
 @router.message(GetFileState.wait_code)
-async def get_file(message: Message, state: FSMContext):
+async def receive_code(message: Message, state: FSMContext):
 
-    print("GETFILE TRIGGERED:", message.text)  # 👈 DEBUG DI SINI
+    print("GETFILE TRIGGERED:", message.text)
 
     if not message.text:
-        await message.answer("❌ Kirim KODE saja (text)")
+        await message.answer("❌ Kirim kode saja")
         return
 
     code = message.text.strip().upper()
@@ -159,7 +141,7 @@ async def get_file(message: Message, state: FSMContext):
     pool = await get_pool()
 
     file = await pool.fetchrow(
-        "SELECT * FROM files WHERE code = $1",
+        "SELECT * FROM files WHERE code=$1",
         code
     )
 
@@ -173,17 +155,21 @@ async def get_file(message: Message, state: FSMContext):
     caption = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
-📦 FILE READY
-────────────────
 🔑 CODE  : {file['code']}
-📊 MEDIA : {file['media_count']}
+📦 MEDIA : {file['media_count']}
 👤 OWNER : {file['creator']}
 """
 
+    # =========================
+    # FREE FILE
+    # =========================
     if file["type"] == "free":
 
         group = [
-            InputMediaPhoto(media=fid, caption=caption if i == 0 else None)
+            InputMediaPhoto(
+                media=fid,
+                caption=caption if i == 0 else None
+            )
             for i, fid in enumerate(media_ids)
         ]
 
@@ -191,15 +177,25 @@ async def get_file(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    # =========================
+    # PAID CHECK
+    # =========================
     paid = await is_paid(message.from_user.id, code)
 
     if not paid:
+
         await payment_ui(message, file)
         await state.clear()
         return
 
+    # =========================
+    # UNLOCKED FILE
+    # =========================
     group = [
-        InputMediaPhoto(media=fid, caption=f"{file['code']} • UNLOCKED" if i == 0 else None)
+        InputMediaPhoto(
+            media=fid,
+            caption=f"{file['code']} • UNLOCKED" if i == 0 else None
+        )
         for i, fid in enumerate(media_ids)
     ]
 
