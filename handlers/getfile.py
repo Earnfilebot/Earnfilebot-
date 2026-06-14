@@ -148,7 +148,13 @@ def build_media(file_id: str, caption=None):
 @router.message(GetFileState.wait_code)
 async def get_file(message: Message, state: FSMContext):
 
-    code = message.text.strip()
+    # ❌ anti crash non-text
+    if not message.text:
+        await message.answer("❌ Kirim KODE saja (text)")
+        return
+
+    code = message.text.strip().upper()
+
     pool = await get_pool()
 
     file = await pool.fetchrow(
@@ -157,7 +163,10 @@ async def get_file(message: Message, state: FSMContext):
     )
 
     if not file:
-        await message.answer("❌ CODE TIDAK DITEMUKAN")
+        await message.answer(
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n❌ CODE TIDAK DITEMUKAN"
+        )
+        await state.clear()
         return
 
     media_ids = file.get("media_ids") or [file["file_id"]]
@@ -179,8 +188,14 @@ async def get_file(message: Message, state: FSMContext):
 
         group = []
         for i, fid in enumerate(media_ids):
-            cap = caption if i == 0 else None
-            group.append(build_media(fid, cap))
+
+            # hanya photo safe version
+            group.append(
+                InputMediaPhoto(
+                    media=fid,
+                    caption=caption if i == 0 else None
+                )
+            )
 
         await message.answer_media_group(group)
         await state.clear()
@@ -189,22 +204,23 @@ async def get_file(message: Message, state: FSMContext):
     # =========================
     # PAID FILE
     # =========================
-
     paid = await is_paid(message.from_user.id, code)
 
-    # ❌ belum bayar
     if not paid:
         await payment_ui(message, file)
         await state.clear()
         return
 
     # =========================
-    # UNLOCK FILE
+    # UNLOCKED
     # =========================
-    group = []
-    for i, fid in enumerate(media_ids):
-        cap = f"{file['code']} • UNLOCKED" if i == 0 else None
-        group.append(build_media(fid, cap))
+    group = [
+        InputMediaPhoto(
+            media=fid,
+            caption=f"{file['code']} • UNLOCKED" if i == 0 else None
+        )
+        for i, fid in enumerate(media_ids)
+    ]
 
     await message.answer_media_group(group)
     await state.clear()
