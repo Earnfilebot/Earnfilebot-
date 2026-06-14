@@ -215,7 +215,7 @@ async def receive_code(message: Message, state: FSMContext):
             }]
 
         # =========================
-        # BUILD MEDIA GROUP (NO TYPE GUESS)
+        # BUILD MEDIA GROUP
         # =========================
         group = []
 
@@ -228,14 +228,18 @@ async def receive_code(message: Message, state: FSMContext):
 
         for i, m in enumerate(media_list):
             fid = m.get("file_id")
+
+            # 🔥 FIX NESTED
+            if isinstance(fid, dict):
+                fid = fid.get("file_id")
+
             if not fid:
                 continue
 
             cap = caption if i == 0 else None
-
-            # 🔥 langsung brute (tanpa normalize_type)
             media_obj = None
 
+            # 🔥 brute type
             try:
                 media_obj = InputMediaVideo(media=fid, caption=cap)
             except:
@@ -264,7 +268,7 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
-        # SAFE SEND (ANTI TELEGRAM ERROR)
+        # SAFE SEND
         # =========================
         async def safe_send():
             try:
@@ -274,33 +278,33 @@ async def receive_code(message: Message, state: FSMContext):
             except Exception as e:
                 print("GROUP SEND FAIL:", e)
 
-                # 🔥 fallback kirim satu-satu
+                # fallback satu-satu
                 for i, m in enumerate(media_list):
                     fid = m.get("file_id")
+
+                    # 🔥 FIX NESTED LAGI
+                    if isinstance(fid, dict):
+                        fid = fid.get("file_id")
+
+                    if not fid:
+                        continue
+
                     cap = caption if i == 0 else None
 
-                    sent = False
-
-                    # VIDEO
                     try:
                         await message.answer_video(fid, caption=cap)
-                        sent = True
                         continue
                     except:
                         pass
 
-                    # DOCUMENT
                     try:
                         await message.answer_document(fid, caption=cap)
-                        sent = True
                         continue
                     except:
                         pass
 
-                    # PHOTO
                     try:
                         await message.answer_photo(fid, caption=cap)
-                        sent = True
                         continue
                     except Exception as err:
                         print("TOTAL SEND FAIL:", err)
