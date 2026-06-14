@@ -101,13 +101,13 @@ func (b *Bot) handleCallback(q *tgbotapi.CallbackQuery) {
 
 		if b.isJoined(q.From.ID) {
 
-			// hapus panel force sub
+			// hapus pesan force join
 			del := tgbotapi.NewDeleteMessage(
 				q.Message.Chat.ID,
 				q.Message.MessageID,
 			)
 
-			b.api.Send(del)
+			_, _ = b.api.Request(del)
 
 			// tampilkan dashboard
 			fakeMsg := &tgbotapi.Message{
@@ -120,22 +120,15 @@ func (b *Bot) handleCallback(q *tgbotapi.CallbackQuery) {
 				fakeMsg,
 			)
 
-			b.api.Send(
-				tgbotapi.NewCallback(
-					q.ID,
-					"✅ Akses diberikan",
-				),
+			_, _ = b.api.Request(
+				tgbotapi.NewCallback(q.ID, "✅ Akses diberikan"),
 			)
 
 		} else {
 
-			b.api.Send(
-				tgbotapi.NewCallback(
-					q.ID,
-					"❌ Kamu belum join semua channel",
-				),
+			_, _ = b.api.Request(
+				tgbotapi.NewCallback(q.ID, "❌ Kamu belum join semua channel"),
 			)
-
 		}
 	}
 }
@@ -158,15 +151,10 @@ func (b *Bot) isJoined(userID int64) bool {
 
 		switch member.Status {
 
-		case "member",
-			"administrator",
-			"creator":
-
+		case "member", "administrator", "creator":
 			continue
 
-		case "left",
-			"kicked":
-
+		case "left", "kicked":
 			return false
 
 		default:
@@ -176,7 +164,6 @@ func (b *Bot) isJoined(userID int64) bool {
 
 	return true
 }
-
 func (b *Bot) sendForceJoin(chatID int64) {
 
 	text := "🔒 BOT TERKUNCI\n\nKamu harus join kedua channel terlebih dahulu untuk menggunakan bot."
