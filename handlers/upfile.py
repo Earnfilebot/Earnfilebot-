@@ -34,11 +34,12 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
     await state.clear()
 
     msg = await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📤 KIRIM MEDIA (foto / video / dokumen)"
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 KIRIM MEDIA (foto / video / dokumen)"
     )
 
     await state.update_data(
         media=[],
+        upload_mode=True,   # 🔥 FIX PENTING
         preview_msg_id=msg.message_id
     )
 # =========================
@@ -56,13 +57,11 @@ async def receive_media(message: Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # ❌ ignore kalau bukan mode upload
     if not data.get("upload_mode"):
         return
 
     media = data.get("media", [])
 
-    # ambil file_id
     if message.document:
         file_id = message.document.file_id
     elif message.video:
@@ -73,7 +72,6 @@ async def receive_media(message: Message, state: FSMContext):
     media.append(file_id)
     await state.update_data(media=media)
 
-    # 🔥 HAPUS MEDIA USER (BIAR CLEAN CHAT)
     try:
         await message.delete()
     except:
@@ -84,7 +82,7 @@ async def receive_media(message: Message, state: FSMContext):
     text = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
-📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚 𝗠𝗘𝗗𝗜𝗔
+📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚
 📊 𝗖𝗢𝗨𝗡𝗧 : {total}
 """
 
@@ -95,7 +93,6 @@ async def receive_media(message: Message, state: FSMContext):
 
     preview_id = data.get("preview_msg_id")
 
-    # 🔥 UPDATE 1 MESSAGE (ANTI NUMPUK)
     if preview_id:
         try:
             await message.bot.edit_message_text(
@@ -106,9 +103,6 @@ async def receive_media(message: Message, state: FSMContext):
             )
         except:
             pass
-    else:
-        msg = await message.answer(text, reply_markup=kb.as_markup())
-        await state.update_data(preview_msg_id=msg.message_id)
 # =========================
 # CANCEL → BACK HOME CLEAN
 # =========================
@@ -199,9 +193,16 @@ async def input_price(message: Message, state: FSMContext):
 @router.callback_query(F.data == "done_upfile")
 async def done(call: CallbackQuery, state: FSMContext):
 
+    data = await state.get_data()
+    media = data.get("media", [])
+
+    if not media:
+        await call.answer("❌ No media", show_alert=True)
+        return
+
+    await show_progress(call.message, len(media))
+
     await save_file(call, state)
-
-
 # =========================
 # SAVE CORE + POST GROUP
 # =========================
@@ -214,7 +215,7 @@ async def save_file(event, state: FSMContext, price=None):
 
     media = data.get("media", [])
     if not media:
-        await event.answer("❌ Tidak ada media")
+        await event.answer("❌ 𝗧𝗜𝗗𝗔𝗞 𝗔𝗗𝗔 𝗠𝗘𝗗𝗜𝗔")
         return
 
     file_id = media[0]
@@ -248,36 +249,44 @@ async def save_file(event, state: FSMContext, price=None):
     text = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 
-📦 MEDIA SUCCESS SAVED
+📦 𝗠𝗘𝗗𝗜𝗔 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗
+────────────────
+🔑 𝗖𝗢𝗗𝗘   : `{code}`
+📊 𝗠𝗘𝗗𝗜𝗔  : {media_count}
+💰 𝗦𝗬𝗦𝗧𝗘𝗠 : {file_type.upper()} {price}
+👤 𝗖𝗥𝗘𝗔𝗧𝗘 : {user.full_name}
 
-🔑 CODE : {code}
-📊 MEDIA : {media_count}
-💰 SYSTEM : {file_type.upper()} {price}
-👤 CREATE : {user.full_name}
+━━━━━━━━━━━━━━━━
+𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 """
 
-    # update UI user (kalau pakai system UI)
+    # user UI update
     try:
         await event.message.edit_text(text)
     except:
         pass
 
-    # post ke group
+    # group post
     try:
         await bot.send_message(CHANNEL_ID, text)
     except:
         pass
 
 async def show_progress(message, total):
+
     for i in range(1, total + 1):
 
         text = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
-⏳ 𝗨𝗣𝗟𝗢𝗔𝗗𝗜𝗡𝗚 𝗣𝗥𝗢𝗖𝗘𝗦𝗦
+⏳ 𝗨𝗣𝗟𝗢𝗔𝗗𝗜𝗡𝗚
 ────────────────
-📊 𝗣𝗥𝗢𝗚𝗥𝗘𝗦𝗦 : {i}/{total}
+📊 {i}/{total}
 """
 
-        await message.edit_text(text)
-        await asyncio.sleep(0.25)
+        try:
+            await message.edit_text(text)
+        except:
+            pass
+
+        await asyncio.sleep(0.2)
