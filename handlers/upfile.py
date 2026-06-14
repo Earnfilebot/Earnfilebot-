@@ -51,6 +51,9 @@ def generate_code():
 # =========================
 # RECEIVE MEDIA (ANTI NUMPUK + 1 MESSAGE UI)
 # =========================
+media_buffer = {}
+
+
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
 
@@ -59,8 +62,9 @@ async def receive_media(message: Message, state: FSMContext):
     if not data.get("upload_mode"):
         return
 
-    media = data.get("media", [])
-
+    # =========================
+    # DETECT FILE
+    # =========================
     if message.document:
         file_id = message.document.file_id
     elif message.video:
@@ -68,17 +72,54 @@ async def receive_media(message: Message, state: FSMContext):
     else:
         file_id = message.photo[-1].file_id
 
-    media.append(file_id)
+    item = {"file_id": file_id}
 
-    await state.update_data(media=media)
+    # =========================
+    # MEDIA GROUP MODE
+    # =========================
+    if message.media_group_id:
+        gid = message.media_group_id
 
-    # hapus pesan user biar clean
+        if gid not in media_buffer:
+            media_buffer[gid] = []
+
+        media_buffer[gid].append(item)
+
+        # tunggu semua masuk
+        await asyncio.sleep(1)
+
+        # kalau masih ada di buffer → proses
+        if gid in media_buffer:
+            batch = media_buffer.pop(gid)
+
+            data = await state.get_data()
+            media = data.get("media", [])
+
+            media.extend(batch)
+
+            await state.update_data(media=media)
+
+    else:
+        # =========================
+        # SINGLE FILE
+        # =========================
+        media = data.get("media", [])
+        media.append(item)
+        await state.update_data(media=media)
+
+    # =========================
+    # DELETE USER MSG
+    # =========================
     try:
         await message.delete()
     except:
         pass
 
-    total = len(media)
+    # =========================
+    # UI UPDATE
+    # =========================
+    data = await state.get_data()
+    total = len(data.get("media", []))
 
     text = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
@@ -105,7 +146,6 @@ async def receive_media(message: Message, state: FSMContext):
             )
         except:
             pass
-
 
 # =========================
 # CANCEL
