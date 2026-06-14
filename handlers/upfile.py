@@ -9,6 +9,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
 from config import CHANNEL_ID
+from utils.ui_manager import update_ui
+from utils.home import build_home
+from keyboards.menu import home_kb
 
 router = Router()
 
@@ -22,36 +25,40 @@ class UploadState(StatesGroup):
 
 
 # =========================
-# ENTRY UPFILE (INI YANG KAMU LUPA)
+# ENTRY UPFILE
 # =========================
 @router.callback_query(F.data == "upfile")
 async def start_upfile(call: CallbackQuery, state: FSMContext):
 
     await state.clear()
-    await state.update_data(media=[])
+
+    await state.update_data(
+        media=[],
+        upload_mode=True
+    )
 
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📤 SILAKAN KIRIM MEDIA (foto / video / dokumen)"
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📤 KIRIM MEDIA SEKARANG\n(foto / video / dokumen)"
     )
 
 
 # =========================
-# CODE GENERATOR
+# GENERATE CODE
 # =========================
 def generate_code():
     return "EF_" + "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
 
 
 # =========================
-# RECEIVE MEDIA
+# RECEIVE MEDIA (LOCKED MODE)
 # =========================
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # ❗ kalau belum start upfile → ignore
-    if "media" not in data:
+    # ❌ kalau bukan mode upload → ignore (biar gak numpuk)
+    if not data.get("upload_mode"):
         return
 
     media = data.get("media", [])
@@ -76,14 +83,14 @@ async def receive_media(message: Message, state: FSMContext):
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧
 
 📦 MEDIA RECEIVED
-📊 COUNT: {len(media)}
+📊 COUNT : {len(media)}
 """,
         reply_markup=kb.as_markup()
     )
 
 
 # =========================
-# CANCEL
+# CANCEL → BACK HOME CLEAN
 # =========================
 @router.callback_query(F.data == "cancel_upfile")
 async def cancel(call: CallbackQuery, state: FSMContext):
@@ -92,13 +99,17 @@ async def cancel(call: CallbackQuery, state: FSMContext):
 
     await call.answer("Upload dibatalkan", show_alert=True)
 
+    user_id = call.from_user.id
+    balance = 0
+
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n❌ UPLOAD CANCELLED"
+        build_home(user_id, balance),
+        reply_markup=home_kb()
     )
 
 
 # =========================
-# SAVE → TYPE
+# SAVE → TYPE SELECT
 # =========================
 @router.callback_query(F.data == "save_upfile")
 async def choose_type(call: CallbackQuery, state: FSMContext):
@@ -111,7 +122,7 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
     await state.set_state(UploadState.wait_type)
 
     await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📦 CHOOSE TYPE",
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n📦 PILIH TYPE",
         reply_markup=kb.as_markup()
     )
 
@@ -129,7 +140,7 @@ async def set_type(call: CallbackQuery, state: FSMContext):
         await state.set_state(UploadState.wait_price)
 
         await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n💰 INPUT PRICE\nContoh: 10000 / 10.000"
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n💰 MASUKKAN HARGA\nContoh: 10000 / 10.000"
         )
     else:
         await save_file(call, state, price=0)
@@ -141,10 +152,10 @@ async def set_type(call: CallbackQuery, state: FSMContext):
 @router.message(UploadState.wait_price)
 async def input_price(message: Message, state: FSMContext):
 
-    raw = message.text.replace(".", "").replace(",", "")
+    raw = "".join(filter(str.isdigit, message.text))
 
-    if not raw.isdigit():
-        await message.answer("❌ Format salah (10000 / 10.000)")
+    if not raw:
+        await message.answer("❌ Format salah")
         return
 
     price = int(raw)
@@ -157,7 +168,7 @@ async def input_price(message: Message, state: FSMContext):
     await state.update_data(price=price)
 
     await message.answer(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n⚙️ CONFIRM SAVE",
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗧\n\n⚙️ KONFIRMASI",
         reply_markup=kb.as_markup()
     )
 
@@ -172,7 +183,7 @@ async def done(call: CallbackQuery, state: FSMContext):
 
 
 # =========================
-# SAVE CORE
+# SAVE CORE + POST GROUP
 # =========================
 async def save_file(event, state: FSMContext, price=None):
 
@@ -182,8 +193,11 @@ async def save_file(event, state: FSMContext, price=None):
     data = await state.get_data()
 
     media = data.get("media", [])
-    file_id = media[0]
+    if not media:
+        await event.answer("❌ Tidak ada media")
+        return
 
+    file_id = media[0]
     media_count = len(media)
 
     file_type = data.get("type", "free")
@@ -222,8 +236,13 @@ async def save_file(event, state: FSMContext, price=None):
 👤 CREATE : {user.full_name}
 """
 
-    await event.message.edit_text(text)
+    # update UI user (kalau pakai system UI)
+    try:
+        await event.message.edit_text(text)
+    except:
+        pass
 
+    # post ke group
     try:
         await bot.send_message(CHANNEL_ID, text)
     except:
