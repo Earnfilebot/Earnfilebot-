@@ -50,11 +50,14 @@ def generate_code():
 
 
 # =========================
-# RECEIVE MEDIA (ANTI NUMPUK + 1 MESSAGE UI)
+# BUFFER MEDIA GROUP
 # =========================
 media_buffer = {}
 
 
+# =========================
+# RECEIVE MEDIA
+# =========================
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
 
@@ -67,24 +70,28 @@ async def receive_media(message: Message, state: FSMContext):
     # DETECT FILE + TYPE
     # =========================
     if message.document:
-        file_id = message.document.file_id
+        fid = message.document.file_id
         ftype = "document"
 
     elif message.video:
-        file_id = message.video.file_id
+        fid = message.video.file_id
         ftype = "video"
 
     else:
-        file_id = message.photo[-1].file_id
+        fid = message.photo[-1].file_id
         ftype = "photo"
 
+    # 🔥 FIX NESTED FILE_ID
+    if isinstance(fid, dict):
+        fid = fid.get("file_id")
+
     item = {
-        "file_id": file_id,
+        "file_id": fid,
         "type": ftype
     }
 
     # =========================
-    # MEDIA GROUP FIX (ANTI KE POTONG)
+    # MEDIA GROUP FIX
     # =========================
     if message.media_group_id:
         gid = message.media_group_id
@@ -94,8 +101,7 @@ async def receive_media(message: Message, state: FSMContext):
 
         media_buffer[gid].append(item)
 
-        # 🔥 delay lebih aman
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1.2)
 
         if gid in media_buffer:
             batch = media_buffer.pop(gid)
@@ -152,6 +158,7 @@ async def receive_media(message: Message, state: FSMContext):
         except:
             pass
 
+
 # =========================
 # CANCEL
 # =========================
@@ -166,10 +173,16 @@ async def cancel(call: CallbackQuery, state: FSMContext):
 
 
 # =========================
-# SAVE → TYPE SELECT
+# SAVE → TYPE
 # =========================
 @router.callback_query(F.data == "save_upfile")
 async def choose_type(call: CallbackQuery, state: FSMContext):
+
+    data = await state.get_data()
+
+    if not data.get("media"):
+        await call.answer("❌ Media kosong", show_alert=True)
+        return
 
     await state.set_state(UploadState.wait_type)
 
@@ -231,7 +244,7 @@ async def input_price(message: Message, state: FSMContext):
 
 
 # =========================
-# DONE + PROGRESS
+# DONE
 # =========================
 @router.callback_query(F.data == "done_upfile")
 async def done(call: CallbackQuery, state: FSMContext):
@@ -262,7 +275,7 @@ async def save_file(event, state: FSMContext, price=None):
         await event.answer("❌ Tidak ada media")
         return
 
-    media_json = media
+    media_json = json.dumps(media)
     media_count = len(media)
 
     file_type = data.get("type", "free")
@@ -271,13 +284,14 @@ async def save_file(event, state: FSMContext, price=None):
     code = generate_code()
     user = event.from_user
 
+    # 🔥 FIX QUERY (CONSISTENT)
     await pool.execute(
         """
-        INSERT INTO files (code, file_id, owner_id, media_count, price, type, creator)
+        INSERT INTO files (code, media, owner_id, media_count, price, type, creator)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         """,
         code,
-        json.dumps(media_json),
+        media_json,
         user.id,
         media_count,
         price,
@@ -312,7 +326,7 @@ async def save_file(event, state: FSMContext, price=None):
 
 
 # =========================
-# PROGRESS ANIMATION
+# PROGRESS
 # =========================
 async def show_progress(message, total):
 
@@ -331,4 +345,4 @@ async def show_progress(message, total):
         except:
             pass
 
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.15)
