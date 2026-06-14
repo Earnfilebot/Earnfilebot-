@@ -17,7 +17,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     }
 
     # 🔥 FIX ENDPOINT
-    url = f"{BAYARGG_BASE_URL}/v1/transaction/create"
+    url = f"{BAYARGG_BASE_URL}/transaction/create"
 
     try:
         print("===== BAYARGG DEBUG =====")
