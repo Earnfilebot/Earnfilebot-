@@ -8,12 +8,12 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": int(amount),
         "description": f"Purchase file {code}",
-        # WAJIB untuk BayarGG
-        "payment_url": "https://earnfilebot.up.railway.app/webhook/bayargg",
 
-        # Optional (kalau dipakai BayarGG tetap aman)
-        "callback_url": "https://earnfilebot.up.railway.app/webhook/bayargg",
+        # Sesuai docs resmi BayarGG
+        "payment_url": "https://www.bayar.gg/pay",
+        "payment_method": "qris_bayar_gg",
 
+        # Optional
         "external_id": f"{user_id}_{code}"
     }
 
@@ -38,22 +38,15 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("RESPONSE:", r.text)
         print("=========================")
 
-        # HTTP ERROR
         if r.status_code != 200:
             return None
 
-        # EMPTY RESPONSE
-        if not r.text:
-            return None
-
-        # JSON PARSE
         try:
             data = r.json()
         except Exception:
             print("❌ INVALID JSON RESPONSE")
             return None
 
-        # API SUCCESS CHECK
         if data.get("success") is False:
             print("❌ BAYARGG ERROR:", data)
             return None
@@ -76,14 +69,12 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             or result.get("id")
             or result.get("transaction_id")
             or result.get("external_id")
+            or f"{user_id}_{code}"
         )
 
         if not checkout_url:
             print("❌ CHECKOUT URL TIDAK ADA:", result)
             return None
-
-        if not reference:
-            reference = f"{user_id}_{code}"
 
         print("✅ INVOICE SUCCESS")
         print("CHECKOUT:", checkout_url)
@@ -111,8 +102,5 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
 
-# =========================
-# ALIAS
-# =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
