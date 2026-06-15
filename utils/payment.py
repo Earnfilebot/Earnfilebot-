@@ -8,7 +8,12 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": int(amount),
         "description": f"Purchase file {code}",
+        # WAJIB untuk BayarGG
+        "payment_url": "https://earnfilebot.up.railway.app/webhook/bayargg",
+
+        # Optional (kalau dipakai BayarGG tetap aman)
         "callback_url": "https://earnfilebot.up.railway.app/webhook/bayargg",
+
         "external_id": f"{user_id}_{code}"
     }
 
@@ -20,39 +25,45 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, json=payload, headers=headers)
+            r = await client.post(
+                url,
+                json=payload,
+                headers=headers
+            )
 
         print("===== BAYARGG DEBUG =====")
         print("URL:", url)
+        print("PAYLOAD:", payload)
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
         print("=========================")
 
-        # ❌ HTTP ERROR
+        # HTTP ERROR
         if r.status_code != 200:
-            print("❌ HTTP ERROR")
             return None
 
-        # ❌ EMPTY RESPONSE
+        # EMPTY RESPONSE
         if not r.text:
-            print("❌ EMPTY RESPONSE")
             return None
 
-        # ❌ SAFE JSON PARSE
+        # JSON PARSE
         try:
             data = r.json()
         except Exception:
             print("❌ INVALID JSON RESPONSE")
             return None
 
-        # 🔥 FLEXIBLE RESULT PARSING
+        # API SUCCESS CHECK
+        if data.get("success") is False:
+            print("❌ BAYARGG ERROR:", data)
+            return None
+
         result = data.get("data") or data.get("result") or data
 
         if not isinstance(result, dict):
-            print("❌ INVALID RESULT FORMAT")
+            print("❌ INVALID RESULT:", result)
             return None
 
-        # 🔥 SUPPORT MULTI FIELD (API beda-beda)
         checkout_url = (
             result.get("checkout_url")
             or result.get("payment_url")
@@ -67,12 +78,16 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             or result.get("external_id")
         )
 
-        # ❌ FIELD CHECK
-        if not checkout_url or not reference:
-            print("❌ MISSING FIELD:", result)
+        if not checkout_url:
+            print("❌ CHECKOUT URL TIDAK ADA:", result)
             return None
 
+        if not reference:
+            reference = f"{user_id}_{code}"
+
         print("✅ INVOICE SUCCESS")
+        print("CHECKOUT:", checkout_url)
+        print("REFERENCE:", reference)
 
         return {
             "checkout_url": checkout_url,
@@ -80,7 +95,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         }
 
     except httpx.ConnectError as e:
-        print("❌ CONNECTION ERROR:", str(e))
+        print("❌ CONNECTION ERROR:", e)
         return None
 
     except httpx.TimeoutException:
@@ -88,16 +103,16 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
     except httpx.RequestError as e:
-        print("❌ REQUEST ERROR:", str(e))
+        print("❌ REQUEST ERROR:", e)
         return None
 
     except Exception as e:
-        print("❌ UNKNOWN ERROR:", str(e))
+        print("❌ UNKNOWN ERROR:", e)
         return None
 
 
 # =========================
-# ALIAS (BIAR GETFILE AMAN)
+# ALIAS
 # =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
