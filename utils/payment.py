@@ -99,4 +99,5 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 # =========================
 # ALIAS (BIAR GETFILE AMAN)
 # =========================
-create_invoice = create_bayargg_invoice
+async def create_invoice(amount: int, code: str, user_id: int):
+    return await create_bayargg_invoice(amount, code, user_id)
