@@ -21,67 +21,58 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                url,
-                json=payload,
-                headers=headers
-            )
+            r = await client.post(url, json=payload, headers=headers)
 
         print("===== BAYARGG DEBUG =====")
         print("URL:", url)
-        print("PAYLOAD:", payload)
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
         print("=========================")
 
-        # HTTP error
         if r.status_code != 200:
             return None
 
-        # Parse JSON
         try:
             data = r.json()
         except Exception:
             print("❌ INVALID JSON RESPONSE")
             return None
 
-        # API error
-        if data.get("success") is False:
+        if not data.get("success"):
             print("❌ BAYARGG ERROR:", data)
             return None
 
-        result = data.get("data") or data.get("result") or data
+        result = data.get("data") or {}
 
         if not isinstance(result, dict):
             print("❌ INVALID RESULT:", result)
             return None
 
+        # =========================
+        # 🔥 IMPORTANT FIELDS FIX
+        # =========================
+        qris_string = result.get("qris_string")
+
         checkout_url = (
-            result.get("checkout_url")
-            or result.get("payment_url")
+            result.get("payment_url")
+            or result.get("checkout_url")
             or result.get("invoice_url")
             or result.get("url")
         )
 
-        reference = (
-            result.get("reference")
-            or result.get("id")
-            or result.get("transaction_id")
-            or result.get("external_id")
-            or f"{user_id}_{code}"
-        )
-
-        if not checkout_url:
-            print("❌ CHECKOUT URL TIDAK ADA:", result)
-            return None
+        invoice_id = result.get("invoice_id")
+        reference = f"{user_id}_{code}"
 
         print("✅ INVOICE SUCCESS")
         print("CHECKOUT:", checkout_url)
-        print("REFERENCE:", reference)
+        print("QRIS:", bool(qris_string))
 
         return {
+            "invoice_id": invoice_id,
+            "qris_string": qris_string,
             "checkout_url": checkout_url,
-            "reference": reference
+            "reference": reference,
+            "raw": result
         }
 
     except httpx.ConnectError as e:
@@ -101,6 +92,6 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
 
-# Alias
+# Alias biar aman dengan bot lama
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
