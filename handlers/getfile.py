@@ -214,6 +214,8 @@ async def send_media_page(message, file, media_list, page=1):
 
     group = []
 
+    file_code = getattr(file, "code", None) or file.get("code")
+
     for i, m in enumerate(chunk):
         fid = clean_file_id(m.get("file_id"))
         if not fid:
@@ -221,12 +223,11 @@ async def send_media_page(message, file, media_list, page=1):
 
         caption = None
 
-        # ✅ FIX: HARUS DI DALAM LOOP
         if i == 0:
             caption = (
                 "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
                 "━━━━━━━━━━━━━━━━━━\n\n"
-                f"▸ 𝗖𝗢𝗗𝗘 : {file['code']}\n"
+                f"▸ 𝗖𝗢𝗗𝗘 : {file_code}\n"
                 f"▸ 𝗣𝗔𝗚𝗘 : {page}/{total}\n"
                 f"▸ 𝗧𝗢𝗧𝗔𝗟 : {len(media_list)} FILE\n"
             )
@@ -246,20 +247,35 @@ async def send_media_page(message, file, media_list, page=1):
 
     await message.answer_media_group(group)
 
+    # =========================
+    # KEYBOARD (FIX AIogram v3)
+    # =========================
+
     keyboard = [
-        [InlineKeyboardButton("📂 GROUP", callback_data=f"group:{file['code']}")]
+        [
+            InlineKeyboardButton(
+                text="📂 GROUP",
+                callback_data=f"group:{file_code}"
+            )
+        ]
     ]
 
     nav = []
 
     if page > 1:
         nav.append(
-            InlineKeyboardButton("⬅️ PREV", callback_data=f"page:{file['code']}:{page-1}")
+            InlineKeyboardButton(
+                text="⬅️ PREV",
+                callback_data=f"page:{file_code}:{page-1}"
+            )
         )
 
     if page < total:
         nav.append(
-            InlineKeyboardButton("NEXT ➡️", callback_data=f"page:{file['code']}:{page+1}")
+            InlineKeyboardButton(
+                text="NEXT ➡️",
+                callback_data=f"page:{file_code}:{page+1}"
+            )
         )
 
     if nav:
