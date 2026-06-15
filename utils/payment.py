@@ -23,22 +23,53 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             r = await client.post(url, json=payload, headers=headers)
 
         print("===== BAYARGG DEBUG =====")
+        print("URL:", url)
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
         print("=========================")
 
+        # ❌ HTTP ERROR
         if r.status_code != 200:
             print("❌ HTTP ERROR")
             return None
 
-        data = r.json()
-        result = data.get("data") or data
+        # ❌ EMPTY RESPONSE
+        if not r.text:
+            print("❌ EMPTY RESPONSE")
+            return None
 
-        checkout_url = result.get("checkout_url") or result.get("payment_url")
-        reference = result.get("reference") or result.get("id")
+        # ❌ SAFE JSON PARSE
+        try:
+            data = r.json()
+        except Exception:
+            print("❌ INVALID JSON RESPONSE")
+            return None
 
+        # 🔥 FLEXIBLE RESULT PARSING
+        result = data.get("data") or data.get("result") or data
+
+        if not isinstance(result, dict):
+            print("❌ INVALID RESULT FORMAT")
+            return None
+
+        # 🔥 SUPPORT MULTI FIELD (API beda-beda)
+        checkout_url = (
+            result.get("checkout_url")
+            or result.get("payment_url")
+            or result.get("invoice_url")
+            or result.get("url")
+        )
+
+        reference = (
+            result.get("reference")
+            or result.get("id")
+            or result.get("transaction_id")
+            or result.get("external_id")
+        )
+
+        # ❌ FIELD CHECK
         if not checkout_url or not reference:
-            print("❌ MISSING FIELD")
+            print("❌ MISSING FIELD:", result)
             return None
 
         print("✅ INVOICE SUCCESS")
@@ -48,14 +79,24 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             "reference": reference
         }
 
-    except httpx.ConnectError:
-        print("❌ CONNECTION ERROR")
+    except httpx.ConnectError as e:
+        print("❌ CONNECTION ERROR:", str(e))
         return None
 
     except httpx.TimeoutException:
         print("❌ TIMEOUT ERROR")
         return None
 
+    except httpx.RequestError as e:
+        print("❌ REQUEST ERROR:", str(e))
+        return None
+
     except Exception as e:
         print("❌ UNKNOWN ERROR:", str(e))
         return None
+
+
+# =========================
+# ALIAS (BIAR GETFILE AMAN)
+# =========================
+create_invoice = create_bayargg_invoice
