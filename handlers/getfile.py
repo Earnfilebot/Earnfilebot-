@@ -133,27 +133,34 @@ async def payment_ui(message: Message, file):
         return await message.answer("❌ Invoice error")
 
     # =========================
-    # WAJIB QRIS STRING (BUKAN URL)
+    # QRIS SAFE PARSER (ANTI ERROR STRUCTURE)
     # =========================
-    qr_data = invoice.get("qris_string")
+    qr_data = None
+
+    if isinstance(invoice, dict):
+        qr_data = (
+            invoice.get("qris_string")
+            or (invoice.get("data") or {}).get("qris_string")
+            or invoice.get("data", {}).get("qris_string")
+        )
 
     if not qr_data:
         return await message.answer("❌ QRIS tidak tersedia")
 
     reference = invoice.get("reference") or f"{message.from_user.id}_{file['code']}"
 
-    await pool.execute(
-        """
+    # =========================
+    # 🔴 ANTI DUPLICATE PAYMENT (RACE CONDITION SAFE)
+    # =========================
+    await pool.execute("""
         INSERT INTO payments(user_id, code, reference, status)
         VALUES ($1,$2,$3,'pending')
         ON CONFLICT (user_id, code)
         DO UPDATE SET reference=EXCLUDED.reference, status='pending'
-        """,
-        message.from_user.id, file["code"], reference
-    )
+    """, message.from_user.id, file["code"], reference)
 
     # =========================
-    # QR GENERATOR REAL
+    # QR GENERATOR
     # =========================
     qr = qrcode.make(qr_data)
 
@@ -166,19 +173,25 @@ async def payment_ui(message: Message, file):
 
     price = int(file.get("price") or 0)
 
+    # =========================
+    # CLEAN UI FONT (RAPI + CONSISTENT)
+    # =========================
     caption = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗣𝗔𝗬𝗠𝗘𝗡𝗧\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🔐 PAYMENT INVOICE\n"
+        "🔐 𝗜𝗡𝗩𝗢𝗜𝗖𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦\n"
         "──────────────────\n\n"
-        f"▸ CODE   : {file['code']}\n"
-        f"▸ PRICE  : Rp{price:,}\n"
-        f"▸ STATUS : PENDING\n\n"
-        "⚡ Scan QR untuk bayar\n"
-        "🔄 Auto unlock setelah sukses"
+        f"▸ 𝗖𝗢𝗗𝗘   : {file['code']}\n"
+        f"▸ 𝗣𝗥𝗜𝗖𝗘  : Rp{price:,}\n"
+        f"▸ 𝗦𝗧𝗔𝗧𝗨𝗦 : PENDING\n\n"
+        "⚡ Scan QR untuk melakukan pembayaran\n"
+        "🔄 Auto unlock setelah pembayaran sukses"
     )
 
-    await message.answer_photo(photo=photo, caption=caption)
+    await message.answer_photo(
+        photo=photo,
+        caption=caption
+    )
 # =========================
 # GETFILE START
 # =========================
