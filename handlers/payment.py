@@ -16,11 +16,20 @@ async def test_payment(message: Message):
     )
 
     if not result:
-        await message.answer("❌ Gagal membuat invoice")
-        return
+        return await message.answer("❌ Gagal membuat invoice")
 
-    await message.answer(
-        "✅ Invoice berhasil dibuat\n"
-        f"🔗 {result['checkout_url']}\n"
-        f"🧾 {result['reference']}"
+    checkout = result.get("checkout_url")
+    reference = result.get("reference")
+    qris = result.get("qris_string")
+
+    text = (
+        "✅ INVOICE CREATED\n\n"
+        f"🔗 Checkout: {checkout or '-'}\n"
+        f"🧾 Reference: {reference or '-'}\n"
     )
+
+    # kalau QRIS ada → kasih info tambahan
+    if qris:
+        text += "\n⚡ QRIS tersedia (ready untuk auto unlock system)"
+
+    await message.answer(text)
