@@ -90,6 +90,7 @@ def normalize_type(ftype: str, file_id: str) -> str:
 # =========================
 # CREATE INVOICE
 # =========================
+
 async def create_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": int(amount),
@@ -99,11 +100,11 @@ async def create_invoice(amount: int, code: str, user_id: int):
     }
 
     headers = {
-        "Authorization": f"Bearer {BAYARGG_API_KEY}",
-        "Content-Type": "application/json"
+        "X-API-Key": str(BAYARGG_API_KEY).strip(),
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
 
-    # 🔥 FIX ENDPOINT (INI KUNCI)
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
     try:
@@ -117,29 +118,24 @@ async def create_invoice(amount: int, code: str, user_id: int):
         print("RAW RESPONSE:", r.text)
         print("=========================")
 
-        # ❌ RESPONSE KOSONG
         if not r.text:
             return {}
 
-        # ❌ PARSE JSON AMAN
         try:
             data = r.json()
         except Exception:
             print("❌ RESPONSE BUKAN JSON")
             return {}
 
-        # ❌ STATUS ERROR
         if r.status_code != 200:
             print("❌ HTTP ERROR:", data)
             return {}
 
-        # 🔥 AMBIL DATA FLEXIBLE
         result = data.get("data") or data.get("result") or data
 
         if not isinstance(result, dict):
             return {}
 
-        # 🔥 SUPPORT MULTI KEY
         checkout_url = (
             result.get("checkout_url")
             or result.get("payment_url")
