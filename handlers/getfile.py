@@ -19,6 +19,7 @@ from database import get_pool
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
 router = Router()
+PAGE_SIZE = 10
 
 
 # =========================
@@ -192,6 +193,51 @@ async def payment_ui(message: Message, file):
         reply_markup=keyboard
     )
 
+@router.callback_query(F.data.startswith("page:"))
+async def page_handler(call: CallbackQuery):
+
+    _, code, page = call.data.split(":")
+
+    page = int(page)
+
+    pool = await get_pool()
+
+    file = await pool.fetchrow(
+        "SELECT * FROM files WHERE code=$1",
+        code
+    )
+
+    if not file:
+        await call.answer(
+            "❌ File tidak ditemukan",
+            show_alert=True
+        )
+        return
+
+    raw_media = file.get("media")
+
+    if isinstance(raw_media, str):
+        raw_media = json.loads(raw_media)
+
+    await send_media_page(
+        call.message,
+        file,
+        raw_media,
+        page
+    )
+
+    await call.answer()
+
+@router.callback_query(F.data.startswith("group:"))
+async def group_handler(call: CallbackQuery):
+
+    code = call.data.split(":")[1]
+
+    await call.answer(
+        f"📂 GROUP FILE\n\n🔑 {code}",
+        show_alert=True
+    )
+
 # =========================
 # CEK PEMBAYARAN
 # =========================
@@ -224,6 +270,87 @@ async def cancel_payment(call: CallbackQuery, state: FSMContext):
     )
 
     await call.answer()
+
+# =========================
+# SEND MEDIA PAGE
+# =========================
+async def send_media_page(message, file, media_list, page=1):
+
+    total_pages = (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE
+
+    start = (page - 1) * PAGE_SIZE
+    end = start + PAGE_SIZE
+
+    chunk = media_list[start:end]
+
+    group = []
+
+    for i, m in enumerate(chunk):
+        fid = clean_file_id(m.get("file_id"))
+
+        if not fid:
+            continue
+
+        caption = None
+
+        if i == 0:
+            caption = (
+                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+                f"🔑 CODE  : {file['code']}\n"
+                f"📄 PAGE  : {page}/{total_pages}\n"
+                f"📦 TOTAL : {len(media_list)} MEDIA"
+            )
+
+        ftype = normalize_type(m.get("type"), fid)
+
+        if ftype == "photo":
+            group.append(InputMediaPhoto(media=fid, caption=caption))
+
+        elif ftype == "video":
+            group.append(InputMediaVideo(media=fid, caption=caption))
+
+        else:
+            group.append(InputMediaDocument(media=fid, caption=caption))
+
+    if group:
+        await message.answer_media_group(group)
+
+    keyboard = []
+
+    keyboard.append([
+        InlineKeyboardButton(
+            text="📂 GROUP CODE",
+            callback_data=f"group:{file['code']}"
+        )
+    ])
+
+    nav = []
+
+    if page > 1:
+        nav.append(
+            InlineKeyboardButton(
+                text="🔙 PREV",
+                callback_data=f"page:{file['code']}:{page-1}"
+            )
+        )
+
+    if page < total_pages:
+        nav.append(
+            InlineKeyboardButton(
+                text="🔜 NEXT",
+                callback_data=f"page:{file['code']}:{page+1}"
+            )
+        )
+
+    if nav:
+        keyboard.append(nav)
+
+    await message.answer(
+        f"📄 Halaman {page}/{total_pages}",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        )
+    )
 # =========================
 # MAIN GETFILE
 # =========================
@@ -351,6 +478,13 @@ async def receive_code(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        await send_media_page(
+    message,
+    file,
+    media_list,
+    1
+)
+
         # =========================
         # PAYMENT
         # =========================
@@ -360,6 +494,13 @@ async def receive_code(message: Message, state: FSMContext):
             await payment_ui(message, file)
             await state.clear()
             return
+
+        await send_media_page(
+    message,
+    file,
+    media_list,
+    1
+)
 
         # =========================
         # UNLOCKED
