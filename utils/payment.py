@@ -8,12 +8,8 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": int(amount),
         "description": f"Purchase file {code}",
-
-        # Sesuai docs resmi BayarGG
         "payment_url": "https://www.bayar.gg/pay",
         "payment_method": "qris_bayar_gg",
-
-        # Optional
         "external_id": f"{user_id}_{code}"
     }
 
@@ -25,6 +21,22 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
+
+            # DEBUG PAYMENT METHODS
+            test = await client.get(
+                f"{BAYARGG_BASE_URL}/payment-methods.php",
+                headers={
+                    "X-API-Key": str(BAYARGG_API_KEY).strip(),
+                    "Accept": "application/json"
+                }
+            )
+
+            print("===== PAYMENT METHODS =====")
+            print("STATUS:", test.status_code)
+            print("RESPONSE:", test.text)
+            print("===========================")
+
+            # CREATE PAYMENT
             r = await client.post(
                 url,
                 json=payload,
@@ -41,21 +53,13 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         if r.status_code != 200:
             return None
 
-        try:
-            data = r.json()
-        except Exception:
-            print("❌ INVALID JSON RESPONSE")
-            return None
+        data = r.json()
 
         if data.get("success") is False:
             print("❌ BAYARGG ERROR:", data)
             return None
 
         result = data.get("data") or data.get("result") or data
-
-        if not isinstance(result, dict):
-            print("❌ INVALID RESULT:", result)
-            return None
 
         checkout_url = (
             result.get("checkout_url")
@@ -76,29 +80,13 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             print("❌ CHECKOUT URL TIDAK ADA:", result)
             return None
 
-        print("✅ INVOICE SUCCESS")
-        print("CHECKOUT:", checkout_url)
-        print("REFERENCE:", reference)
-
         return {
             "checkout_url": checkout_url,
             "reference": reference
         }
 
-    except httpx.ConnectError as e:
-        print("❌ CONNECTION ERROR:", e)
-        return None
-
-    except httpx.TimeoutException:
-        print("❌ TIMEOUT ERROR")
-        return None
-
-    except httpx.RequestError as e:
-        print("❌ REQUEST ERROR:", e)
-        return None
-
     except Exception as e:
-        print("❌ UNKNOWN ERROR:", e)
+        print("❌ BAYARGG ERROR:", e)
         return None
 
 
