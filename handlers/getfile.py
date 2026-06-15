@@ -1,4 +1,5 @@
 import json
+import asyncio
 import qrcode
 from io import BytesIO
 
@@ -19,10 +20,29 @@ from aiogram.fsm.state import State, StatesGroup
 from utils.payment import create_invoice
 from database import get_pool
 
+PAGE_CACHE = {}
+CLICK_LOCK = {}
 router = Router()
 PAGE_SIZE = 10
 
+def get_cache(code, page):
+    return PAGE_CACHE.get(f"{code}:{page}")
 
+
+def set_cache(code, page, data):
+    PAGE_CACHE[f"{code}:{page}"] = data
+
+
+def is_locked(user_id):
+    return CLICK_LOCK.get(user_id, False)
+
+
+def lock(user_id):
+    CLICK_LOCK[user_id] = True
+
+
+def unlock(user_id):
+    CLICK_LOCK[user_id] = False
 # =========================
 # UI FONT
 # =========================
@@ -205,87 +225,122 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 # =========================
 # SEND MEDIA PAGE
 # =========================
-async def send_media_page(message, file, media_list, page=1):
+@router.callback_query(F.data.startswith("page:"))
+async def page_handler(call: CallbackQuery):
+    user_id = call.from_user.id
 
-    total = max(1, (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = max(1, min(page, total))
+    if is_locked(user_id):
+        return await call.answer("⏳ Tunggu...", show_alert=False)
 
-    chunk = media_list[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
+    lock(user_id)
 
-    group = []
+    try:
+        _, code, page = call.data.split(":")
+        page = int(page)
 
-    file_code = getattr(file, "code", None) or file.get("code")
+        pool = await get_pool()
 
-    for i, m in enumerate(chunk):
-        fid = clean_file_id(m.get("file_id"))
-        if not fid:
-            continue
+        file = await pool.fetchrow(
+            "SELECT * FROM files WHERE code=$1",
+            code
+        )
 
-        caption = None
+        if not file:
+            return await call.answer("❌ FILE NOT FOUND", show_alert=True)
 
-        if i == 0:
-            caption = (
-                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
-                "━━━━━━━━━━━━━━━━━━\n\n"
-                f"▸ 𝗖𝗢𝗗𝗘 : {file_code}\n"
-                f"▸ 𝗣𝗔𝗚𝗘 : {page}/{total}\n"
-                f"▸ 𝗧𝗢𝗧𝗔𝗟 : {len(media_list)} FILE\n"
-            )
+        media = file.get("media") or []
+        if isinstance(media, str):
+            media = json.loads(media)
 
-        ftype = normalize_type(m.get("type"), fid)
+        if not isinstance(media, list):
+            media = []
 
+        total = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
+
+        # 🔥 CLAMP PAGE (WAJIB)
+        page = max(1, min(page, total))
+
+        chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
+
+        if not chunk:
+            return await call.answer("❌ EMPTY PAGE", show_alert=True)
+
+        first = chunk[0]
+        fid = clean_file_id(first.get("file_id"))
+        ftype = normalize_type(first.get("type"), fid)
+
+        caption = (
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            f"▸ 𝗖𝗢𝗗𝗘 : {code}\n"
+            f"▸ 𝗣𝗔𝗚𝗘 : {page}/{total}\n"
+            f"▸ 𝗧𝗢𝗧𝗔𝗟 : {len(media)} FILE\n"
+        )
+
+        # media builder
         if ftype == "photo":
-            group.append(InputMediaPhoto(media=fid, caption=caption))
+            media_obj = InputMediaPhoto(media=fid, caption=caption)
         elif ftype == "video":
-            group.append(InputMediaVideo(media=fid, caption=caption))
+            media_obj = InputMediaVideo(media=fid, caption=caption)
         else:
-            group.append(InputMediaDocument(media=fid, caption=caption))
+            media_obj = InputMediaDocument(media=fid, caption=caption)
 
-    if not group:
-        await message.answer("❌ MEDIA KOSONG")
-        return
+        # =========================
+        # BUTTONS FIX (NO PAGE 0 BUG)
+        # =========================
+        nav = []
 
-    await message.answer_media_group(group)
-
-    # =========================
-    # KEYBOARD (FIX AIogram v3)
-    # =========================
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                text="📂 GROUP",
-                callback_data=f"group:{file_code}"
+        if page > 1:
+            nav.append(
+                InlineKeyboardButton(
+                    "⬅️ PREV",
+                    callback_data=f"page:{code}:{page-1}"
+                )
             )
-        ]
-    ]
 
-    nav = []
-
-    if page > 1:
-        nav.append(
-            InlineKeyboardButton(
-                text="⬅️ PREV",
-                callback_data=f"page:{file_code}:{page-1}"
+        if page < total:
+            nav.append(
+                InlineKeyboardButton(
+                    "NEXT ➡️",
+                    callback_data=f"page:{code}:{page+1}"
+                )
             )
-        )
 
-    if page < total:
-        nav.append(
+        buttons = []
+
+        if nav:
+            buttons.append(nav)
+
+        buttons.append([
+            InlineKeyboardButton("📂 GROUP", callback_data=f"group:{code}")
+        ])
+
+        buttons.append([
             InlineKeyboardButton(
-                text="NEXT ➡️",
-                callback_data=f"page:{file_code}:{page+1}"
+                "🔔 JOIN NOTIFIKASI",
+                url="https://t.me/+DTL9cOR34ipmM2U1"
             )
-        )
+        ])
 
-    if nav:
-        keyboard.append(nav)
+        # =========================
+        # SMOOTH EDIT (NO CRASH)
+        # =========================
+        try:
+            await call.message.edit_media(media=media_obj)
+        except:
+            pass
 
-    await message.answer(
-        f"📄 Page {page}/{total}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-    )
+        try:
+            await call.message.edit_reply_markup(
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+            )
+        except:
+            pass
 
+        await call.answer()
+
+    finally:
+        unlock(user_id)
 # =========================
 # RECEIVE CODE (FIXED FLOW)
 # =========================
@@ -317,17 +372,87 @@ async def receive_code(message: Message, state: FSMContext):
     if not isinstance(media, list):
         media = []
 
-    # FREE
-    if str(file.get("type")) == "free":
-        await send_media_page(message, file, media, 1)
-        await state.clear()
-        return
+    # =========================
+    # ACCESS CHECK
+    # =========================
+    is_free = str(file.get("type")) == "free"
+    paid = await is_paid(message.from_user.id, code)
 
-    # PAID
-    if not await is_paid(message.from_user.id, code):
+    if not is_free and not paid:
         await payment_ui(message, file)
         await state.clear()
         return
 
-    await send_media_page(message, file, media, 1)
+    # =========================
+    # PAGE INIT
+    # =========================
+    page = 1
+    total = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    chunk = media[:PAGE_SIZE]
+
+    if not chunk:
+        return await message.answer("❌ FILE KOSONG")
+
+    first = chunk[0]
+    fid = clean_file_id(first.get("file_id"))
+    ftype = normalize_type(first.get("type"), fid)
+
+    caption = (
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"▸ 𝗖𝗢𝗗𝗘 : {code}\n"
+        f"▸ 𝗣𝗔𝗚𝗘 : {page}/{total}\n"
+        f"▸ 𝗧𝗢𝗧𝗔𝗟 : {len(media)} FILE\n"
+    )
+
+    # =========================
+    # CACHE PAGE 1
+    # =========================
+    set_cache(code, page, (
+        file, media, total, chunk, fid, caption, ftype
+    ))
+
+    # =========================
+    # BUTTONS (FIXED NAV)
+    # =========================
+    buttons = [
+        [
+            InlineKeyboardButton(
+                "⬅️ PREV", callback_data=f"page:{code}:{page-1}"
+            ),
+            InlineKeyboardButton(
+                "NEXT ➡️", callback_data=f"page:{code}:{page+1}"
+            )
+        ],
+        [
+            InlineKeyboardButton("📂 GROUP", callback_data=f"group:{code}")
+        ],
+        [
+            InlineKeyboardButton(
+                "🔔 JOIN NOTIFIKASI",
+                url="https://t.me/+DTL9cOR34ipmM2U1"
+            )
+        ]
+    ]
+
+    # =========================
+    # BUILD MEDIA (FIRST PAGE)
+    # =========================
+    if ftype == "photo":
+        media_obj = InputMediaPhoto(media=fid, caption=caption)
+    elif ftype == "video":
+        media_obj = InputMediaVideo(media=fid, caption=caption)
+    else:
+        media_obj = InputMediaDocument(media=fid, caption=caption)
+
+    # =========================
+    # SEND FIRST MESSAGE
+    # =========================
+    await message.answer_photo(
+        photo=fid,
+        caption=caption,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
     await state.clear()
