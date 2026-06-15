@@ -11,6 +11,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from utils.payment import create_invoice
 
 from database import get_pool
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
@@ -86,89 +87,6 @@ def normalize_type(ftype: str, file_id: str) -> str:
 
     return "document"
 
-
-# =========================
-# CREATE INVOICE
-# =========================
-
-async def create_invoice(amount: int, code: str, user_id: int):
-    payload = {
-        "amount": int(amount),
-        "description": f"Purchase file {code}",
-        "callback_url": "https://earnfilebot.up.railway.app/webhook/bayargg",
-        "external_id": f"{user_id}_{code}"
-    }
-
-    headers = {
-        "X-API-Key": str(BAYARGG_API_KEY).strip(),
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-
-    url = f"{BAYARGG_BASE_URL}/create-payment.php"
-
-    try:
-        print("===== INVOICE DEBUG =====")
-        print("URL:", url)
-
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(url, json=payload, headers=headers)
-
-        print("STATUS:", r.status_code)
-        print("RAW RESPONSE:", r.text)
-        print("=========================")
-
-        if not r.text:
-            return {}
-
-        try:
-            data = r.json()
-        except Exception:
-            print("❌ RESPONSE BUKAN JSON")
-            return {}
-
-        if r.status_code != 200:
-            print("❌ HTTP ERROR:", data)
-            return {}
-
-        result = data.get("data") or data.get("result") or data
-
-        if not isinstance(result, dict):
-            return {}
-
-        checkout_url = (
-            result.get("checkout_url")
-            or result.get("payment_url")
-            or result.get("invoice_url")
-        )
-
-        reference = (
-            result.get("reference")
-            or result.get("id")
-            or result.get("external_id")
-        )
-
-        if not checkout_url or not reference:
-            print("❌ FIELD KURANG:", result)
-            return {}
-
-        print("✅ INVOICE SUCCESS")
-
-        return {
-            "data": {
-                "checkout_url": checkout_url,
-                "reference": reference
-            }
-        }
-
-    except httpx.ConnectError as e:
-        print("❌ DNS / DOMAIN ERROR:", e)
-        return {}
-
-    except Exception as e:
-        print("❌ INVOICE ERROR:", e)
-        return {}
-
 # =========================
 # START
 # =========================
@@ -209,13 +127,14 @@ async def payment_ui(message: Message, file):
         user_id=message.from_user.id
     )
 
-    data = invoice.get("data")
-    if not data:
+    invoice_data = invoice.get("data")
+
+    if not invoice_data:
         await message.answer("❌ Gagal membuat invoice")
         return
 
-    pay_url = data.get("checkout_url")
-    reference = data.get("reference")
+    pay_url = invoice_data.get("checkout_url")
+    reference = invoice_data.get("reference")
 
     if not pay_url or not reference:
         await message.answer("❌ Invoice invalid")
@@ -248,8 +167,6 @@ async def payment_ui(message: Message, file):
 ⚡ Setelah bayar file otomatis unlock
 """
     )
-
-
 # =========================
 # MAIN GETFILE
 # =========================
@@ -372,7 +289,7 @@ async def receive_code(message: Message, state: FSMContext):
         # =========================
         # FREE
         # =========================
-        if file["type"] == "free":
+        if file.get("type") == "free":
             await safe_send()
             await state.clear()
             return
