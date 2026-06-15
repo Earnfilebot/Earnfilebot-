@@ -1,6 +1,9 @@
 import json
-from aiogram import Router, F
+import qrcode
+import asyncio
+from io import BytesIO
 
+from aiogram import Router, F
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -12,47 +15,13 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.exceptions import TelegramBadRequest
+
 from utils.payment import create_invoice
 from database import get_pool
 
 router = Router()
 PAGE_SIZE = 10
-# =========================
-# CLEAN FILE ID (ULTRA FIX)
-# =========================
-def clean_file_id(fid):
-    # unwrap dict berkali-kali
-    while isinstance(fid, dict):
-        fid = fid.get("file_id")
 
-    # kalau string JSON → decode lagi
-    if isinstance(fid, str) and fid.startswith("["):
-        try:
-            data = json.loads(fid)
-
-            if isinstance(data, list) and data:
-                return clean_file_id(
-                    data[0].get("file_id")
-                )
-        except Exception:
-            return None
-
-    # bukan string
-    if not isinstance(fid, str):
-        return None
-
-    fid = fid.strip()
-
-    # file_id kosong
-    if not fid:
-        return None
-
-    # terlalu pendek kemungkinan invalid
-    if len(fid) < 20:
-        return None
-
-    return fid
 
 # =========================
 # STATE
@@ -62,578 +31,292 @@ class GetFileState(StatesGroup):
 
 
 # =========================
-# NORMALIZE TYPE
+# CLEAN FILE ID
 # =========================
-def normalize_type(ftype: str, file_id: str) -> str:
+def clean_file_id(fid):
+    while isinstance(fid, dict):
+        fid = fid.get("file_id")
 
+    if isinstance(fid, str) and fid.startswith("["):
+        try:
+            data = json.loads(fid)
+            if isinstance(data, list) and data:
+                return clean_file_id(data[0].get("file_id"))
+        except:
+            return None
+
+    if not isinstance(fid, str):
+        return None
+
+    fid = fid.strip()
+    if len(fid) < 20:
+        return None
+
+    return fid
+
+
+# =========================
+# TYPE
+# =========================
+def normalize_type(ftype, file_id):
     if ftype:
         ftype = ftype.lower()
-
-        if ftype in (
-            "photo", "image", "jpg",
-            "jpeg", "png"
-        ):
+        if ftype in ("photo", "jpg", "png", "image"):
             return "photo"
-
-        if ftype in (
-            "video", "mp4", "mov"
-        ):
+        if ftype in ("video", "mp4", "mov"):
             return "video"
 
-        if ftype in (
-            "doc", "document",
-            "file", "pdf", "zip"
-        ):
-            return "document"
-
-    # fallback dari file_id
     if isinstance(file_id, str):
-
         if file_id.startswith("AgACAg"):
             return "photo"
-
         if file_id.startswith("BQACAg"):
             return "video"
 
-        if file_id.startswith("BAACAg"):
-            return "document"
-
     return "document"
+
+
 # =========================
-# START GETFILE
+# PAYMENT CHECK
+# =========================
+async def is_paid(user_id, code):
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT status FROM payments WHERE user_id=$1 AND code=$2 AND status='paid'",
+        user_id, code
+    )
+    return bool(row)
+
+
+# =========================
+# SEND FILE
+# =========================
+async def send_file(bot, user_id, file):
+    media = file.get("media") or file.get("file_id")
+
+    if isinstance(media, str):
+        try:
+            media = json.loads(media)
+        except:
+            media = []
+
+    if not isinstance(media, list):
+        return
+
+    for m in media[:10]:
+        fid = m.get("file_id")
+        if fid:
+            try:
+                await bot.send_document(user_id, fid)
+            except:
+                pass
+
+
+# =========================
+# REALTIME WATCHER
+# =========================
+async def watch_payment(message, code, file, msg_id):
+    for _ in range(60):  # 10 menit
+        await asyncio.sleep(10)
+
+        if await is_paid(message.from_user.id, code):
+            try:
+                await message.bot.delete_message(message.chat.id, msg_id)
+            except:
+                pass
+
+            await message.answer("✅ PAYMENT SUCCESS")
+            await send_file(message.bot, message.from_user.id, file)
+            return
+
+
+# =========================
+# PAYMENT UI (QR)
+# =========================
+async def payment_ui(message: Message, file):
+    pool = await get_pool()
+
+    invoice = await create_invoice(
+        amount=file["price"],
+        code=file["code"],
+        user_id=message.from_user.id
+    )
+
+    if not invoice:
+        return await message.answer("❌ Invoice error")
+
+    pay_url = invoice.get("checkout_url")
+    reference = invoice.get("reference") or f"{message.from_user.id}_{file['code']}"
+
+    await pool.execute(
+        """
+        INSERT INTO payments(user_id, code, reference, status)
+        VALUES ($1,$2,$3,'pending')
+        ON CONFLICT (user_id, code)
+        DO UPDATE SET reference=EXCLUDED.reference, status='pending'
+        """,
+        message.from_user.id, file["code"], reference
+    )
+
+    qr = qrcode.make(pay_url)
+    bio = BytesIO()
+    bio.name = "qr.png"
+    qr.save(bio)
+    bio.seek(0)
+
+    price = int(file.get("price") or 0)
+
+    msg = await message.answer_photo(
+        photo=bio,
+        caption=(
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+            "🔒 PAYMENT REQUIRED\n"
+            "━━━━━━━━━━━━━━\n"
+            f"🔑 CODE : {file['code']}\n"
+            f"💰 PRICE : Rp{price:,}\n\n"
+            "📌 SCAN QR"
+        )
+    )
+
+    asyncio.create_task(
+        watch_payment(message, file["code"], file, msg.message_id)
+    )
+
+
+# =========================
+# GETFILE START
 # =========================
 @router.callback_query(F.data == "getfile")
 async def getfile_start(call: CallbackQuery, state: FSMContext):
     await state.set_state(GetFileState.wait_code)
-
-    try:
-        await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-            "🔑 KIRIM KODE FILE SEKARANG"
-        )
-    except:
-        await call.message.answer(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-            "🔑 KIRIM KODE FILE SEKARANG"
-        )
-
+    await call.message.answer("🔑 KIRIM KODE FILE")
     await call.answer()
-# =========================
-# CHECK PAYMENT
-# =========================
-async def is_paid(user_id: int, code: str) -> bool:
-    try:
-        pool = await get_pool()
-
-        row = await pool.fetchrow(
-            """
-            SELECT 1
-            FROM payments
-            WHERE user_id = $1
-              AND code = $2
-              AND status = 'paid'
-            LIMIT 1
-            """,
-            user_id,
-            code
-        )
-
-        return row is not None
-
-    except Exception as e:
-        print("IS_PAID ERROR:", e)
-        return False
-
-# =========================
-# PAYMENT UI
-# =========================
-async def payment_ui(message: Message, file):
-    try:
-        invoice = await create_invoice(
-            amount=file["price"],
-            code=file["code"],
-            user_id=message.from_user.id
-        )
-
-        if not invoice:
-            await message.answer(
-                "❌ Gagal membuat invoice."
-            )
-            return
-
-        pay_url = invoice.get("checkout_url")
-        reference = invoice.get("reference")
-
-        if not pay_url:
-            await message.answer(
-                "❌ Invoice tidak valid."
-            )
-            return
-
-        if not reference:
-            reference = (
-                f"{message.from_user.id}_{file['code']}"
-            )
-
-        pool = await get_pool()
-
-        # Simpan / update pembayaran pending
-        await pool.execute(
-            """
-            INSERT INTO payments (
-                user_id,
-                code,
-                reference,
-                status
-            )
-            VALUES ($1, $2, $3, 'pending')
-
-            ON CONFLICT (user_id, code)
-            DO UPDATE SET
-                reference = EXCLUDED.reference
-            """,
-            message.from_user.id,
-            file["code"],
-            reference
-        )
-
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="💳 BAYAR",
-                        url=pay_url
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔄 CEK PEMBAYARAN",
-                        callback_data=f"cekpay:{file['code']}"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="❌ BATALKAN",
-                        callback_data="cancel_payment"
-                    )
-                ]
-            ]
-        )
-
-        price = int(file.get("price", 0))
-
-        await message.answer(
-            f"""𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
-
-🔒 𝗙𝗜𝗟𝗘 𝗟𝗢𝗖𝗞𝗘𝗗
-━━━━━━━━━━━━━━
-🔑 𝗖𝗢𝗗𝗘   : {file['code']}
-💰 𝗣𝗥𝗜𝗖𝗘 : Rp{price:,}
-
-⚡ Setelah pembayaran berhasil,
-file akan otomatis terbuka.
-
-📌 Tekan tombol BAYAR untuk melanjutkan.
-""",
-            reply_markup=keyboard
-        )
-
-    except Exception as e:
-        print("PAYMENT_UI ERROR:", e)
-
-        await message.answer(
-            "❌ Terjadi kesalahan saat membuat pembayaran."
-        )
-
-# =========================
-# PAGE HANDLER
-# =========================
-@router.callback_query(F.data.startswith("page:"))
-async def page_handler(call: CallbackQuery):
-    try:
-        parts = call.data.split(":")
-
-        if len(parts) != 3:
-            await call.answer(
-                "❌ Data halaman tidak valid",
-                show_alert=True
-            )
-            return
-
-        _, code, page = parts
-        page = int(page)
-
-        pool = await get_pool()
-
-        file = await pool.fetchrow(
-            "SELECT * FROM files WHERE code=$1",
-            code
-        )
-
-        if not file:
-            await call.answer(
-                "❌ File tidak ditemukan",
-                show_alert=True
-            )
-            return
-
-        # =========================
-        # CEK AKSES PREMIUM
-        # =========================
-        if dict(file).get("type") != "free":
-
-            paid = await is_paid(
-                call.from_user.id,
-                code
-            )
-
-            if not paid:
-                await call.answer(
-                    "❌ File belum dibeli",
-                    show_alert=True
-                )
-                return
-
-        # =========================
-        # PARSE MEDIA
-        # =========================
-        raw_media = (
-            file.get("media")
-            or file.get("file_id")
-        )
-
-        if isinstance(raw_media, str):
-            try:
-                raw_media = json.loads(raw_media)
-            except:
-                raw_media = []
-
-        if not isinstance(raw_media, list):
-            raw_media = []
-
-        # =========================
-        # HAPUS TOMBOL HALAMAN LAMA
-        # =========================
-        try:
-            await call.message.delete()
-        except:
-            pass
-
-        # =========================
-        # KIRIM HALAMAN
-        # =========================
-        await send_media_page(
-            call.message,
-            file,
-            raw_media,
-            page
-        )
-
-        await call.answer()
-
-    except Exception as e:
-        print("PAGE_HANDLER ERROR:", e)
-
-        await call.answer(
-            "❌ Gagal membuka halaman",
-            show_alert=True
-        )
-
-# =========================
-# GROUP HANDLER
-# =========================
-@router.callback_query(F.data.startswith("group:"))
-async def group_handler(call: CallbackQuery):
-    try:
-        parts = call.data.split(":", 1)
-
-        if len(parts) != 2:
-            await call.answer(
-                "❌ Data group tidak valid",
-                show_alert=True
-            )
-            return
-
-        code = parts[1]
-
-        pool = await get_pool()
-
-        file = await pool.fetchrow(
-            "SELECT code, creator FROM files WHERE code=$1",
-            code
-        )
-
-        if not file:
-            await call.answer(
-                "❌ Group tidak ditemukan",
-                show_alert=True
-            )
-            return
-
-        await call.answer(
-            f"📂 GROUP FILE\n\n"
-            f"🔑 CODE : {file['code']}\n"
-            f"👤 OWNER : {file['creator']}",
-            show_alert=True
-        )
-
-    except Exception as e:
-        print("GROUP_HANDLER ERROR:", e)
-
-        await call.answer(
-            "❌ Gagal membuka informasi group",
-            show_alert=True
-        )
-
-# =========================
-# CEK PEMBAYARAN
-# =========================
-@router.callback_query(F.data.startswith("cekpay:"))
-async def cek_pembayaran(call: CallbackQuery):
-    try:
-        parts = call.data.split(":")
-
-        if len(parts) < 2:
-            await call.answer("❌ Data tidak valid", show_alert=True)
-            return
-
-        code = parts[1]
-
-        paid = await is_paid(call.from_user.id, code)
-
-        if paid:
-            await call.answer(
-                "✅ Pembayaran sudah diterima.\nSilakan kirim ulang kode file.",
-                show_alert=True
-            )
-        else:
-            await call.answer(
-                "⌛ Pembayaran belum terdeteksi.",
-                show_alert=True
-            )
-
-    except Exception as e:
-        await call.answer("❌ Terjadi error saat cek pembayaran", show_alert=True)
-        print(f"[cek_pembayaran error] {e}")
 
 
 # =========================
-# BATALKAN
-# =========================
-@router.callback_query(F.data == "cancel_payment")
-async def cancel_payment(call: CallbackQuery, state: FSMContext):
-    try:
-        await state.clear()
-
-        if call.message:
-            await call.message.edit_text("❌ Permintaan pembayaran dibatalkan.")
-
-        await call.answer()
-
-    except TelegramBadRequest:
-        # kalau message sudah diedit / tidak bisa diubah
-        await call.answer("❌ Tidak bisa membatalkan pesan ini", show_alert=True)
-
-    except Exception as e:
-        await call.answer("❌ Error saat cancel", show_alert=True)
-        print(f"[cancel_payment error] {e}")
-# =========================
-# SEND MEDIA PAGE
+# SEND PAGE (FIXED)
 # =========================
 async def send_media_page(message, file, media_list, page=1):
 
-    total_pages = (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE
+    total = max(1, (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE)
 
-    if total_pages <= 0:
-        total_pages = 1
-
-    if page < 1:
-        page = 1
-
-    if page > total_pages:
-        page = total_pages
+    page = max(1, min(page, total))
 
     start = (page - 1) * PAGE_SIZE
-    end = start + PAGE_SIZE
-
-    chunk = media_list[start:end]
-
-    # ✅ SAFETY CHECK
-    if not chunk:
-        await message.answer("❌ Halaman kosong")
-        return
+    chunk = media_list[start:start + PAGE_SIZE]
 
     group = []
 
     for i, m in enumerate(chunk):
         fid = clean_file_id(m.get("file_id"))
-
         if not fid:
             continue
 
         caption = None
-
         if i == 0:
             caption = (
                 "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-                f"🔑 CODE  : {file['code']}\n"
-                f"📄 PAGE  : {page}/{total_pages}\n"
-                f"📦 TOTAL : {len(media_list)} MEDIA"
+                f"🔑 CODE : {file['code']}\n"
+                f"📄 PAGE : {page}/{total}"
             )
 
         ftype = normalize_type(m.get("type"), fid)
 
         if ftype == "photo":
             group.append(InputMediaPhoto(media=fid, caption=caption))
-
         elif ftype == "video":
             group.append(InputMediaVideo(media=fid, caption=caption))
-
         else:
             group.append(InputMediaDocument(media=fid, caption=caption))
 
-    # ❌ FIX INDENTATION DI SINI
-    if not group:
-        await message.answer("❌ Semua media tidak valid")
-        return
+    if group:
+        await message.answer_media_group(group)
 
-    await message.answer_media_group(group)
-
-    keyboard = []
-
-    keyboard.append([
-        InlineKeyboardButton(
-            text="📂 GROUP CODE",
-            callback_data=f"group:{file['code']}"
-        )
-    ])
+    keyboard = [
+        [InlineKeyboardButton("📂 GROUP", callback_data=f"group:{file['code']}")]
+    ]
 
     nav = []
-
     if page > 1:
-        nav.append(
-            InlineKeyboardButton(
-                text="🔙 PREV",
-                callback_data=f"page:{file['code']}:{page-1}"
-            )
-        )
-
-    if page < total_pages:
-        nav.append(
-            InlineKeyboardButton(
-                text="🔜 NEXT",
-                callback_data=f"page:{file['code']}:{page+1}"
-            )
-        )
+        nav.append(InlineKeyboardButton("⬅️ PREV", callback_data=f"page:{file['code']}:{page-1}"))
+    if page < total:
+        nav.append(InlineKeyboardButton("NEXT ➡️", callback_data=f"page:{file['code']}:{page+1}"))
 
     if nav:
         keyboard.append(nav)
 
     await message.answer(
-        f"📄 Halaman {page}/{total_pages}",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=keyboard
-        )
+        f"📄 Page {page}/{total}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
+
+
 # =========================
-# MAIN GETFILE
+# PAGE HANDLER
+# =========================
+@router.callback_query(F.data.startswith("page:"))
+async def page_handler(call: CallbackQuery):
+    _, code, page = call.data.split(":")
+    page = int(page)
+
+    pool = await get_pool()
+
+    file = await pool.fetchrow("SELECT * FROM files WHERE code=$1", code)
+
+    if not file:
+        return await call.answer("NOT FOUND", show_alert=True)
+
+    if file["type"] != "free":
+        if not await is_paid(call.from_user.id, code):
+            return await call.answer("BELUM BAYAR", show_alert=True)
+
+    media = file.get("media") or []
+    if isinstance(media, str):
+        try:
+            media = json.loads(media)
+        except:
+            media = []
+
+    await call.message.delete()
+
+    await send_media_page(call.message, file, media, page)
+    await call.answer()
+
+
+# =========================
+# RECEIVE CODE (MAIN FIX)
 # =========================
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
-    try:
-        if not message.text:
-            await message.answer("❌ Kirim kode saja")
-            return
 
-        code = message.text.strip().upper()
-        print("GETFILE:", code)
+    code = message.text.strip().upper()
 
-        pool = await get_pool()
+    pool = await get_pool()
 
-        file = await pool.fetchrow(
-            "SELECT * FROM files WHERE code=$1",
-            code
-        )
+    file = await pool.fetchrow("SELECT * FROM files WHERE code=$1", code)
 
-        if not file:
-            await message.answer("❌ CODE TIDAK DITEMUKAN")
-            await state.clear()
-            return
+    if not file:
+        await message.answer("❌ NOT FOUND")
+        return await state.clear()
 
-        # =========================
-        # PARSE MEDIA (SAFE VERSION)
-        # =========================
-        raw_media = file.get("media") or file.get("file_id")
+    media = file.get("media") or []
+    if isinstance(media, str):
+        try:
+            media = json.loads(media)
+        except:
+            media = []
 
-        if isinstance(raw_media, str):
-            try:
-                raw_media = json.loads(raw_media)
-            except Exception:
-                raw_media = []
-
-        # FIX DOUBLE JSON ENCODE CASE
-        if isinstance(raw_media, list) and len(raw_media) == 1:
-            first = raw_media[0]
-
-            if isinstance(first, dict) and isinstance(first.get("file_id"), str):
-                try:
-                    raw_media = json.loads(first["file_id"])
-                except Exception:
-                    pass
-
-        # FINAL NORMALIZATION
-        if not isinstance(raw_media, list):
-            raw_media = []
-
-        media_list = raw_media
-
-        if len(media_list) == 0:
-            await message.answer("❌ Media kosong")
-            await state.clear()
-            return
-
-        # =========================
-        # FREE FILE
-        # =========================
-        if str(file.get("type")) == "free":
-
-            await send_media_page(
-                message,
-                file,
-                media_list,
-                1
-            )
-
-            await state.clear()
-            return
-
-        # =========================
-        # PREMIUM / PAID FILE
-        # =========================
-        paid = await is_paid(
-            message.from_user.id,
-            code
-        )
-
-        if not paid:
-            await payment_ui(message, file)
-            await state.clear()
-            return
-
-        # =========================
-        # UNLOCKED
-        # =========================
-        await send_media_page(
-            message,
-            file,
-            media_list,
-            1
-        )
-
+    # FREE FILE
+    if file["type"] == "free":
+        await send_file(message.bot, message.from_user.id, file)
         await state.clear()
+        return
 
-    except Exception as e:
-        print("FATAL GETFILE ERROR:", e)
-
-        await message.answer("❌ Terjadi error")
+    # PAID FILE
+    if not await is_paid(message.from_user.id, code):
+        await payment_ui(message, file)
         await state.clear()
+        return
+
+    # UNLOCK
+    await send_file(message.bot, message.from_user.id, file)
+    await state.clear()
