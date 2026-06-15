@@ -120,93 +120,129 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 # =========================
 # CHECK PAYMENT
 # =========================
-async def is_paid(user_id: int, code: str):
-    pool = await get_pool()
+async def is_paid(user_id: int, code: str) -> bool:
+    try:
+        pool = await get_pool()
 
-    row = await pool.fetchrow(
-        """
-        SELECT 1 FROM payments
-        WHERE user_id=$1 AND code=$2 AND status='paid'
-        """,
-        user_id,
-        code
-    )
+        row = await pool.fetchrow(
+            """
+            SELECT 1
+            FROM payments
+            WHERE user_id = $1
+              AND code = $2
+              AND status = 'paid'
+            LIMIT 1
+            """,
+            user_id,
+            code
+        )
 
-    return bool(row)
+        return row is not None
 
+    except Exception as e:
+        print("IS_PAID ERROR:", e)
+        return False
 
 # =========================
-# PAYMENT UI (FULL MAX)
+# PAYMENT UI
 # =========================
 async def payment_ui(message: Message, file):
-    invoice = await create_invoice(
-        amount=file["price"],
-        code=file["code"],
-        user_id=message.from_user.id
-    )
+    try:
+        invoice = await create_invoice(
+            amount=file["price"],
+            code=file["code"],
+            user_id=message.from_user.id
+        )
 
-    if invoice is None:
-        await message.answer("❌ Gagal membuat invoice")
-        return
+        if not invoice:
+            await message.answer(
+                "❌ Gagal membuat invoice."
+            )
+            return
 
-    pay_url = invoice.get("checkout_url")
-    reference = invoice.get("reference")
+        pay_url = invoice.get("checkout_url")
+        reference = invoice.get("reference")
 
-    if not pay_url:
-        await message.answer("❌ Invoice invalid")
-        return
+        if not pay_url:
+            await message.answer(
+                "❌ Invoice tidak valid."
+            )
+            return
 
-    if not reference:
-        reference = f"{message.from_user.id}_{file['code']}"
+        if not reference:
+            reference = (
+                f"{message.from_user.id}_{file['code']}"
+            )
 
-    pool = await get_pool()
+        pool = await get_pool()
 
-    await pool.execute(
-        """
-        INSERT INTO payments (user_id, code, reference, status)
-        VALUES ($1,$2,$3,'pending')
-        ON CONFLICT DO NOTHING
-        """,
-        message.from_user.id,
-        file["code"],
-        reference
-    )
+        # Simpan / update pembayaran pending
+        await pool.execute(
+            """
+            INSERT INTO payments (
+                user_id,
+                code,
+                reference,
+                status
+            )
+            VALUES ($1, $2, $3, 'pending')
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="💳 BAYAR",
-                    url=pay_url
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔄 CEK PEMBAYARAN",
-                    callback_data=f"cekpay:{file['code']}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="❌ BATALKAN",
-                    callback_data="cancel_payment"
-                )
+            ON CONFLICT (user_id, code)
+            DO UPDATE SET
+                reference = EXCLUDED.reference
+            """,
+            message.from_user.id,
+            file["code"],
+            reference
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="💳 BAYAR",
+                        url=pay_url
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔄 CEK PEMBAYARAN",
+                        callback_data=f"cekpay:{file['code']}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ BATALKAN",
+                        callback_data="cancel_payment"
+                    )
+                ]
             ]
-        ]
-    )
+        )
 
-    await message.answer(
-        f"""𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
+        price = int(file.get("price", 0))
+
+        await message.answer(
+            f"""𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
 
 🔒 𝗙𝗜𝗟𝗘 𝗟𝗢𝗖𝗞𝗘𝗗
 ━━━━━━━━━━━━━━
 🔑 𝗖𝗢𝗗𝗘   : {file['code']}
-💰 𝗣𝗥𝗜𝗖𝗘 : Rp{file['price']:,}
+💰 𝗣𝗥𝗜𝗖𝗘 : Rp{price:,}
 
-⚡ 𝗦𝗲𝘁𝗲𝗹𝗮𝗵 𝗽𝗲𝗺𝗯𝗮𝘆𝗮𝗿𝗮𝗻 𝗳𝗶𝗹𝗲 𝗮𝗸𝗮𝗻 𝗼𝘁𝗼𝗺𝗮𝘁𝗶𝘀 𝘁𝗲𝗿𝗯𝘂𝗸𝗮.
+⚡ Setelah pembayaran berhasil,
+file akan otomatis terbuka.
+
+📌 Tekan tombol BAYAR untuk melanjutkan.
 """,
-        reply_markup=keyboard
-    )
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        print("PAYMENT_UI ERROR:", e)
+
+        await message.answer(
+            "❌ Terjadi kesalahan saat membuat pembayaran."
+        )
 
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
