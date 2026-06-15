@@ -132,10 +132,13 @@ async def payment_ui(message: Message, file):
     if not invoice:
         return await message.answer("❌ Invoice error")
 
-    qr_data = invoice.get("qris_string") or invoice.get("checkout_url")
+    # =========================
+    # WAJIB QRIS STRING (BUKAN URL)
+    # =========================
+    qr_data = invoice.get("qris_string")
 
     if not qr_data:
-        return await message.answer("❌ QR tidak tersedia")
+        return await message.answer("❌ QRIS tidak tersedia")
 
     reference = invoice.get("reference") or f"{message.from_user.id}_{file['code']}"
 
@@ -149,6 +152,9 @@ async def payment_ui(message: Message, file):
         message.from_user.id, file["code"], reference
     )
 
+    # =========================
+    # QR GENERATOR REAL
+    # =========================
     qr = qrcode.make(qr_data)
 
     bio = BytesIO()
@@ -163,13 +169,13 @@ async def payment_ui(message: Message, file):
     caption = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗣𝗔𝗬𝗠𝗘𝗡𝗧\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "▸ 𝗜𝗡𝗩𝗢𝗜𝗖𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦\n"
-        "──────────────────\n"
-        f"▸ 𝗖𝗢𝗗𝗘   : {file['code']}\n"
-        f"▸ 𝗣𝗥𝗜𝗖𝗘  : Rp{price:,}\n"
-        "▸ 𝗦𝗧𝗔𝗧𝗨𝗦 : PENDING\n\n"
-        "▸ 𝗦𝗖𝗔𝗡 𝗤𝗥 𝗨𝗡𝗧𝗨𝗞 𝗣𝗔𝗬\n"
-        "Auto unlock setelah pembayaran sukses"
+        "🔐 PAYMENT INVOICE\n"
+        "──────────────────\n\n"
+        f"▸ CODE   : {file['code']}\n"
+        f"▸ PRICE  : Rp{price:,}\n"
+        f"▸ STATUS : PENDING\n\n"
+        "⚡ Scan QR untuk bayar\n"
+        "🔄 Auto unlock setelah sukses"
     )
 
     await message.answer_photo(photo=photo, caption=caption)
