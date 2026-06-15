@@ -2,12 +2,14 @@ import asyncio
 import json
 import httpx
 
-from aiogram import Router, F
 from aiogram.types import (
-    Message, CallbackQuery,
+    Message,
+    CallbackQuery,
     InputMediaPhoto,
     InputMediaVideo,
-    InputMediaDocument
+    InputMediaDocument,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -118,7 +120,7 @@ async def is_paid(user_id: int, code: str):
 
 
 # =========================
-# PAYMENT UI
+# PAYMENT UI (FULL MAX)
 # =========================
 async def payment_ui(message: Message, file):
     invoice = await create_invoice(
@@ -127,7 +129,6 @@ async def payment_ui(message: Message, file):
         user_id=message.from_user.id
     )
 
-    # Invoice gagal dibuat
     if invoice is None:
         await message.answer("❌ Gagal membuat invoice")
         return
@@ -135,9 +136,12 @@ async def payment_ui(message: Message, file):
     pay_url = invoice.get("checkout_url")
     reference = invoice.get("reference")
 
-    if not pay_url or not reference:
+    if not pay_url:
         await message.answer("❌ Invoice invalid")
         return
+
+    if not reference:
+        reference = f"{message.from_user.id}_{file['code']}"
 
     pool = await get_pool()
 
@@ -152,21 +156,74 @@ async def payment_ui(message: Message, file):
         reference
     )
 
-    await message.answer(
-        f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
-
-🔒 FILE LOCKED
-────────────────
-🔑 CODE : {file['code']}
-💰 PRICE: Rp{file['price']}
-
-💳 BAYAR:
-👉 {pay_url}
-
-⚡ Setelah bayar file otomatis unlock
-"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💳 BAYAR",
+                    url=pay_url
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔄 CEK PEMBAYARAN",
+                    callback_data=f"cekpay:{file['code']}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ BATALKAN",
+                    callback_data="cancel_payment"
+                )
+            ]
+        ]
     )
+
+    await message.answer(
+        f"""𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
+
+🔒 𝗙𝗜𝗟𝗘 𝗟𝗢𝗖𝗞𝗘𝗗
+━━━━━━━━━━━━━━
+🔑 𝗖𝗢𝗗𝗘   : {file['code']}
+💰 𝗣𝗥𝗜𝗖𝗘 : Rp{file['price']:,}
+
+⚡ 𝗦𝗲𝘁𝗲𝗹𝗮𝗵 𝗽𝗲𝗺𝗯𝗮𝘆𝗮𝗿𝗮𝗻 𝗳𝗶𝗹𝗲 𝗮𝗸𝗮𝗻 𝗼𝘁𝗼𝗺𝗮𝘁𝗶𝘀 𝘁𝗲𝗿𝗯𝘂𝗸𝗮.
+""",
+        reply_markup=keyboard
+    )
+
+# =========================
+# CEK PEMBAYARAN
+# =========================
+@router.callback_query(F.data.startswith("cekpay:"))
+async def cek_pembayaran(call: CallbackQuery):
+    code = call.data.split(":")[1]
+
+    paid = await is_paid(call.from_user.id, code)
+
+    if paid:
+        await call.answer(
+            "✅ Pembayaran sudah diterima.\nSilakan kirim ulang kode file.",
+            show_alert=True
+        )
+    else:
+        await call.answer(
+            "⌛ Pembayaran belum terdeteksi.",
+            show_alert=True
+        )
+
+# =========================
+# BATALKAN
+# =========================
+@router.callback_query(F.data == "cancel_payment")
+async def cancel_payment(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+
+    await call.message.edit_text(
+        "❌ Permintaan pembayaran dibatalkan."
+    )
+
+    await call.answer()
 # =========================
 # MAIN GETFILE
 # =========================
