@@ -12,6 +12,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest
 from utils.payment import create_invoice
 from database import get_pool
 
@@ -384,9 +385,6 @@ async def group_handler(call: CallbackQuery):
             show_alert=True
         )
 
-from aiogram.fsm.context import FSMContext
-from aiogram.exceptions import TelegramBadRequest
-
 # =========================
 # CEK PEMBAYARAN
 # =========================
@@ -446,19 +444,24 @@ async def send_media_page(message, file, media_list, page=1):
 
     total_pages = (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE
 
-if total_pages <= 0:
-    total_pages = 1
+    if total_pages <= 0:
+        total_pages = 1
 
-if page < 1:
-    page = 1
+    if page < 1:
+        page = 1
 
-if page > total_pages:
-    page = total_pages
+    if page > total_pages:
+        page = total_pages
 
     start = (page - 1) * PAGE_SIZE
     end = start + PAGE_SIZE
 
     chunk = media_list[start:end]
+
+    # ✅ SAFETY CHECK
+    if not chunk:
+        await message.answer("❌ Halaman kosong")
+        return
 
     group = []
 
@@ -489,14 +492,12 @@ if page > total_pages:
         else:
             group.append(InputMediaDocument(media=fid, caption=caption))
 
+    # ❌ FIX INDENTATION DI SINI
     if not group:
-    await message.answer(
-        "❌ Semua media tidak valid"
-    )
-    return
+        await message.answer("❌ Semua media tidak valid")
+        return
 
-    if group:
-        await message.answer_media_group(group)
+    await message.answer_media_group(group)
 
     keyboard = []
 
@@ -560,36 +561,33 @@ async def receive_code(message: Message, state: FSMContext):
             return
 
         # =========================
-        # PARSE MEDIA
+        # PARSE MEDIA (SAFE VERSION)
         # =========================
         raw_media = file.get("media") or file.get("file_id")
 
         if isinstance(raw_media, str):
             try:
                 raw_media = json.loads(raw_media)
-            except:
+            except Exception:
                 raw_media = []
 
-        # FIX JSON DALAM JSON
+        # FIX DOUBLE JSON ENCODE CASE
         if isinstance(raw_media, list) and len(raw_media) == 1:
             first = raw_media[0]
 
-            if (
-                isinstance(first, dict)
-                and isinstance(first.get("file_id"), str)
-            ):
+            if isinstance(first, dict) and isinstance(first.get("file_id"), str):
                 try:
                     raw_media = json.loads(first["file_id"])
-                except:
+                except Exception:
                     pass
 
-        media_list = (
-            raw_media
-            if isinstance(raw_media, list)
-            else []
-        )
+        # FINAL NORMALIZATION
+        if not isinstance(raw_media, list):
+            raw_media = []
 
-        if not media_list:
+        media_list = raw_media
+
+        if len(media_list) == 0:
             await message.answer("❌ Media kosong")
             await state.clear()
             return
@@ -597,7 +595,7 @@ async def receive_code(message: Message, state: FSMContext):
         # =========================
         # FREE FILE
         # =========================
-        if dict(file).get("type") == "free":
+        if str(file.get("type")) == "free":
 
             await send_media_page(
                 message,
@@ -618,12 +616,7 @@ async def receive_code(message: Message, state: FSMContext):
         )
 
         if not paid:
-
-            await payment_ui(
-                message,
-                file
-            )
-
+            await payment_ui(message, file)
             await state.clear()
             return
 
@@ -642,8 +635,5 @@ async def receive_code(message: Message, state: FSMContext):
     except Exception as e:
         print("FATAL GETFILE ERROR:", e)
 
-        await message.answer(
-            "❌ Terjadi error"
-        )
-
+        await message.answer("❌ Terjadi error")
         await state.clear()
