@@ -225,122 +225,161 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 # =========================
 # SEND MEDIA PAGE
 # =========================
+
+from collections import defaultdict
+import asyncio
+
+CLICK_COOLDOWN = defaultdict(float)
+USER_LOCK = defaultdict(asyncio.Lock)
+
+COOLDOWN_SEC = 0.8
+
+
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
     user_id = call.from_user.id
+    now = asyncio.get_event_loop().time()
 
-    if is_locked(user_id):
-        return await call.answer("⏳ Tunggu...", show_alert=False)
+    # =========================
+    # ANTI SPAM CLICK
+    # =========================
+    if now - CLICK_COOLDOWN[user_id] < COOLDOWN_SEC:
+        return await call.answer("⏳ Slow down", show_alert=False)
 
-    lock(user_id)
+    CLICK_COOLDOWN[user_id] = now
 
-    try:
-        _, code, page = call.data.split(":")
-        page = int(page)
+    # =========================
+    # SAFE LOCK PER USER
+    # =========================
+    lock = USER_LOCK[user_id]
 
-        pool = await get_pool()
+    if lock.locked():
+        return await call.answer("⏳ Processing...", show_alert=False)
 
-        file = await pool.fetchrow(
-            "SELECT * FROM files WHERE code=$1",
-            code
-        )
-
-        if not file:
-            return await call.answer("❌ FILE NOT FOUND", show_alert=True)
-
-        media = file.get("media") or []
-        if isinstance(media, str):
-            media = json.loads(media)
-
-        if not isinstance(media, list):
-            media = []
-
-        total = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
-
-        # 🔥 CLAMP PAGE (WAJIB)
-        page = max(1, min(page, total))
-
-        chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
-
-        if not chunk:
-            return await call.answer("❌ EMPTY PAGE", show_alert=True)
-
-        first = chunk[0]
-        fid = clean_file_id(first.get("file_id"))
-        ftype = normalize_type(first.get("type"), fid)
-
-        caption = (
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            f"▸ 𝗖𝗢𝗗𝗘 : {code}\n"
-            f"▸ 𝗣𝗔𝗚𝗘 : {page}/{total}\n"
-            f"▸ 𝗧𝗢𝗧𝗔𝗟 : {len(media)} FILE\n"
-        )
-
-        # media builder
-        if ftype == "photo":
-            media_obj = InputMediaPhoto(media=fid, caption=caption)
-        elif ftype == "video":
-            media_obj = InputMediaVideo(media=fid, caption=caption)
-        else:
-            media_obj = InputMediaDocument(media=fid, caption=caption)
-
-        # =========================
-        # BUTTONS FIX (NO PAGE 0 BUG)
-        # =========================
-        nav = []
-
-        if page > 1:
-            nav.append(
-                InlineKeyboardButton(
-                    "⬅️ PREV",
-                    callback_data=f"page:{code}:{page-1}"
-                )
-            )
-
-        if page < total:
-            nav.append(
-                InlineKeyboardButton(
-                    "NEXT ➡️",
-                    callback_data=f"page:{code}:{page+1}"
-                )
-            )
-
-        buttons = []
-
-        if nav:
-            buttons.append(nav)
-
-        buttons.append([
-            InlineKeyboardButton("📂 GROUP", callback_data=f"group:{code}")
-        ])
-
-        buttons.append([
-            InlineKeyboardButton(
-                "🔔 JOIN NOTIFIKASI",
-                url="https://t.me/+DTL9cOR34ipmM2U1"
-            )
-        ])
-
-        # =========================
-        # SMOOTH EDIT (NO CRASH)
-        # =========================
+    async with lock:
         try:
-            await call.message.edit_media(media=media_obj)
-        except:
-            pass
+            parts = call.data.split(":")
+            if len(parts) != 3:
+                return await call.answer("❌ INVALID CALLBACK", show_alert=True)
 
-        try:
-            await call.message.edit_reply_markup(
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-            )
-        except:
-            pass
+            _, code, page = parts
 
-        await call.answer()
+            try:
+                page = int(page)
+            except:
+                return await call.answer("❌ INVALID PAGE", show_alert=True)
 
-    finally:
-        unlock(user_id)
+            # =========================
+            # CACHE CHECK
+            # =========================
+            cached = get_cache(code, page)
+
+            if cached:
+                file, media, total, chunk, fid, caption, ftype = cached
+            else:
+                pool = await get_pool()
+
+                file = await pool.fetchrow(
+                    "SELECT * FROM files WHERE code=$1",
+                    code
+                )
+
+                if not file:
+                    return await call.answer("❌ FILE NOT FOUND", show_alert=True)
+
+                media = file.get("media") or []
+
+                if isinstance(media, str):
+                    try:
+                        media = json.loads(media)
+                    except:
+                        media = []
+
+                if not isinstance(media, list):
+                    media = []
+
+                total = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
+                page = max(1, min(page, total))
+
+                chunk = media[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+
+                if not chunk:
+                    return await call.answer("❌ EMPTY PAGE", show_alert=True)
+
+                first = chunk[0]
+                fid = clean_file_id(first.get("file_id"))
+
+                if not fid:
+                    return await call.answer("❌ INVALID FILE", show_alert=True)
+
+                ftype = normalize_type(first.get("type"), fid)
+
+                caption = (
+                    "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+                    "━━━━━━━━━━━━━━\n\n"
+                    f"CODE: {code}\n"
+                    f"PAGE: {page}/{total}\n"
+                    f"TOTAL: {len(media)} FILE"
+                )
+
+                set_cache(code, page, (file, media, total, chunk, fid, caption, ftype))
+
+            # =========================
+            # MEDIA BUILD
+            # =========================
+            if ftype == "photo":
+                media_obj = InputMediaPhoto(media=fid, caption=caption)
+            elif ftype == "video":
+                media_obj = InputMediaVideo(media=fid, caption=caption)
+            else:
+                media_obj = InputMediaDocument(media=fid, caption=caption)
+
+            # =========================
+            # BUTTONS BUILD
+            # =========================
+            nav = []
+
+            if page > 1:
+                nav.append(
+                    InlineKeyboardButton("⬅️ PREV", callback_data=f"page:{code}:{page-1}")
+                )
+
+            if page < total:
+                nav.append(
+                    InlineKeyboardButton("NEXT ➡️", callback_data=f"page:{code}:{page+1}")
+                )
+
+            buttons = []
+            if nav:
+                buttons.append(nav)
+
+            buttons += [
+                [InlineKeyboardButton("📂 GROUP", callback_data=f"group:{code}")],
+                [InlineKeyboardButton("🔔 JOIN NOTIF", url="https://t.me/+DTL9cOR34ipmM2U1")]
+            ]
+
+            # =========================
+            # SAFE EDIT MEDIA
+            # =========================
+            try:
+                await call.message.edit_media(media=media_obj)
+            except:
+                pass
+
+            # =========================
+            # SAFE EDIT BUTTON
+            # =========================
+            try:
+                await call.message.edit_reply_markup(
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                )
+            except:
+                pass
+
+            await call.answer()
+
+        except Exception:
+            await call.answer("❌ ERROR", show_alert=True)
 # =========================
 # RECEIVE CODE (FIXED FLOW)
 # =========================
