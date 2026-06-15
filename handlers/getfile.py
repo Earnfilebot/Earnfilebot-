@@ -244,115 +244,201 @@ file akan otomatis terbuka.
             "❌ Terjadi kesalahan saat membuat pembayaran."
         )
 
+# =========================
+# PAGE HANDLER
+# =========================
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
+    try:
+        parts = call.data.split(":")
 
-    _, code, page = call.data.split(":")
-
-    page = int(page)
-
-    pool = await get_pool()
-
-    file = await pool.fetchrow(
-        "SELECT * FROM files WHERE code=$1",
-        code
-    )
-
-    if not file:
-        await call.answer(
-            "❌ File tidak ditemukan",
-            show_alert=True
-        )
-        return
-
-    # =========================
-    # CEK AKSES PREMIUM
-    # =========================
-    if dict(file).get("type") != "free":
-
-        paid = await is_paid(
-            call.from_user.id,
-            code
-        )
-
-        if not paid:
+        if len(parts) != 3:
             await call.answer(
-                "❌ File belum dibeli",
+                "❌ Data halaman tidak valid",
                 show_alert=True
             )
             return
 
-    # =========================
-    # PARSE MEDIA
-    # =========================
-    raw_media = file.get("media") or file.get("file_id")
+        _, code, page = parts
+        page = int(page)
 
-    if isinstance(raw_media, str):
-        try:
-            raw_media = json.loads(raw_media)
-        except:
+        pool = await get_pool()
+
+        file = await pool.fetchrow(
+            "SELECT * FROM files WHERE code=$1",
+            code
+        )
+
+        if not file:
+            await call.answer(
+                "❌ File tidak ditemukan",
+                show_alert=True
+            )
+            return
+
+        # =========================
+        # CEK AKSES PREMIUM
+        # =========================
+        if dict(file).get("type") != "free":
+
+            paid = await is_paid(
+                call.from_user.id,
+                code
+            )
+
+            if not paid:
+                await call.answer(
+                    "❌ File belum dibeli",
+                    show_alert=True
+                )
+                return
+
+        # =========================
+        # PARSE MEDIA
+        # =========================
+        raw_media = (
+            file.get("media")
+            or file.get("file_id")
+        )
+
+        if isinstance(raw_media, str):
+            try:
+                raw_media = json.loads(raw_media)
+            except:
+                raw_media = []
+
+        if not isinstance(raw_media, list):
             raw_media = []
 
-    try:
-    await call.message.delete()
-except:
-    pass
+        # =========================
+        # HAPUS TOMBOL HALAMAN LAMA
+        # =========================
+        try:
+            await call.message.delete()
+        except:
+            pass
 
-    # =========================
-    # KIRIM HALAMAN
-    # =========================
-    await send_media_page(
-        call.message,
-        file,
-        raw_media,
-        page
-    )
+        # =========================
+        # KIRIM HALAMAN
+        # =========================
+        await send_media_page(
+            call.message,
+            file,
+            raw_media,
+            page
+        )
 
-    await call.answer()
+        await call.answer()
 
+    except Exception as e:
+        print("PAGE_HANDLER ERROR:", e)
+
+        await call.answer(
+            "❌ Gagal membuka halaman",
+            show_alert=True
+        )
+
+# =========================
+# GROUP HANDLER
+# =========================
 @router.callback_query(F.data.startswith("group:"))
 async def group_handler(call: CallbackQuery):
+    try:
+        parts = call.data.split(":", 1)
 
-    code = call.data.split(":")[1]
+        if len(parts) != 2:
+            await call.answer(
+                "❌ Data group tidak valid",
+                show_alert=True
+            )
+            return
 
-    await call.answer(
-        f"📂 GROUP FILE\n\n🔑 {code}",
-        show_alert=True
-    )
+        code = parts[1]
+
+        pool = await get_pool()
+
+        file = await pool.fetchrow(
+            "SELECT code, creator FROM files WHERE code=$1",
+            code
+        )
+
+        if not file:
+            await call.answer(
+                "❌ Group tidak ditemukan",
+                show_alert=True
+            )
+            return
+
+        await call.answer(
+            f"📂 GROUP FILE\n\n"
+            f"🔑 CODE : {file['code']}\n"
+            f"👤 OWNER : {file['creator']}",
+            show_alert=True
+        )
+
+    except Exception as e:
+        print("GROUP_HANDLER ERROR:", e)
+
+        await call.answer(
+            "❌ Gagal membuka informasi group",
+            show_alert=True
+        )
+
+from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 
 # =========================
 # CEK PEMBAYARAN
 # =========================
 @router.callback_query(F.data.startswith("cekpay:"))
 async def cek_pembayaran(call: CallbackQuery):
-    code = call.data.split(":")[1]
+    try:
+        parts = call.data.split(":")
 
-    paid = await is_paid(call.from_user.id, code)
+        if len(parts) < 2:
+            await call.answer("❌ Data tidak valid", show_alert=True)
+            return
 
-    if paid:
-        await call.answer(
-            "✅ Pembayaran sudah diterima.\nSilakan kirim ulang kode file.",
-            show_alert=True
-        )
-    else:
-        await call.answer(
-            "⌛ Pembayaran belum terdeteksi.",
-            show_alert=True
-        )
+        code = parts[1]
+
+        paid = await is_paid(call.from_user.id, code)
+
+        if paid:
+            await call.answer(
+                "✅ Pembayaran sudah diterima.\nSilakan kirim ulang kode file.",
+                show_alert=True
+            )
+        else:
+            await call.answer(
+                "⌛ Pembayaran belum terdeteksi.",
+                show_alert=True
+            )
+
+    except Exception as e:
+        await call.answer("❌ Terjadi error saat cek pembayaran", show_alert=True)
+        print(f"[cek_pembayaran error] {e}")
+
 
 # =========================
 # BATALKAN
 # =========================
 @router.callback_query(F.data == "cancel_payment")
 async def cancel_payment(call: CallbackQuery, state: FSMContext):
-    await state.clear()
+    try:
+        await state.clear()
 
-    await call.message.edit_text(
-        "❌ Permintaan pembayaran dibatalkan."
-    )
+        if call.message:
+            await call.message.edit_text("❌ Permintaan pembayaran dibatalkan.")
 
-    await call.answer()
+        await call.answer()
 
+    except TelegramBadRequest:
+        # kalau message sudah diedit / tidak bisa diubah
+        await call.answer("❌ Tidak bisa membatalkan pesan ini", show_alert=True)
+
+    except Exception as e:
+        await call.answer("❌ Error saat cancel", show_alert=True)
+        print(f"[cancel_payment error] {e}")
 # =========================
 # SEND MEDIA PAGE
 # =========================
