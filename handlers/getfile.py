@@ -287,36 +287,79 @@ async def page_handler(call: CallbackQuery):
 # =========================
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
+    try:
 
-    code = message.text.strip().upper()
+        # =========================
+        # VALIDASI INPUT
+        # =========================
+        if not message.text:
+            await message.answer("❌ Kirim kode file yang valid")
+            return
 
-    pool = await get_pool()
+        code = message.text.strip().upper()
 
-    file = await pool.fetchrow("SELECT * FROM files WHERE code=$1", code)
+        pool = await get_pool()
 
-    if not file:
-        await message.answer("❌ NOT FOUND")
-        return await state.clear()
+        file = await pool.fetchrow(
+            "SELECT * FROM files WHERE code=$1",
+            code
+        )
 
-    media = file.get("media") or []
-    if isinstance(media, str):
-        try:
-            media = json.loads(media)
-        except:
+        if not file:
+            await message.answer("❌ CODE TIDAK DITEMUKAN")
+            await state.clear()
+            return
+
+        # =========================
+        # AMBIL MEDIA (FIX HERE)
+        # =========================
+        media = file.get("media")
+
+        if isinstance(media, str):
+            try:
+                media = json.loads(media)
+            except:
+                media = []
+
+        if not isinstance(media, list):
             media = []
 
-    # FREE FILE
-    if file["type"] == "free":
-        await send_file(message.bot, message.from_user.id, file)
-        await state.clear()
-        return
+        if not media:
+            await message.answer("❌ File tidak punya media")
+            await state.clear()
+            return
 
-    # PAID FILE
-    if not await is_paid(message.from_user.id, code):
-        await payment_ui(message, file)
-        await state.clear()
-        return
+        # =========================
+        # FREE FILE (FIXED SECTION)
+        # =========================
+        if str(file.get("type")) == "free":
+            try:
+                await send_media_page(message, file, media, 1)
 
-    # UNLOCK
-    await send_file(message.bot, message.from_user.id, file)
-    await state.clear()
+            except Exception as e:
+                print("FREE FILE ERROR:", e)
+                await message.answer("❌ Gagal membuka file free")
+
+            await state.clear()
+            return
+
+        # =========================
+        # PAID FILE
+        # =========================
+        paid = await is_paid(message.from_user.id, code)
+
+        if not paid:
+            await payment_ui(message, file)
+            await state.clear()
+            return
+
+        # =========================
+        # UNLOCKED PAID
+        # =========================
+        await send_media_page(message, file, media, 1)
+        await state.clear()
+
+    except Exception as e:
+        print("GETFILE ERROR:", e)
+        await message.answer("❌ Terjadi error")
+        await state.clear()
