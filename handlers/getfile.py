@@ -228,6 +228,7 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 
 from collections import defaultdict
 import asyncio
+import json
 
 CLICK_COOLDOWN = defaultdict(float)
 USER_LOCK = defaultdict(asyncio.Lock)
@@ -241,16 +242,13 @@ async def page_handler(call: CallbackQuery):
     now = asyncio.get_event_loop().time()
 
     # =========================
-    # ANTI SPAM CLICK
+    # ANTI SPAM
     # =========================
     if now - CLICK_COOLDOWN[user_id] < COOLDOWN_SEC:
         return await call.answer("⏳ Slow down", show_alert=False)
 
     CLICK_COOLDOWN[user_id] = now
 
-    # =========================
-    # SAFE LOCK PER USER
-    # =========================
     lock = USER_LOCK[user_id]
 
     if lock.locked():
@@ -270,7 +268,7 @@ async def page_handler(call: CallbackQuery):
                 return await call.answer("❌ INVALID PAGE", show_alert=True)
 
             # =========================
-            # CACHE CHECK
+            # CACHE
             # =========================
             cached = get_cache(code, page)
 
@@ -317,15 +315,15 @@ async def page_handler(call: CallbackQuery):
                 caption = (
                     "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
                     "━━━━━━━━━━━━━━\n\n"
-                    f"CODE: {code}\n"
-                    f"PAGE: {page}/{total}\n"
-                    f"TOTAL: {len(media)} FILE"
+                    f"CODE : {code}\n"
+                    f"PAGE : {page}/{total}\n"
+                    f"TOTAL : {len(media)} FILE"
                 )
 
                 set_cache(code, page, (file, media, total, chunk, fid, caption, ftype))
 
             # =========================
-            # MEDIA BUILD
+            # MEDIA
             # =========================
             if ftype == "photo":
                 media_obj = InputMediaPhoto(media=fid, caption=caption)
@@ -335,28 +333,42 @@ async def page_handler(call: CallbackQuery):
                 media_obj = InputMediaDocument(media=fid, caption=caption)
 
             # =========================
-            # BUTTONS BUILD
+            # BUTTONS (FIX AIogram v3)
             # =========================
             nav = []
 
             if page > 1:
                 nav.append(
-                    InlineKeyboardButton("⬅️ PREV", callback_data=f"page:{code}:{page-1}")
+                    InlineKeyboardButton(
+                        text="⬅️ PREV",
+                        callback_data=f"page:{code}:{page-1}"
+                    )
                 )
 
             if page < total:
                 nav.append(
-                    InlineKeyboardButton("NEXT ➡️", callback_data=f"page:{code}:{page+1}")
+                    InlineKeyboardButton(
+                        text="NEXT ➡️",
+                        callback_data=f"page:{code}:{page+1}"
+                    )
                 )
 
             buttons = []
+
             if nav:
                 buttons.append(nav)
 
-            buttons += [
-                [InlineKeyboardButton("📂 GROUP", callback_data=f"group:{code}")],
-                [InlineKeyboardButton("🔔 JOIN NOTIF", url="https://t.me/+DTL9cOR34ipmM2U1")]
-            ]
+            buttons.extend([
+                [
+                    InlineKeyboardButton(text="📂 GROUP", callback_data=f"group:{code}")
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔔 JOIN NOTIF",
+                        url="https://t.me/+DTL9cOR34ipmM2U1"
+                    )
+                ]
+            ])
 
             # =========================
             # SAFE EDIT MEDIA
@@ -366,9 +378,6 @@ async def page_handler(call: CallbackQuery):
             except:
                 pass
 
-            # =========================
-            # SAFE EDIT BUTTON
-            # =========================
             try:
                 await call.message.edit_reply_markup(
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
