@@ -13,12 +13,13 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     }
 
     headers = {
-        "Authorization": f"Bearer {BAYARGG_API_KEY}",
-        "Content-Type": "application/json"
+        "X-API-Key": str(BAYARGG_API_KEY).strip(),
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, json=payload, headers=headers)
 
         print("===== BAYARGG DEBUG =====")
@@ -26,40 +27,18 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("RESPONSE:", r.text)
         print("=========================")
 
-        if not r.text:
-            print("❌ EMPTY RESPONSE")
-            return None
-
-        try:
-            data = r.json()
-        except Exception:
-            print("❌ INVALID JSON RESPONSE")
-            return None
-
         if r.status_code != 200:
-            print("❌ HTTP ERROR:", data)
+            print("❌ HTTP ERROR")
             return None
 
-        result = data.get("data") or data.get("result") or data
+        data = r.json()
+        result = data.get("data") or data
 
-        if not isinstance(result, dict):
-            print("❌ INVALID RESULT FORMAT:", result)
-            return None
-
-        checkout_url = (
-            result.get("checkout_url")
-            or result.get("payment_url")
-            or result.get("url")
-        )
-
-        reference = (
-            result.get("reference")
-            or result.get("id")
-            or result.get("transaction_id")
-        )
+        checkout_url = result.get("checkout_url") or result.get("payment_url")
+        reference = result.get("reference") or result.get("id")
 
         if not checkout_url or not reference:
-            print("❌ MISSING FIELD:", result)
+            print("❌ MISSING FIELD")
             return None
 
         print("✅ INVOICE SUCCESS")
@@ -75,10 +54,6 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     except httpx.TimeoutException:
         print("❌ TIMEOUT ERROR")
-        return None
-
-    except httpx.RequestError as e:
-        print("❌ REQUEST ERROR:", str(e))
         return None
 
     except Exception as e:
