@@ -1,21 +1,30 @@
 import asyncio
-from handlers import admin
+import logging
 
 from aiogram import Bot, Dispatcher
 
 from config import BOT_TOKEN
 from database import connect_db
 
-from handlers.payment import router as payment_router
-from handlers.check_sub import router as check_sub_router
+# =========================
+# ROUTERS
+# =========================
 from handlers.start import router as start_router
+from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
 from handlers.getfile import router as getfile_router
+from handlers.payment import router as payment_router
 from handlers.admin import router as admin_router
 
+# =========================
+# INIT
+# =========================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# =========================
+# REGISTER ROUTERS
+# =========================
 dp.include_router(start_router)
 dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
@@ -24,10 +33,24 @@ dp.include_router(payment_router)
 dp.include_router(admin_router)
 
 
+# =========================
+# START BOT
+# =========================
 async def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s"
+    )
+
     await connect_db()
+    logging.info("DATABASE CONNECTED")
+
+    logging.info("BOT STARTED")
     await dp.start_polling(bot)
 
 
+# =========================
+# ENTRY POINT
+# =========================
 if __name__ == "__main__":
     asyncio.run(main())
