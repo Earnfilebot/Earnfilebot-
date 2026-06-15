@@ -8,7 +8,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 BAYARGG_API_KEY = os.getenv("BAYARGG_API_KEY")
 
 # 🔥 FIX ENDPOINT
-BAYARGG_BASE_URL = "https://api.bayar.gg/api"
+BAYARGG_BASE_URL = "https://www.bayar.gg/api"
 
 # =========================
 # VALIDASI
