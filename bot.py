@@ -10,6 +10,7 @@ from handlers.check_sub import router as check_sub_router
 from handlers.start import router as start_router
 from handlers.upfile import router as upfile_router
 from handlers.getfile import router as getfile_router
+from handlers.admin import router as admin_router
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -19,6 +20,7 @@ dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
 dp.include_router(getfile_router)
 dp.include_router(payment_router)
+dp.include_router(admin_router)
 
 
 async def main():
