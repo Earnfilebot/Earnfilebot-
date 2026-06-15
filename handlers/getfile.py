@@ -127,14 +127,13 @@ async def payment_ui(message: Message, file):
         user_id=message.from_user.id
     )
 
-    invoice_data = invoice.get("data")
-
-    if not invoice_data:
+    # Invoice gagal dibuat
+    if invoice is None:
         await message.answer("❌ Gagal membuat invoice")
         return
 
-    pay_url = invoice_data.get("checkout_url")
-    reference = invoice_data.get("reference")
+    pay_url = invoice.get("checkout_url")
+    reference = invoice.get("reference")
 
     if not pay_url or not reference:
         await message.answer("❌ Invoice invalid")
@@ -146,6 +145,7 @@ async def payment_ui(message: Message, file):
         """
         INSERT INTO payments (user_id, code, reference, status)
         VALUES ($1,$2,$3,'pending')
+        ON CONFLICT DO NOTHING
         """,
         message.from_user.id,
         file["code"],
@@ -289,7 +289,7 @@ async def receive_code(message: Message, state: FSMContext):
         # =========================
         # FREE
         # =========================
-        if file.get("type") == "free":
+        if dict(file).get("type") == "free":
             await safe_send()
             await state.clear()
             return
