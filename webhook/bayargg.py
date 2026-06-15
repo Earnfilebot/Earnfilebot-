@@ -7,7 +7,7 @@ from bot import bot
 
 router = APIRouter()
 
-BAYARGG_SECRET = "ISI_SECRET_KAMU"  # dari dashboard BayarGG
+BAYARGG_SECRET = "whsec_81c259f2d3291e377957b7b56155683290aacc63e41a0df2"  # dari dashboard BayarGG
 
 
 # =========================
