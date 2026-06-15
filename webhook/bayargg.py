@@ -1,13 +1,9 @@
-from fastapi import FastAPI, Request
-from database import get_pool
-
-app = FastAPI()
-
-
 @app.post("/webhook/bayargg")
-async def bayargg_webhook(req: Request):
-    data = await req.json()
-    print("WEBHOOK MASUK:", data)  # 🔥 DEBUG
+async def webhook(req: Request):
+    raw = await req.body()
+    data = json.loads(raw)
+
+    print("WEBHOOK:", data)
 
     payload = data.get("data", data)
 
@@ -15,23 +11,76 @@ async def bayargg_webhook(req: Request):
     status = payload.get("status")
 
     if not reference or not status:
-        print("❌ DATA INVALID")
+        return {"ok": False}
+
+    # =========================
+    # ANTI FAKE SIGNATURE
+    # =========================
+    signature = req.headers.get("X-BAYARGG-SIGNATURE")
+
+    expected = hmac.new(
+        BAYARGG_SECRET.encode(),
+        raw,
+        hashlib.sha256
+    ).hexdigest()
+
+    if signature and not hmac.compare_digest(signature, expected):
+        print("❌ FAKE WEBHOOK BLOCKED")
+        return {"ok": False}
+
+    # =========================
+    # PARSE USER
+    # =========================
+    user_id, code = parse_reference(reference)
+
+    if not user_id:
         return {"ok": False}
 
     pool = await get_pool()
 
-    if status.lower() == "success":
-        await pool.execute(
-            """
+    # =========================
+    # PAID EVENT
+    # =========================
+    if status.upper() == "PAID":
+
+        # update payment
+        await pool.execute("""
             UPDATE payments
             SET status='paid'
-            WHERE reference=$1
-            """,
-            reference
-        )
-        print("✅ PAYMENT UPDATED:", reference)
+            WHERE user_id=$1 AND code=$2
+        """, user_id, code)
 
-    else:
-        print("⏳ STATUS:", status)
+        # get file
+        file = await pool.fetchrow(
+            "SELECT * FROM files WHERE code=$1",
+            code
+        )
+
+        if not file:
+            return {"ok": False}
+
+        media = file.get("media") or []
+        if isinstance(media, str):
+            media = json.loads(media)
+
+        # =========================
+        # AUTO UNLOCK (REAL TIME)
+        # =========================
+        await bot.send_message(
+            user_id,
+            "✅ PAYMENT SUCCESS\n🔓 FILE UNLOCKED"
+        )
+
+        for m in media[:10]:
+            try:
+                fid = decrypt(m["file_id"])  # 🔐 anti leak
+                await bot.send_document(user_id, fid)
+            except:
+                pass
+
+        # =========================
+        # RESELLER PROFIT
+        # =========================
+        await give_commission(pool, user_id, file["price"])
 
     return {"ok": True}
