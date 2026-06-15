@@ -11,7 +11,8 @@ from aiogram.types import (
     InputMediaVideo,
     InputMediaDocument,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    BufferedInputFile
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -48,15 +49,11 @@ def clean_file_id(fid):
     if not isinstance(fid, str):
         return None
 
-    fid = fid.strip()
-    if len(fid) < 20:
-        return None
-
-    return fid
+    return fid.strip() if len(fid.strip()) > 20 else None
 
 
 # =========================
-# TYPE
+# TYPE NORMALIZER
 # =========================
 def normalize_type(ftype, file_id):
     if ftype:
@@ -88,10 +85,10 @@ async def is_paid(user_id, code):
 
 
 # =========================
-# SEND FILE
+# SEND FILE (AUTO UNLOCK)
 # =========================
 async def send_file(bot, user_id, file):
-    media = file.get("media") or file.get("file_id")
+    media = file.get("media") or []
 
     if isinstance(media, str):
         try:
@@ -112,7 +109,7 @@ async def send_file(bot, user_id, file):
 
 
 # =========================
-# REALTIME WATCHER
+# PAYMENT WATCHER (REALTIME)
 # =========================
 async def watch_payment(message, code, file, msg_id):
     for _ in range(60):  # 10 menit
@@ -130,7 +127,7 @@ async def watch_payment(message, code, file, msg_id):
 
 
 # =========================
-# PAYMENT UI (QR)
+# PAYMENT UI (QR FIXED)
 # =========================
 async def payment_ui(message: Message, file):
     pool = await get_pool()
@@ -157,23 +154,25 @@ async def payment_ui(message: Message, file):
         message.from_user.id, file["code"], reference
     )
 
+    # QR FIX AIogram v3
     qr = qrcode.make(pay_url)
     bio = BytesIO()
-    bio.name = "qr.png"
-    qr.save(bio)
+    qr.save(bio, format="PNG")
     bio.seek(0)
+
+    photo = BufferedInputFile(bio.read(), filename="qris.png")
 
     price = int(file.get("price") or 0)
 
     msg = await message.answer_photo(
-        photo=bio,
+        photo=photo,
         caption=(
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
             "🔒 PAYMENT REQUIRED\n"
             "━━━━━━━━━━━━━━\n"
             f"🔑 CODE : {file['code']}\n"
             f"💰 PRICE : Rp{price:,}\n\n"
-            "📌 SCAN QR"
+            "📌 SCAN QR UNTUK BAYAR"
         )
     )
 
@@ -188,21 +187,23 @@ async def payment_ui(message: Message, file):
 @router.callback_query(F.data == "getfile")
 async def getfile_start(call: CallbackQuery, state: FSMContext):
     await state.set_state(GetFileState.wait_code)
-    await call.message.answer("🔑 KIRIM KODE FILE")
+
+    await call.message.answer(
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n🔑 KIRIM KODE FILE"
+    )
+
     await call.answer()
 
 
 # =========================
-# SEND PAGE (FIXED)
+# SEND MEDIA PAGE (FIXED NAV)
 # =========================
 async def send_media_page(message, file, media_list, page=1):
 
     total = max(1, (len(media_list) + PAGE_SIZE - 1) // PAGE_SIZE)
-
     page = max(1, min(page, total))
 
-    start = (page - 1) * PAGE_SIZE
-    chunk = media_list[start:start + PAGE_SIZE]
+    chunk = media_list[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
 
     group = []
 
@@ -251,115 +252,54 @@ async def send_media_page(message, file, media_list, page=1):
 
 
 # =========================
-# PAGE HANDLER
+# RECEIVE CODE (FIXED FREE + PAID)
 # =========================
-@router.callback_query(F.data.startswith("page:"))
-async def page_handler(call: CallbackQuery):
-    _, code, page = call.data.split(":")
-    page = int(page)
+@router.message(GetFileState.wait_code)
+async def receive_code(message: Message, state: FSMContext):
+
+    if not message.text:
+        return await message.answer("❌ Kirim kode file")
+
+    code = message.text.strip().upper()
 
     pool = await get_pool()
 
-    file = await pool.fetchrow("SELECT * FROM files WHERE code=$1", code)
+    file = await pool.fetchrow(
+        "SELECT * FROM files WHERE code=$1",
+        code
+    )
 
     if not file:
-        return await call.answer("NOT FOUND", show_alert=True)
-
-    if file["type"] != "free":
-        if not await is_paid(call.from_user.id, code):
-            return await call.answer("BELUM BAYAR", show_alert=True)
+        await message.answer("❌ CODE TIDAK DITEMUKAN")
+        await state.clear()
+        return
 
     media = file.get("media") or []
+
     if isinstance(media, str):
         try:
             media = json.loads(media)
         except:
             media = []
 
-    await call.message.delete()
+    if not isinstance(media, list):
+        media = []
 
-    await send_media_page(call.message, file, media, page)
-    await call.answer()
-
-
-# =========================
-# RECEIVE CODE (MAIN FIX)
-# =========================
-@router.message(GetFileState.wait_code)
-async def receive_code(message: Message, state: FSMContext):
-    try:
-
-        # =========================
-        # VALIDASI INPUT
-        # =========================
-        if not message.text:
-            await message.answer("❌ Kirim kode file yang valid")
-            return
-
-        code = message.text.strip().upper()
-
-        pool = await get_pool()
-
-        file = await pool.fetchrow(
-            "SELECT * FROM files WHERE code=$1",
-            code
-        )
-
-        if not file:
-            await message.answer("❌ CODE TIDAK DITEMUKAN")
-            await state.clear()
-            return
-
-        # =========================
-        # AMBIL MEDIA (FIX HERE)
-        # =========================
-        media = file.get("media")
-
-        if isinstance(media, str):
-            try:
-                media = json.loads(media)
-            except:
-                media = []
-
-        if not isinstance(media, list):
-            media = []
-
-        if not media:
-            await message.answer("❌ File tidak punya media")
-            await state.clear()
-            return
-
-        # =========================
-        # FREE FILE (FIXED SECTION)
-        # =========================
-        if str(file.get("type")) == "free":
-            try:
-                await send_media_page(message, file, media, 1)
-
-            except Exception as e:
-                print("FREE FILE ERROR:", e)
-                await message.answer("❌ Gagal membuka file free")
-
-            await state.clear()
-            return
-
-        # =========================
-        # PAID FILE
-        # =========================
-        paid = await is_paid(message.from_user.id, code)
-
-        if not paid:
-            await payment_ui(message, file)
-            await state.clear()
-            return
-
-        # =========================
-        # UNLOCKED PAID
-        # =========================
+    # =========================
+    # FREE FILE FIX (NO DEAD BOT)
+    # =========================
+    if str(file.get("type")) == "free":
         await send_media_page(message, file, media, 1)
         await state.clear()
+        return
 
-    except Exception as e:
-        print("GETFILE ERROR:", e)
-        await message.answer("❌ Terjadi error")
+    # =========================
+    # PAID FILE
+    # =========================
+    if not await is_paid(message.from_user.id, code):
+        await payment_ui(message, file)
         await state.clear()
+        return
+
+    await send_media_page(message, file, media, 1)
+    await state.clear()
