@@ -3,7 +3,7 @@ import string
 import json
 import asyncio
 
-from aiogram import Router, F, Bot
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -24,7 +24,14 @@ class UploadState(StatesGroup):
 
 
 # =========================
-# ENTRY UPFILE
+# GENERATE CODE
+# =========================
+def generate_code():
+    return "EF_" + "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
+
+
+# =========================
+# START UPFILE
 # =========================
 @router.callback_query(F.data == "upfile")
 async def start_upfile(call: CallbackQuery, state: FSMContext):
@@ -38,21 +45,11 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
     await state.update_data(
         media=[],
         upload_mode=True,
-        preview_msg_id=msg.message_id
+        preview_msg_id=msg.message_id,
+        saved=False
     )
 
     await call.answer()
-# =========================
-# GENERATE CODE
-# =========================
-def generate_code():
-    return "EF_" + "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
-
-
-# =========================
-# BUFFER MEDIA GROUP
-# =========================
-media_buffer = {}
 
 
 # =========================
@@ -62,6 +59,7 @@ media_buffer = {}
 async def receive_media(message: Message, state: FSMContext):
 
     data = await state.get_data()
+
     if not data.get("upload_mode"):
         return
 
@@ -75,10 +73,9 @@ async def receive_media(message: Message, state: FSMContext):
         fid = message.photo[-1].file_id
         ftype = "photo"
 
-    item = {"file_id": fid, "type": ftype}
-
     media = data.get("media", [])
-    media.append(item)
+    media.append({"file_id": fid, "type": ftype})
+
     await state.update_data(media=media)
 
     try:
@@ -88,13 +85,13 @@ async def receive_media(message: Message, state: FSMContext):
 
     total = len(media)
 
-    text = f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
-
-📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚
-────────────────
-📊 𝗖𝗢𝗨𝗡𝗧 : {total}
-"""
+    text = (
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚\n"
+        "──────────────────\n"
+        f"📊 COUNT : {total}"
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="💾 SAVE", callback_data="save_upfile")
@@ -113,6 +110,8 @@ async def receive_media(message: Message, state: FSMContext):
             )
         except:
             pass
+
+
 # =========================
 # CANCEL
 # =========================
@@ -120,10 +119,11 @@ async def receive_media(message: Message, state: FSMContext):
 async def cancel(call: CallbackQuery, state: FSMContext):
 
     await state.clear()
-
     await call.answer("Upload dibatalkan", show_alert=True)
 
-    await call.message.edit_text("𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n❌ CANCELLED")
+    await call.message.edit_text(
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n❌ CANCELLED"
+    )
 
 
 # =========================
@@ -150,6 +150,8 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
     )
 
     await call.answer()
+
+
 # =========================
 # TYPE HANDLER
 # =========================
@@ -166,11 +168,10 @@ async def set_type(call: CallbackQuery, state: FSMContext):
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n💰 MASUKKAN HARGA"
         )
     else:
-        # langsung save kalau FREE
-        await save_file(call.message, state)
-        await state.update_data(upload_mode=False)
+        await finalize_save(call.message, state)
 
     await call.answer()
+
 
 # =========================
 # PRICE INPUT
@@ -181,12 +182,9 @@ async def input_price(message: Message, state: FSMContext):
     raw = "".join(filter(str.isdigit, message.text or ""))
 
     if not raw:
-        await message.answer("❌ Format salah")
-        return
+        return await message.answer("❌ Format salah")
 
-    price = int(raw)
-
-    await state.update_data(price=price)
+    await state.update_data(price=int(raw))
 
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ DONE", callback_data="done_upfile")
@@ -206,37 +204,33 @@ async def input_price(message: Message, state: FSMContext):
 async def done(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
-    media = data.get("media", [])
 
-    if not media:
+    if data.get("saved"):
+        return await call.answer("⚠️ Sudah tersimpan", show_alert=True)
+
+    if not data.get("media"):
         return await call.answer("❌ No media", show_alert=True)
 
-    await show_progress(call.message, len(media))
+    await state.update_data(saved=True)
 
-    # prevent double execution
-    if not data.get("upload_mode"):
-        return await call.answer("⚠️ Already processed", show_alert=False)
+    await show_progress(call.message, len(data["media"]))
 
-    await state.update_data(upload_mode=False)
-
-    await save_file(call.message, state)
+    await finalize_save(call.message, state)
 
     await call.answer()
+
+
 # =========================
-# SAVE CORE
+# SAVE CORE (FIXED)
 # =========================
-async def save_file(message: Message, state: FSMContext):
+async def finalize_save(message: Message, state: FSMContext):
 
     pool = await get_pool()
-    bot = message.bot
-
     data = await state.get_data()
 
     media = data.get("media", [])
     if not media:
         return
-
-    media_json = json.dumps(media)
 
     file_type = data.get("type", "free")
     price = data.get("price", 0)
@@ -250,7 +244,7 @@ async def save_file(message: Message, state: FSMContext):
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         """,
         code,
-        media_json,
+        json.dumps(media),
         user.id,
         len(media),
         price,
@@ -265,10 +259,10 @@ async def save_file(message: Message, state: FSMContext):
         "━━━━━━━━━━━━━━━━━━\n\n"
         "📦 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗\n"
         "──────────────────\n\n"
-        f"🔑 𝗖𝗢𝗗𝗘   : <code>{code}</code>\n"
-        f"📊 𝗠𝗘𝗗𝗜𝗔  : {len(media)} FILE\n"
-        f"💰 𝗧𝗬𝗣𝗘   : {file_type.upper()}\n"
-        f"👤 𝗢𝗪𝗡𝗘𝗥  : {user.full_name}\n\n"
+        f"🔑 CODE : <code>{code}</code>\n"
+        f"📊 MEDIA : {len(media)} FILE\n"
+        f"💰 TYPE : {file_type.upper()}\n"
+        f"👤 OWNER : {user.full_name}\n"
         "━━━━━━━━━━━━━━━━━━"
     )
 
@@ -278,27 +272,22 @@ async def save_file(message: Message, state: FSMContext):
         await message.answer(text, parse_mode="HTML")
 
     try:
-        await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+        await message.bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
     except:
         pass
+
+
 # =========================
 # PROGRESS
 # =========================
 async def show_progress(message, total):
 
     for i in range(1, total + 1):
-
-        text = f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
-
-⏳ 𝗨𝗣𝗟𝗢𝗔𝗗𝗜𝗡𝗚
-────────────────
-📊 {i}/{total}
-"""
-
         try:
-            await message.edit_text(text)
+            await message.edit_text(
+                f"𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n⏳ UPLOADING\n📊 {i}/{total}"
+            )
         except:
             pass
 
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.12)
