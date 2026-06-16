@@ -1,6 +1,6 @@
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from utils.force_sub import check_force_sub
@@ -13,29 +13,11 @@ from utils.ui_manager import set_ui, USER_UI
 router = Router()
 
 
-@router.message(CommandStart())
-async def start_cmd(message: Message, state: FSMContext):
+# =========================
+# RENDER HOME (CORE UI)
+# =========================
+async def render_home(bot, message, user_id, username):
 
-    # 🔥 RESET STATE (anti upfile nyangkut)
-    await state.clear()
-
-    user_id = message.from_user.id
-    username = message.from_user.username
-    bot = message.bot
-
-    # =========================
-    # FORCE SUB CHECK
-    # =========================
-    if not await check_force_sub(bot, user_id):
-        await message.answer(
-            "❌ Kamu belum join semua channel.\n\nSilakan join dulu lalu klik CHECK.",
-            reply_markup=join_kb()
-        )
-        return
-
-    # =========================
-    # DATABASE USER
-    # =========================
     pool = await get_pool()
 
     await pool.execute(
@@ -54,24 +36,20 @@ async def start_cmd(message: Message, state: FSMContext):
         user_id
     )
 
-    balance = user["balance"] if user and user["balance"] is not None else 0
+    balance = user["balance"] if user and user["balance"] else 0
 
     # =========================
-    # CLEAN HOME UI TEXT
+    # CLEAN FONT (CONSISTENT)
     # =========================
-    text = f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
+    text = (
+        "EARNFILEBOX\n\n"
+        "HOME DASHBOARD\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"ID : {user_id}\n"
+        f"BALANCE : Rp{balance}\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
 
-🆔 𝗜𝗗 : {user_id}
-💰 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 : Rp{balance}
-
-────────────────
-𝗖𝗢𝗣𝗬𝗥𝗜𝗚𝗛𝗧 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
-"""
-
-    # =========================
-    # UI MANAGER (AUTO REPLACE SYSTEM)
-    # =========================
     ui = USER_UI.get(user_id)
 
     if ui:
@@ -84,15 +62,49 @@ async def start_cmd(message: Message, state: FSMContext):
             )
             return
         except:
-            # kalau gagal, reset UI
             USER_UI.pop(user_id, None)
 
-    # =========================
-    # FIRST TIME UI CREATE
-    # =========================
-    msg = await message.answer(
-        text,
-        reply_markup=home_kb()
-    )
-
+    msg = await message.answer(text, reply_markup=home_kb())
     await set_ui(user_id, msg.chat.id, msg.message_id)
+
+
+# =========================
+# START COMMAND
+# =========================
+@router.message(CommandStart())
+async def start_cmd(message: Message, state: FSMContext):
+
+    await state.clear()
+
+    user_id = message.from_user.id
+    username = message.from_user.username or "unknown"
+    bot = message.bot
+
+    # FORCE SUB
+    if not await check_force_sub(bot, user_id):
+        await message.answer(
+            "EARNFILEBOX\n\n"
+            "STATUS : JOIN REQUIRED\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "Silakan join semua channel terlebih dahulu",
+            reply_markup=join_kb()
+        )
+        return
+
+    await render_home(bot, message, user_id, username)
+
+
+# =========================
+# HOME BUTTON
+# =========================
+@router.callback_query(F.data == "home")
+async def back_home(call: CallbackQuery, state: FSMContext):
+
+    await state.clear()
+
+    user_id = call.from_user.id
+    username = call.from_user.username or "unknown"
+
+    await render_home(call.bot, call.message, user_id, username)
+
+    await call.answer()
