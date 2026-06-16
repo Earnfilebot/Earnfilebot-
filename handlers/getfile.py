@@ -344,16 +344,26 @@ async def receive_code(message: Message, state: FSMContext):
     if isinstance(media, str):
         try:
             media = json.loads(media)
-        except:
+        except Exception:
             media = []
+
+    if not media:
+        await message.answer("❌ FILE TIDAK MEMILIKI MEDIA")
+        await state.clear()
+        return
 
     total = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
 
     chunk = media[:PAGE_SIZE]
 
     first = chunk[0]
+
     fid = clean_file_id(first.get("file_id"))
-    ftype = normalize_type(first.get("type"), fid)
+
+    if not fid:
+        await message.answer("❌ FILE ID TIDAK VALID")
+        await state.clear()
+        return
 
     caption = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
@@ -363,16 +373,26 @@ async def receive_code(message: Message, state: FSMContext):
         f"TOTAL : {len(media)} FILE"
     )
 
-    nav = [
-        [
-            InlineKeyboardButton("NEXT ➡️", callback_data=f"page:{code}:2")
-        ],
-        [
-            InlineKeyboardButton("📂 GROUP", callback_data=f"group:{code}")
-        ]
-    ]
+    nav = []
 
-    markup = InlineKeyboardMarkup(inline_keyboard=nav)
+    if total > 1:
+        nav.append([
+            InlineKeyboardButton(
+                text="NEXT ➡️",
+                callback_data=f"page:{code}:2"
+            )
+        ])
+
+    nav.append([
+        InlineKeyboardButton(
+            text="📂 GROUP",
+            callback_data=f"group:{code}"
+        )
+    ])
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=nav
+    )
 
     await message.answer_photo(
         photo=fid,
