@@ -230,10 +230,46 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 # =========================
 # RECEIVE CODE (FIXED FLOW)
 # =========================
+import json
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+
+from database import get_pool
+
+router = Router()
+
+# =========================
+# STATE IMPORT (kalau kamu pakai FSM)
+# =========================
+from states import GetFileState  # sesuaikan kalau beda
+
+
+# =========================
+# UTIL
+# =========================
+def safe_json(data):
+    if isinstance(data, str):
+        try:
+            return json.loads(data)
+        except:
+            return []
+    return data or []
+
+
+def get_first_media(media):
+    if not media:
+        return None
+    return media[0]
+
+
+# =========================
+# ENTRY GET FILE
+# =========================
 @router.message(GetFileState.wait_code)
-async def receive_code(message: Message, state: FSMContext):
+async def receive_code(message: Message, state):
 
     code = message.text.strip().upper()
+    user_id = message.from_user.id
 
     pool = await get_pool()
 
@@ -247,65 +283,219 @@ async def receive_code(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    media = file.get("media") or []
-
-    if isinstance(media, str):
-        try:
-            media = json.loads(media)
-        except Exception:
-            media = []
+    # =========================
+    # PARSE DATA
+    # =========================
+    media = safe_json(file.get("media"))
+    file_type = file.get("type", "free")
+    price = file.get("price", 0)
 
     if not media:
-        await message.answer("❌ FILE TIDAK MEMILIKI MEDIA")
+        await message.answer("❌ FILE KOSONG")
         await state.clear()
         return
 
-    total = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
-
-    chunk = media[:PAGE_SIZE]
-
-    first = chunk[0]
-
-    fid = clean_file_id(first.get("file_id"))
+    first = get_first_media(media)
+    fid = first.get("file_id")
+    ftype = (first.get("type") or "document").lower()
 
     if not fid:
-        await message.answer("❌ FILE ID TIDAK VALID")
+        await message.answer("❌ FILE INVALID")
         await state.clear()
         return
+
+    # =========================
+    # ACCESS CHECK (PAID SYSTEM)
+    # =========================
+    if file_type == "paid":
+        access = await pool.fetchrow(
+            """
+            SELECT 1 FROM user_access
+            WHERE user_id=$1 AND code=$2 AND paid=true
+            """,
+            user_id, code
+        )
+
+        if not access:
+
+            # cek invoice aktif
+            pending = await pool.fetchrow(
+                """
+                SELECT * FROM payments
+                WHERE user_id=$1 AND code=$2 AND status='pending'
+                """,
+                user_id, code
+            )
+
+            if pending:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="⏳ MENUNGGU PEMBAYARAN",
+                            callback_data="noop"
+                        )
+                    ]
+                ])
+                await message.answer(
+                    "⏳ INVOICE MASIH AKTIF\nSelesaikan pembayaran terlebih dahulu."
+                )
+                await state.clear()
+                return
+
+            # tombol BUY
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"💰 BUY ACCESS ({price})",
+                        callback_data=f"buy:{code}"
+                    )
+                ]
+            ])
+
+            await message.answer(
+                "🔒 FILE BERBAYAR\n\nKlik untuk membeli akses.",
+                reply_markup=keyboard
+            )
+
+            await state.clear()
+            return
+
+    # =========================
+    # PAGE ENTRY BUTTON
+    # =========================
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📂 OPEN FILE",
+                callback_data=f"page:{code}:1"
+            )
+        ]
+    ])
 
     caption = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-        "━━━━━━━━━━━━━━\n\n"
-        f"CODE : {code}\n"
-        f"PAGE : 1/{total}\n"
-        f"TOTAL : {len(media)} FILE"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔑 CODE : {code}\n"
+        f"📊 TOTAL : {len(media)} FILE\n"
+        f"💰 TYPE : {file_type.upper()}"
     )
 
-    nav = []
+    try:
+        if ftype == "photo":
+            await message.answer_photo(fid, caption=caption, reply_markup=keyboard)
 
-    if total > 1:
-        nav.append([
-            InlineKeyboardButton(
-                text="NEXT ➡️",
-                callback_data=f"page:{code}:2"
-            )
-        ])
+        elif ftype == "video":
+            await message.answer_video(fid, caption=caption, reply_markup=keyboard)
 
-    nav.append([
-        InlineKeyboardButton(
-            text="📂 GROUP",
-            callback_data=f"group:{code}"
-        )
-    ])
+        else:
+            await message.answer_document(fid, caption=caption, reply_markup=keyboard)
 
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=nav
-    )
-
-    await message.answer_photo(
-        photo=fid,
-        caption=caption,
-        reply_markup=markup
-    )
+    except Exception as e:
+        await message.answer(f"❌ ERROR: {e}")
 
     await state.clear()
+
+
+# =========================
+# BUY HANDLER (INLINE)
+# =========================
+@router.callback_query(F.data.startswith("buy:"))
+async def buy_access(call: CallbackQuery):
+
+    code = call.data.split(":")[1]
+    user_id = call.from_user.id
+
+    pool = await get_pool()
+
+    file = await pool.fetchrow(
+        "SELECT * FROM files WHERE code=$1",
+        code
+    )
+
+    if not file:
+        return await call.answer("FILE NOT FOUND", show_alert=True)
+
+    price = file["price"]
+
+    # anti double invoice
+    exist = await pool.fetchrow(
+        """
+        SELECT 1 FROM payments
+        WHERE user_id=$1 AND code=$2 AND status='pending'
+        """,
+        user_id, code
+    )
+
+    if exist:
+        return await call.answer("⚠️ INVOICE MASIH AKTIF", show_alert=True)
+
+    invoice_id = f"INV_{user_id}_{code}"
+
+    await pool.execute(
+        """
+        INSERT INTO payments (user_id, code, amount, status, provider, invoice_id)
+        VALUES ($1,$2,$3,'pending','qris',$4)
+        """,
+        user_id, code, price, invoice_id
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="💳 BAYAR SEKARANG",
+                callback_data=f"pay:{invoice_id}"
+            )
+        ]
+    ])
+
+    await call.message.edit_text(
+        f"💰 INVOICE\n\nCODE: {code}\nTOTAL: {price}",
+        reply_markup=keyboard
+    )
+
+    await call.answer()
+
+
+# =========================
+# PAYMENT SUCCESS SIMULATION
+# =========================
+@router.callback_query(F.data.startswith("pay:"))
+async def pay_handler(call: CallbackQuery):
+
+    invoice_id = call.data.split(":")[1]
+    pool = await get_pool()
+
+    payment = await pool.fetchrow(
+        "SELECT * FROM payments WHERE invoice_id=$1",
+        invoice_id
+    )
+
+    if not payment:
+        return await call.answer("INVALID INVOICE", show_alert=True)
+
+    user_id = payment["user_id"]
+    code = payment["code"]
+
+    # update payment
+    await pool.execute(
+        "UPDATE payments SET status='paid' WHERE invoice_id=$1",
+        invoice_id
+    )
+
+    # unlock access
+    await pool.execute(
+        """
+        INSERT INTO user_access (user_id, code, paid)
+        VALUES ($1,$2,true)
+        ON CONFLICT (user_id, code)
+        DO UPDATE SET paid=true
+        """,
+        user_id, code
+    )
+
+    await call.bot.send_message(
+        user_id,
+        f"✅ PAYMENT SUCCESS\n\nACCESS UNLOCKED: {code}"
+    )
+
+    await call.answer("PAID SUCCESS")
