@@ -41,7 +41,7 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
         preview_msg_id=msg.message_id
     )
 
-
+    await call.answer()
 # =========================
 # GENERATE CODE
 # =========================
@@ -62,75 +62,31 @@ media_buffer = {}
 async def receive_media(message: Message, state: FSMContext):
 
     data = await state.get_data()
-
     if not data.get("upload_mode"):
         return
 
-    # =========================
-    # DETECT FILE + TYPE
-    # =========================
     if message.document:
         fid = message.document.file_id
         ftype = "document"
-
     elif message.video:
         fid = message.video.file_id
         ftype = "video"
-
     else:
         fid = message.photo[-1].file_id
         ftype = "photo"
 
-    # 🔥 FIX NESTED FILE_ID
-    if isinstance(fid, dict):
-        fid = fid.get("file_id")
+    item = {"file_id": fid, "type": ftype}
 
-    item = {
-        "file_id": fid,
-        "type": ftype
-    }
+    media = data.get("media", [])
+    media.append(item)
+    await state.update_data(media=media)
 
-    # =========================
-    # MEDIA GROUP FIX
-    # =========================
-    if message.media_group_id:
-        gid = message.media_group_id
-
-        if gid not in media_buffer:
-            media_buffer[gid] = []
-
-        media_buffer[gid].append(item)
-
-        await asyncio.sleep(1.2)
-
-        if gid in media_buffer:
-            batch = media_buffer.pop(gid)
-
-            data = await state.get_data()
-            media = data.get("media", [])
-
-            media.extend(batch)
-
-            await state.update_data(media=media)
-
-    else:
-        media = data.get("media", [])
-        media.append(item)
-        await state.update_data(media=media)
-
-    # =========================
-    # DELETE USER MSG
-    # =========================
     try:
         await message.delete()
     except:
         pass
 
-    # =========================
-    # UI UPDATE
-    # =========================
-    data = await state.get_data()
-    total = len(data.get("media", []))
+    total = len(media)
 
     text = f"""
 𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
@@ -157,8 +113,6 @@ async def receive_media(message: Message, state: FSMContext):
             )
         except:
             pass
-
-
 # =========================
 # CANCEL
 # =========================
@@ -181,8 +135,7 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
     if not data.get("media"):
-        await call.answer("❌ Media kosong", show_alert=True)
-        return
+        return await call.answer("❌ Media kosong", show_alert=True)
 
     await state.set_state(UploadState.wait_type)
 
@@ -196,7 +149,7 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
         reply_markup=kb.as_markup()
     )
 
-
+    await call.answer()
 # =========================
 # TYPE HANDLER
 # =========================
@@ -213,8 +166,11 @@ async def set_type(call: CallbackQuery, state: FSMContext):
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n💰 MASUKKAN HARGA"
         )
     else:
-        await save_file(call, state, price=0)
+        # langsung save kalau FREE
+        await save_file(call.message, state)
+        await state.update_data(upload_mode=False)
 
+    await call.answer()
 
 # =========================
 # PRICE INPUT
@@ -253,38 +209,41 @@ async def done(call: CallbackQuery, state: FSMContext):
     media = data.get("media", [])
 
     if not media:
-        await call.answer("❌ No media", show_alert=True)
-        return
+        return await call.answer("❌ No media", show_alert=True)
 
     await show_progress(call.message, len(media))
-    await save_file(call, state)
 
+    # prevent double execution
+    if not data.get("upload_mode"):
+        return await call.answer("⚠️ Already processed", show_alert=False)
 
+    await state.update_data(upload_mode=False)
+
+    await save_file(call.message, state)
+
+    await call.answer()
 # =========================
 # SAVE CORE
 # =========================
-async def save_file(event, state: FSMContext, price=None):
+async def save_file(message: Message, state: FSMContext):
 
     pool = await get_pool()
-    bot: Bot = event.bot
+    bot = message.bot
 
     data = await state.get_data()
 
     media = data.get("media", [])
     if not media:
-        await event.answer("❌ Tidak ada media")
         return
 
     media_json = json.dumps(media)
-    media_count = len(media)
 
     file_type = data.get("type", "free")
-    price = price if price is not None else data.get("price", 0)
+    price = data.get("price", 0)
 
     code = generate_code()
-    user = event.from_user
+    user = message.from_user
 
-    # 🔥 FIX QUERY (CONSISTENT)
     await pool.execute(
         """
         INSERT INTO files (code, media, owner_id, media_count, price, type, creator)
@@ -293,7 +252,7 @@ async def save_file(event, state: FSMContext, price=None):
         code,
         media_json,
         user.id,
-        media_count,
+        len(media),
         price,
         file_type,
         user.full_name
@@ -301,30 +260,27 @@ async def save_file(event, state: FSMContext, price=None):
 
     await state.clear()
 
-    text = f"""
-𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫
-
-📦 𝗠𝗘𝗗𝗜𝗔 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗
-────────────────
-🔑 𝗖𝗢𝗗𝗘
-<code>{code}</code>
-
-📊 𝗠𝗘𝗗𝗜𝗔 : {media_count}
-💰 𝗦𝗬𝗦𝗧𝗘𝗠 : {file_type.upper()} {price}
-👤 𝗖𝗥𝗘𝗔𝗧𝗘 : {user.full_name}
-"""
+    text = (
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "📦 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗\n"
+        "──────────────────\n\n"
+        f"🔑 𝗖𝗢𝗗𝗘   : <code>{code}</code>\n"
+        f"📊 𝗠𝗘𝗗𝗜𝗔  : {len(media)} FILE\n"
+        f"💰 𝗧𝗬𝗣𝗘   : {file_type.upper()}\n"
+        f"👤 𝗢𝗪𝗡𝗘𝗥  : {user.full_name}\n\n"
+        "━━━━━━━━━━━━━━━━━━"
+    )
 
     try:
-        await event.message.edit_text(text, parse_mode="HTML")
+        await message.edit_text(text, parse_mode="HTML")
     except:
-        pass
+        await message.answer(text, parse_mode="HTML")
 
     try:
         await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
     except:
         pass
-
-
 # =========================
 # PROGRESS
 # =========================
