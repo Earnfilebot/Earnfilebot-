@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery
 
 from utils.force_sub import check_force_sub
 from keyboards.join import join_kb
-from handlers.start import render_home
+from handlers.start import render_home_fast
 
 router = Router()
 
@@ -34,7 +34,7 @@ async def check_sub_callback(call: CallbackQuery):
 
         return
 
-    await render_home(
+    await render_home_fast(
         call.bot,
         call.message,
         user_id,
