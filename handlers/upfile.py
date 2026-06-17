@@ -284,9 +284,12 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
     if choice == "free":
 
         await state.update_data(
+            type="free",
             is_paid=False,
             price=0
         )
+
+        await call.answer("Free selected")
 
         return await finalize_save(call.message, state)
 
@@ -295,12 +298,19 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
     # =========================
     if choice == "paid":
 
-        await state.update_data(is_paid=True)
+        await state.update_data(
+            type="paid",
+            is_paid=True,
+            price=None
+        )
 
         await state.set_state(UploadState.wait_price)
 
+        await call.answer()
+
         return await call.message.edit_text(
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n💰 MASUKKAN HARGA\n\nContoh: 5000"
+        )
         )
 # =========================
 # INPUT PRICE
