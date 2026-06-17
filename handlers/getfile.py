@@ -76,7 +76,7 @@ async def receive_code(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    media = safe_json(file.get("media"))
+    media = json.loads(file["media"])
     file_type = file.get("type", "free")
     price = file.get("price", 0)
 
