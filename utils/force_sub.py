@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from aiogram import Bot
 
@@ -11,19 +12,25 @@ async def check_force_sub(bot: Bot, user_id: int) -> bool:
 
     for channel_id in CHANNELS:
 
-        try:
-            member = await bot.get_chat_member(channel_id, user_id)
-            status = member.status
+        ok = False
 
-            if status not in ("member", "administrator", "creator"):
-                return False
+        for _ in range(3):  # retry biar tidak false reject
+            try:
+                member = await bot.get_chat_member(channel_id, user_id)
+                status = member.status
 
-        except Exception as e:
-            logging.warning(
-                f"Force sub error | channel={channel_id} | user={user_id} | error={e}"
-            )
+                if status in ("member", "administrator", "creator"):
+                    ok = True
+                    break
 
-            # ❗ jangan langsung block user karena error API
+            except Exception as e:
+                logging.warning(
+                    f"Force sub error | channel={channel_id} | user={user_id} | error={e}"
+                )
+
+            await asyncio.sleep(0.5)
+
+        if not ok:
             return False
 
     return True
