@@ -4,7 +4,7 @@ import logging
 from aiogram import Bot, Dispatcher
 
 from config import BOT_TOKEN
-from database import connect_db
+from database import connect_db, close_db
 
 # =========================
 # ROUTERS
@@ -20,7 +20,7 @@ from handlers.admin import router as admin_router
 # =========================
 # INIT
 # =========================
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
 # =========================
@@ -34,11 +34,11 @@ dp.include_router(payment_router)
 dp.include_router(page_router)
 dp.include_router(admin_router)
 
-
 # =========================
 # START BOT
 # =========================
 async def main():
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s"
@@ -47,8 +47,21 @@ async def main():
     await connect_db()
     logging.info("DATABASE CONNECTED")
 
-    logging.info("BOT STARTED")
-    await dp.start_polling(bot)
+    try:
+
+        logging.info("BOT STARTED")
+
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types()
+        )
+
+    finally:
+
+        await close_db()
+        await bot.session.close()
+
+        logging.info("BOT STOPPED")
 
 
 # =========================
