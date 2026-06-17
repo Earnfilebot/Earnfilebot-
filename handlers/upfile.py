@@ -155,7 +155,7 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
             file_type=None,
             is_paid=False,
             price=0,
-            saving=False,
+            saving=True,
             finalizing=False
         )
 # =========================
@@ -303,7 +303,7 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
             )
         except TelegramBadRequest:
             pass
-    )
+    
 # =========================
 # HANDLE TYPE
 # =========================
@@ -317,7 +317,7 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
 
         data = await state.get_data()
 
-        if data.get("finalizing"):
+        if data.get("saving") or data.get("finalizing"):
             return await call.answer("⏳ Processing...", show_alert=True)
 
         choice = call.data.split("_")[1]
