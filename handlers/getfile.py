@@ -77,7 +77,9 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     media = json.loads(file["media"])
-    file_type = file.get("type", "free")
+
+    # ❌ JANGAN pakai "free" fallback
+    file_type = file.get("type")
     price = file.get("price", 0)
 
     if not media:
@@ -95,48 +97,50 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     # =========================
-    # ACCESS CHECK
+    # 🔒 FINAL SECURITY GATE (ONLY ONCE)
     # =========================
-    if file_type == "paid":
+    is_paid = file_type == "paid"
 
+    if is_paid:
         access = await pool.fetchrow(
-            "SELECT 1 FROM user_access WHERE user_id=$1 AND code=$2 AND paid=true",
+            """
+            SELECT 1 FROM user_access
+            WHERE user_id=$1 AND code=$2 AND paid=true
+            """,
             user_id, code
         )
 
         if not access:
 
             pending = await pool.fetchrow(
-                "SELECT 1 FROM payments WHERE user_id=$1 AND code=$2 AND status='pending'",
+                """
+                SELECT 1 FROM payments
+                WHERE user_id=$1 AND code=$2 AND status='pending'
+                """,
                 user_id, code
             )
 
             if pending:
                 await message.answer("⏳ INVOICE MASIH AKTIF")
-                await state.clear()
-                return
-
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=f"💰 BUY ACCESS ({price})",
-                            callback_data=f"buy:{code}"
-                        )
+            else:
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text=f"💰 BUY ACCESS ({price})",
+                                callback_data=f"buy:{code}"
+                            )
+                        ]
                     ]
-                ]
-            )
+                )
 
-            await message.answer(
-                "🔒 FILE BERBAYAR",
-                reply_markup=keyboard
-            )
+                await message.answer("🔒 FILE BERBAYAR", reply_markup=keyboard)
 
             await state.clear()
             return
 
     # =========================
-    # SHOW FILE
+    # SHOW FILE (ONLY IF PASS GATE)
     # =========================
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -170,104 +174,3 @@ async def receive_code(message: Message, state: FSMContext):
         await message.answer(f"❌ ERROR: {e}")
 
     await state.clear()
-
-
-# =========================
-# BUY
-# =========================
-@router.callback_query(F.data.startswith("buy:"))
-async def buy_access(call: CallbackQuery):
-
-    code = call.data.split(":")[1]
-    user_id = call.from_user.id
-
-    pool = await get_pool()
-
-    file = await pool.fetchrow(
-        "SELECT * FROM files WHERE code=$1",
-        code
-    )
-
-    if not file:
-        return await call.answer("NOT FOUND", show_alert=True)
-
-    price = file["price"]
-
-    exist = await pool.fetchrow(
-        "SELECT 1 FROM payments WHERE user_id=$1 AND code=$2 AND status='pending'",
-        user_id, code
-    )
-
-    if exist:
-        return await call.answer("INVOICE MASIH AKTIF", show_alert=True)
-
-    invoice_id = f"INV_{user_id}_{code}"
-
-    await pool.execute(
-        """
-        INSERT INTO payments(user_id, code, amount, status, provider, invoice_id)
-        VALUES ($1,$2,$3,'pending','qris',$4)
-        """,
-        user_id, code, price, invoice_id
-    )
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="💳 BAYAR SEKARANG",
-                    callback_data=f"pay:{invoice_id}"
-                )
-            ]
-        ]
-    )
-
-    await call.message.edit_text(
-        f"💰 INVOICE\nCODE: {code}\nTOTAL: {price}",
-        reply_markup=keyboard
-    )
-
-    await call.answer()
-
-
-# =========================
-# PAYMENT SUCCESS
-# =========================
-@router.callback_query(F.data.startswith("pay:"))
-async def pay_handler(call: CallbackQuery):
-
-    invoice_id = call.data.split(":")[1]
-    pool = await get_pool()
-
-    payment = await pool.fetchrow(
-        "SELECT * FROM payments WHERE invoice_id=$1",
-        invoice_id
-    )
-
-    if not payment:
-        return await call.answer("INVALID INVOICE", show_alert=True)
-
-    user_id = payment["user_id"]
-    code = payment["code"]
-
-    await pool.execute(
-        "UPDATE payments SET status='paid' WHERE invoice_id=$1",
-        invoice_id
-    )
-
-    await pool.execute(
-        """
-        INSERT INTO user_access(user_id, code, paid)
-        VALUES ($1,$2,true)
-        ON CONFLICT (user_id, code)
-        DO UPDATE SET paid=true
-        """,
-        user_id, code
-    )
-
-    await call.bot.send_message(
-        user_id,
-        f"✅ PAYMENT SUCCESS\nACCESS UNLOCKED: {code}"
-    )
-
-    await call.answer("PAID SUCCESS")
