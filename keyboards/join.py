@@ -15,7 +15,7 @@ def join_kb():
             [
                 InlineKeyboardButton(
                     text="📢 Channel 2",
-                    url="https://t.me/+DTL9cOR34ipmM2U1"
+                    url="https://t.me/+TiCdabQsYW43Mjk1"
                 )
             ],
             [
