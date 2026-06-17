@@ -123,17 +123,12 @@ async def page_handler(call: CallbackQuery):
             media = []
 
         total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
-
         page = max(1, min(page, total_page))
 
         chunk = media[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
 
         if not chunk:
             return await call.answer("❌ Page kosong", show_alert=True)
-
-        first = chunk[0]
-        fid = clean_file_id(first.get("file_id"))
-        ftype = normalize_type(first.get("type"))
 
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
@@ -144,51 +139,58 @@ async def page_handler(call: CallbackQuery):
         )
 
         # =========================
-        # MEDIA BUILD
+        # BUILD MEDIA GROUP (FIXED)
         # =========================
-        if ftype == "photo":
-            media_obj = InputMediaPhoto(media=fid, caption=caption)
-        elif ftype == "video":
-            media_obj = InputMediaVideo(media=fid, caption=caption)
-        else:
-            media_obj = InputMediaDocument(media=fid, caption=caption)
+        group = []
 
-        # =========================
-        # KEYBOARD
-        # =========================
+        for m in chunk:
+            fid = clean_file_id(m.get("file_id"))
+            ftype = normalize_type(m.get("type"))
+
+            if not fid:
+                continue
+
+            if ftype == "photo":
+                group.append(InputMediaPhoto(media=fid))
+            elif ftype == "video":
+                group.append(InputMediaVideo(media=fid))
+            else:
+                group.append(InputMediaDocument(media=fid))
+
         nav = build_page_buttons(code, page, total_page)
 
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                nav,
-                [
-                    InlineKeyboardButton(
-                        text="📢 Channel Update",
-                        url="https://t.me/yourchannel"
-                    ),
-                    InlineKeyboardButton(
-                        text="🔔 Notifikasi Code",
-                        callback_data=f"notify:{code}"
-                    )
-                ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            nav,
+            [
+                InlineKeyboardButton(
+                    text="📢 Channel Update",
+                    url="https://t.me/yourchannel"
+                ),
+                InlineKeyboardButton(
+                    text="🔔 Notifikasi Code",
+                    callback_data=f"notify:{code}"
+                )
             ]
-        )
+        ])
 
         # =========================
-        # SAFE EDIT MEDIA (FIX REAL)
+        # SEND PROPERLY
         # =========================
         try:
-            await call.message.edit_media(media=media_obj)
-        except:
-            # fallback kalau message bukan media
-            try:
-                await call.message.edit_text(caption)
-            except:
-                pass
+            # kalau cuma 1 media → edit_media
+            if len(group) == 1:
+                await call.message.edit_media(media=group[0])
 
-        # =========================
-        # ALWAYS UPDATE BUTTONS
-        # =========================
+            # kalau banyak → kirim media group (MAX 10 aman)
+            else:
+                await call.message.answer_media_group(group)
+
+                # optional: kasih caption baru setelah group
+                await call.message.answer(caption, reply_markup=keyboard)
+
+        except Exception as e:
+            await call.message.answer(caption)
+
         try:
             await call.message.edit_reply_markup(reply_markup=keyboard)
         except:
