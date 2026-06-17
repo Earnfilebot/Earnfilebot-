@@ -28,6 +28,7 @@ from handlers.getfile import router as getfile_router
 from handlers.payment import router as payment_router
 from handlers.page import router as page_router
 from handlers.account import router as account_router
+from handlers.withdraw import router as withdraw_router
 from handlers.admin import router as admin_router
 
 # =========================
@@ -50,6 +51,7 @@ dp.include_router(getfile_router)
 dp.include_router(payment_router)
 dp.include_router(page_router)
 dp.include_router(account_router)
+dp.include_router(withdraw_router)
 dp.include_router(admin_router)
 
 # =========================
