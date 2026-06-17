@@ -90,17 +90,11 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
                 reply_markup=join_kb()
             )
 
-        kb = InlineKeyboardBuilder()
-        kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
-        kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
-        kb.adjust(2)
-
         msg = await call.message.edit_text("⏳ Loading...")
         await asyncio.sleep(0.2)
 
         msg = await msg.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW",
-            reply_markup=kb.as_markup()
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
         )
 
         await state.update_data(
