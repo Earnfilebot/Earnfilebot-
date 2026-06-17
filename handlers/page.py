@@ -114,13 +114,7 @@ async def page_handler(call: CallbackQuery):
         media = file.get("media") or []
 
         if isinstance(media, str):
-            try:
-                media = json.loads(media)
-            except:
-                media = []
-
-        if not isinstance(media, list):
-            media = []
+            media = json.loads(media)
 
         total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
         page = max(1, min(page, total_page))
@@ -139,17 +133,26 @@ async def page_handler(call: CallbackQuery):
         )
 
         # =========================
-        # TAKE FIRST MEDIA ONLY (IMPORTANT)
+        # BUILD MEDIA GROUP (FIXED)
         # =========================
-        first = chunk[0]
-        fid = clean_file_id(first.get("file_id"))
-        ftype = normalize_type(first.get("type"))
+        group = []
 
-        if not fid:
-            return await call.answer("❌ Media invalid", show_alert=True)
+        for m in chunk:
+            fid = clean_file_id(m.get("file_id"))
+            ftype = normalize_type(m.get("type"))
+
+            if not fid:
+                continue
+
+            if ftype == "photo":
+                group.append(InputMediaPhoto(media=fid))
+            elif ftype == "video":
+                group.append(InputMediaVideo(media=fid))
+            else:
+                group.append(InputMediaDocument(media=fid))
 
         # =========================
-        # KEYBOARD
+        # KEYBOARD (AUTO REFRESH)
         # =========================
         nav = build_page_buttons(code, page, total_page)
 
@@ -168,31 +171,24 @@ async def page_handler(call: CallbackQuery):
         ])
 
         # =========================
-        # SAFE EDIT (ONLY THIS WAY)
+        # IMPORTANT: DELETE OLD MESSAGE
         # =========================
         try:
-            if ftype == "photo":
-                await call.message.edit_media(
-                    media=InputMediaPhoto(media=fid, caption=caption),
-                    reply_markup=keyboard
-                )
-
-            elif ftype == "video":
-                await call.message.edit_media(
-                    media=InputMediaVideo(media=fid, caption=caption),
-                    reply_markup=keyboard
-                )
-
-            else:
-                await call.message.edit_media(
-                    media=InputMediaDocument(media=fid, caption=caption),
-                    reply_markup=keyboard
-                )
-
+            await call.message.delete()
         except:
-            await call.message.edit_text(
-                caption,
-                reply_markup=keyboard
-            )
+            pass
+
+        # =========================
+        # SEND NEW MEDIA GROUP (PAGE)
+        # =========================
+        sent = await call.message.answer_media_group(group)
+
+        # =========================
+        # SEND CAPTION + BUTTONS (SEPARATE MESSAGE)
+        # =========================
+        await call.message.answer(
+            caption,
+            reply_markup=keyboard
+        )
 
         await call.answer()
