@@ -15,7 +15,28 @@ from database import get_pool
 
 from utils.force_sub import check_force_sub
 from keyboards.join import join_kb
+import time   # <- wajib
 
+_last_update = {}   # <- global variable
+
+async def safe_update(bot, chat_id, message_id, text, user_id):
+    now = time.time()
+
+    last = _last_update.get(user_id, 0)
+
+    if now - last < 0.7:
+        return
+
+    _last_update[user_id] = now
+
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text
+        )
+    except:
+        pass
 
 MAX_MEDIA = 50
 
@@ -65,13 +86,15 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
         media=[],
         upload_mode=True,
         preview_msg_id=msg.message_id,
-        saved=False
+        saved=False,
+        upload_anim_id=msg.message_id
     )
 
     await call.answer()
 # =========================
 # RECEIVE MEDIA
 # =========================
+
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
 
@@ -83,10 +106,9 @@ async def receive_media(message: Message, state: FSMContext):
     media = data.get("media", [])
 
     if len(media) >= MAX_MEDIA:
-        return await message.answer(
-            "❌ Maksimal 50 media per produk"
-        )
+        return await message.answer("❌ Maksimal 50 media per produk")
 
+    # detect file
     if message.document:
         fid = message.document.file_id
         ftype = "document"
@@ -97,32 +119,34 @@ async def receive_media(message: Message, state: FSMContext):
         fid = message.photo[-1].file_id
         ftype = "photo"
 
-    media.append({
-        "file_id": fid,
-        "type": ftype
-    })
+    # quick “real feel” animation (TIDAK BLOCK BOT)
+    anim_id = data.get("upload_anim_id")
 
+try:
+    anim = await message.bot.edit_message_text(
+        chat_id=message.chat.id,
+        message_id=anim_id,
+        text="⏳ Processing file..."
+    )
+except:
+    anim = None
+
+    # append first (biar cepat)
+    media.append({"file_id": fid, "type": ftype})
     await state.update_data(media=media)
 
-    try:
-        await message.delete()
-    except:
-        pass
-
     total = len(media)
+
+    # smooth progress bar (ringan, gak spam)
+    bar = "█" * total + "░" * (MAX_MEDIA - total)
 
     text = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "📦 𝗣𝗥𝗢𝗖𝗘𝗦𝗦𝗜𝗡𝗚\n"
-        "──────────────────\n"
-        f"📊 COUNT : {total}"
+        "📦 UPLOADING MEDIA\n"
+        f"[{bar}]\n"
+        f"📊 {total}/{MAX_MEDIA}"
     )
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text="💾 SAVE", callback_data="save_upfile")
-    kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
-    kb.adjust(2)
 
     preview_id = data.get("preview_msg_id")
 
@@ -132,12 +156,13 @@ async def receive_media(message: Message, state: FSMContext):
                 chat_id=message.chat.id,
                 message_id=preview_id,
                 text=text,
-                reply_markup=kb.as_markup()
+                reply_markup=None
             )
         except:
             pass
 
-
+    # update animasi kecil lalu hapus (FAST UX)
+    await anim.edit_text("✅ Added")
 # =========================
 # CANCEL
 # =========================
@@ -205,6 +230,9 @@ async def set_type(call: CallbackQuery, state: FSMContext):
 @router.message(UploadState.wait_price)
 async def input_price(message: Message, state: FSMContext):
 
+    if not message.text:
+    return await message.answer("❌ Input tidak valid")
+
     raw = "".join(filter(str.isdigit, message.text or ""))
 
     if not raw:
@@ -242,7 +270,9 @@ async def input_price(message: Message, state: FSMContext):
 
 # =========================
 # DONE
-# =========================@router.callback_query(F.data == "done_upfile")
+# =========================
+
+@router.callback_query(F.data == "done_upfile")
 async def done(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
@@ -339,29 +369,28 @@ async def finalize_save(message: Message, state: FSMContext):
 # PROGRESS
 # =========================
 async def show_progress(message, total):
-
-    last = 0
+    last_edit = 0
 
     for i in range(1, total + 1):
 
-        # biar gak spam edit tiap langkah kecil (lebih smooth)
-        if i - last < 1:
+        now = time.time()
+
+        # throttle 0.4–0.6 detik
+        if now - last_edit < 0.4:
             continue
 
-        last = i
+        last_edit = now
 
         try:
+            bar = "█" * i + "░" * (total - i)
+
             await message.edit_text(
                 f"𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
                 f"⏳ UPLOADING\n"
+                f"[{bar}]\n"
                 f"📊 {i}/{total}"
             )
-
-        except TelegramBadRequest:
-            # kalau message sudah tidak bisa diedit, skip
+        except:
             pass
 
-        except Exception:
-            pass
-
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.25)
