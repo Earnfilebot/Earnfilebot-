@@ -26,7 +26,7 @@ MAX_MEDIA = 200
 UPDATE_DELAY = 0.25
 
 _last_update: dict[int, float] = {}
-
+_active_progress: dict[int, int] = {}
 _lock_init = asyncio.Lock()
 _user_locks: dict[int, asyncio.Lock] = {}
 
@@ -155,7 +155,7 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
             file_type=None,
             is_paid=False,
             price=0,
-            saving=True,
+            saving=False,
             finalizing=False
         )
 # =========================
@@ -200,29 +200,38 @@ async def receive_media(message: Message, state: FSMContext):
         except:
             pass
 
+        data = await state.get_data()
         msg_id = data.get("progress_msg_id")
 
         # =========================
         # CREATE PROGRESS ONCE
         # =========================
         if not msg_id:
-            kb = InlineKeyboardBuilder()
-            kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
-            kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
-            kb.adjust(2)
 
             progress = await message.bot.send_message(
                 chat_id=message.chat.id,
-                text="📦 UPLOADING...\n[░░░░░░░░░░]\n0/200",
-                reply_markup=kb.as_markup(),
-                reply_to_message_id=message.message_id
+                text="📦 UPLOADING...\n[░░░░░░░░░░]\n0/200"
             )
 
             msg_id = progress.message_id
             await state.update_data(progress_msg_id=msg_id)
 
+            kb = InlineKeyboardBuilder()
+            kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
+            kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
+            kb.adjust(2)
+
+            try:
+                await message.bot.edit_message_reply_markup(
+                    chat_id=message.chat.id,
+                    message_id=msg_id,
+                    reply_markup=kb.as_markup()
+                )
+            except:
+                pass
+
         # =========================
-        # UPDATE ONLY TEXT
+        # UPDATE PROGRESS TEXT
         # =========================
         total = len(media)
 
@@ -251,19 +260,19 @@ async def receive_media(message: Message, state: FSMContext):
 async def cancel(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
-
-    await state.update_data(upload_stopped=True)
+    msg_id = data.get("progress_msg_id")
 
     await state.clear()
 
-    await call.answer("Upload dibatalkan", show_alert=True)
-
     try:
-        await call.message.edit_text(
-            "❌ UPLOAD CANCELLED"
-        )
+        if msg_id:
+            await call.bot.delete_message(call.message.chat.id, msg_id)
     except:
         pass
+
+    await call.answer("Upload dibatalkan", show_alert=True)
+
+    await call.message.edit_text("❌ UPLOAD CANCELLED")
 # =========================
 # SAVE → TYPE
 # =========================
@@ -395,6 +404,17 @@ async def finalize_save(message: Message, state: FSMContext):
 
         data = await state.get_data()
 
+        # =========================
+        # 🔥 DELETE PROGRESS UI FIRST
+        # =========================
+        msg_id = data.get("progress_msg_id")
+
+        try:
+            if msg_id:
+                await message.bot.delete_message(message.chat.id, msg_id)
+        except:
+            pass
+
         # 🔒 HARD GUARD (anti double trigger)
         if data.get("saving") is True:
             return
@@ -435,7 +455,7 @@ async def finalize_save(message: Message, state: FSMContext):
                 )
 
             # =========================
-            # CLEAN OUTPUT (EASY COPY UX)
+            # CLEAN OUTPUT
             # =========================
             text = (
                 "💎 PREMIUM SAVED\n" if is_paid else "🎉 FREE SAVED\n"
@@ -452,14 +472,10 @@ async def finalize_save(message: Message, state: FSMContext):
             # =========================
             await state.clear()
 
-            # send result
             await message.answer(text, parse_mode="Markdown")
-
-            # optional channel log
             await message.bot.send_message(CHANNEL_ID, text)
 
         finally:
-            # jangan crash kalau state sudah clear
             try:
                 await state.update_data(saving=False)
             except:
