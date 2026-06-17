@@ -21,7 +21,7 @@ from keyboards.join import join_kb
 # =========================
 # GLOBAL CONFIG
 # =========================
-MAX_MEDIA = 50
+MAX_MEDIA = 200
 UPDATE_DELAY = 0.3  # anti spam edit (detik)
 
 router = Router()
@@ -111,39 +111,23 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 
     await state.clear()
 
-    # =========================
-    # FORCE SUB CHECK
-    # =========================
-    if not await check_force_sub(
-        call.bot,
-        call.from_user.id
-    ):
+    if not await check_force_sub(call.bot, call.from_user.id):
         return await call.message.answer(
             "❌ Join channel terlebih dahulu",
             reply_markup=join_kb()
         )
 
-    # =========================
-    # INITIAL UI (NO BUTTON DULU)
-    # =========================
-    text = (
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "📤 KIRIM MEDIA SEKARANG\n"
-        
+    msg = await call.message.edit_text(
+        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n━━━━━━━━━━━━━━━━━━\n\n📤 KIRIM MEDIA SEKARANG"
     )
 
-    msg = await call.message.edit_text(text)
-
-    # =========================
-    # INIT STATE (WAJIB UNTUK REAL PROGRESS)
-    # =========================
     await state.update_data(
         media=[],
+        idle_msg_id=msg.message_id,
+        progress_msg_id=None,
         upload_mode=True,
-        preview_msg_id=msg.message_id,
-        total_received=0,   # 🔥 penting
-        saved=False
+        total_received=0,
+        locked=False
     )
 
     await call.answer()
@@ -155,28 +139,22 @@ async def receive_media(message: Message, state: FSMContext):
 
     user_id = message.from_user.id
 
-    # =========================
-    # LOCK PER USER (ANTI LOMPAT)
-    # =========================
     if user_id not in _user_locks:
         _user_locks[user_id] = asyncio.Lock()
 
     async with _user_locks[user_id]:
 
         data = await state.get_data()
-
         if not data.get("upload_mode"):
             return
 
-        media = list(data.get("media") or [])
+        media = data.get("media", [])
         total = data.get("total_received", 0)
 
-        if len(media) >= MAX_MEDIA:
-            return await message.answer("❌ Maksimal 50 media")
+        if len(media) >= 200:
+            return await message.answer("❌ Maksimal 200 media")
 
-        # =========================
-        # DETECT FILE
-        # =========================
+        # detect file
         if message.document:
             fid = message.document.file_id
             ftype = "document"
@@ -187,80 +165,71 @@ async def receive_media(message: Message, state: FSMContext):
             fid = message.photo[-1].file_id
             ftype = "photo"
 
-        # =========================
-        # UPDATE DATA
-        # =========================
-        media.append({
-            "file_id": fid,
-            "type": ftype
-        })
-
+        media.append({"file_id": fid, "type": ftype})
         total += 1
 
-        await state.update_data(
-            media=media,
-            total_received=total
-        )
+        await state.update_data(media=media, total_received=total)
 
-        # =========================
-        # DELETE USER MESSAGE
-        # =========================
         try:
             await message.delete()
         except:
             pass
 
         # =========================
-        # PROGRESS BAR
+        # 🔥 FIRST MEDIA → HAPUS WELCOME + BUAT PROGRESS
         # =========================
-        MAX_BAR = 10
-        filled = int(total / MAX_MEDIA * MAX_BAR)
-        bar = "█" * filled + "░" * (MAX_BAR - filled)
+        if total == 1:
 
-        text = (
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "📦 UPLOADING\n"
-            f"[{bar}]\n"
-            f"📊 {total}/{MAX_MEDIA}\n\n"
-            f"✅ {total} media accepted\n"
-            f"🧹 {total} media deleted"
-        )
+            idle_id = data["idle_msg_id"]
 
-        preview_id = data.get("preview_msg_id")
+            try:
+                await message.bot.delete_message(message.chat.id, idle_id)
+            except:
+                pass
 
-        # =========================
-        # SAFE UPDATE (WAJIB)
-        # =========================
-        await asyncio.sleep(0.1)
-        if preview_id:
-            await safe_update(
-                message.bot,
+            progress = await message.bot.send_message(
                 message.chat.id,
-                preview_id,
-                text,
-                user_id
+                "📦 UPLOADING...\n[░░░░░░░░░░]\n0/200"
             )
 
+            await state.update_data(progress_msg_id=progress.message_id)
+
+            msg_id = progress.message_id
+
+        else:
+            msg_id = data["progress_msg_id"]
+
         # =========================
-        # DONE STATE (TOMBOL)
+        # PROGRESS UPDATE
+        # =========================
+        bar_len = 10
+        filled = int(total / 200 * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+
+        text = (
+            "📦 UPLOADING...\n"
+            f"[{bar}]\n"
+            f"{total}/200\n"
+            f"✅ accepted"
+        )
+
+        await safe_update(message.bot, message.chat.id, msg_id, text, user_id)
+
+        # =========================
+        # 🔥 BUTTON MUNCUL SAAT SUDAH ADA PROGRESS
         # =========================
         if total >= 1:
 
             kb = InlineKeyboardBuilder()
-            kb.button(text="✅ DONE", callback_data="done_upfile")
+            kb.button(text="⏹ STOP & SAVE", callback_data="done_upfile")
             kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
             kb.adjust(2)
 
-            try:
-                await message.bot.edit_message_text(
-                    chat_id=message.chat.id,
-                    message_id=preview_id,
-                    text=text + "\n\n🚀 Siap disimpan",
-                    reply_markup=kb.as_markup()
-                )
-            except:
-                pass
+            await message.bot.edit_message_reply_markup(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                reply_markup=kb.as_markup()
+            )
 # =========================
 # CANCEL
 # =========================
