@@ -22,7 +22,7 @@ from keyboards.join import join_kb
 # GLOBAL CONFIG
 # =========================
 MAX_MEDIA = 50
-UPDATE_DELAY = 0.7  # anti spam edit (detik)
+UPDATE_DELAY = 0.3  # anti spam edit (detik)
 
 router = Router()
 
@@ -218,6 +218,7 @@ async def receive_media(message: Message, state: FSMContext):
         # =========================
         # SAFE UPDATE (WAJIB)
         # =========================
+        await asyncio.sleep(0.1)
         if preview_id:
             await safe_update(
                 message.bot,
@@ -230,7 +231,7 @@ async def receive_media(message: Message, state: FSMContext):
         # =========================
         # DONE STATE (TOMBOL)
         # =========================
-        if total >= MAX_MEDIA:
+        if total >= 1:
 
             kb = InlineKeyboardBuilder()
             kb.button(text="✅ DONE", callback_data="done_upfile")
