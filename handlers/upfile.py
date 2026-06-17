@@ -179,9 +179,6 @@ async def receive_media(message: Message, state: FSMContext):
         if len(media) >= MAX_MEDIA:
             return await message.answer("❌ Maksimal 200 media")
 
-        # =========================
-        # detect file
-        # =========================
         if message.document:
             fid = message.document.file_id
             ftype = "document"
@@ -202,11 +199,10 @@ async def receive_media(message: Message, state: FSMContext):
         except:
             pass
 
-        data = await state.get_data()
         msg_id = data.get("progress_msg_id")
 
         # =========================
-        # CREATE PROGRESS ONCE
+        # CREATE ONCE (FIXED)
         # =========================
         if not msg_id:
 
@@ -215,9 +211,8 @@ async def receive_media(message: Message, state: FSMContext):
             kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
             kb.adjust(2)
 
-            progress = await message.bot.send_message(
-                chat_id=message.chat.id,
-                text="📦 UPLOADING...\n[░░░░░░░░░░]\n0/200",
+            progress = await message.answer(
+                "📦 UPLOADING...\n[░░░░░░░░░░]\n0/200",
                 reply_markup=kb.as_markup()
             )
 
@@ -225,7 +220,7 @@ async def receive_media(message: Message, state: FSMContext):
             await state.update_data(progress_msg_id=msg_id)
 
         # =========================
-        # UPDATE PROGRESS TEXT
+        # UPDATE ONLY TEXT (NO MARKUP TOUCH)
         # =========================
         total = len(media)
 
@@ -240,12 +235,10 @@ async def receive_media(message: Message, state: FSMContext):
             "✅ accepted"
         )
 
-        await safe_update(
-            message.bot,
-            message.chat.id,
-            msg_id,
-            text,
-            user_id
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=msg_id,
+            text=text
         )
 # =========================
 # CANCEL
