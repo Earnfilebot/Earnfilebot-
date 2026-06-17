@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 
 from utils.force_sub import check_force_sub
 from keyboards.menu import home_kb
@@ -11,6 +12,13 @@ from database import get_pool
 from utils.ui_manager import set_ui, USER_UI
 
 router = Router()
+
+
+def rupiah(amount):
+    try:
+        return f"{int(amount):,}".replace(",", ".")
+    except:
+        return "0"
 
 
 # =========================
@@ -36,17 +44,15 @@ async def render_home(bot, message, user_id, username):
         user_id
     )
 
-    balance = user["balance"] if user and user["balance"] else 0
+    balance = user["balance"] if user else 0
+    balance = balance or 0
 
-    # =========================
-    # CLEAN FONT (CONSISTENT)
-    # =========================
     text = (
         "EARNFILEBOX\n\n"
         "HOME DASHBOARD\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"ID : {user_id}\n"
-        f"BALANCE : Rp{balance}\n"
+        f"BALANCE : Rp{rupiah(balance)}\n"
         "━━━━━━━━━━━━━━━━━━"
     )
 
@@ -61,11 +67,20 @@ async def render_home(bot, message, user_id, username):
                 reply_markup=home_kb()
             )
             return
-        except:
+
+        except TelegramBadRequest:
             USER_UI.pop(user_id, None)
 
-    msg = await message.answer(text, reply_markup=home_kb())
-    await set_ui(user_id, msg.chat.id, msg.message_id)
+    msg = await message.answer(
+        text,
+        reply_markup=home_kb()
+    )
+
+    await set_ui(
+        user_id,
+        msg.chat.id,
+        msg.message_id
+    )
 
 
 # =========================
@@ -78,20 +93,25 @@ async def start_cmd(message: Message, state: FSMContext):
 
     user_id = message.from_user.id
     username = message.from_user.username or "unknown"
-    bot = message.bot
 
-    # FORCE SUB
-    if not await check_force_sub(bot, user_id):
-        await message.answer(
+    if not await check_force_sub(
+        message.bot,
+        user_id
+    ):
+        return await message.answer(
             "EARNFILEBOX\n\n"
             "STATUS : JOIN REQUIRED\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "Silakan join semua channel terlebih dahulu",
             reply_markup=join_kb()
         )
-        return
 
-    await render_home(bot, message, user_id, username)
+    await render_home(
+        message.bot,
+        message,
+        user_id,
+        username
+    )
 
 
 # =========================
@@ -105,6 +125,23 @@ async def back_home(call: CallbackQuery, state: FSMContext):
     user_id = call.from_user.id
     username = call.from_user.username or "unknown"
 
-    await render_home(call.bot, call.message, user_id, username)
+    if not await check_force_sub(
+        call.bot,
+        user_id
+    ):
+        return await call.message.answer(
+            "EARNFILEBOX\n\n"
+            "STATUS : JOIN REQUIRED\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "Silakan join semua channel terlebih dahulu",
+            reply_markup=join_kb()
+        )
+
+    await render_home(
+        call.bot,
+        call.message,
+        user_id,
+        username
+    )
 
     await call.answer()
