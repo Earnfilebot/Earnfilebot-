@@ -4,7 +4,7 @@ from aiogram import Bot
 
 CHANNELS = [
     -1003712587847,
-    -1003721009353
+    -1004304319968
 ]
 
 
