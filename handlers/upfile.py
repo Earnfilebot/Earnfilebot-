@@ -119,7 +119,8 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 
     start = time.time()
 
-    await call.answer()  # hilangkan loading Telegram
+    # langsung hilangkan loading "circle"
+    await call.answer()
 
     async with get_lock(call.from_user.id):
 
@@ -134,25 +135,24 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 
         text_final = "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
 
-        elapsed = time.time() - start
-
-        # =========================
-        # 🔥 SMART UX DECISION
-        # =========================
-
         try:
-            if elapsed > 0.15:
-                # kalau agak lambat → kasih proses dulu
-                processing = "⏳ Processing...\n\n" + text_final
-                msg = await call.message.edit_text(processing)
+            current_text = call.message.text or ""
 
-                # optional kecil delay biar smooth feel
-                await asyncio.sleep(0.1)
+            # =========================
+            # 🔥 SMART UX RULE (FIXED)
+            # =========================
 
-                await call.message.edit_text(text_final)
+            if current_text == text_final:
+                # sudah sama → jangan edit (FIX "message is not modified")
+                msg = call.message
 
             else:
-                # kalau cepat → langsung tampil final UI
+                elapsed = time.time() - start
+
+                if elapsed > 0.15:
+                    # slow case → kasih feel loading 1 step saja
+                    await call.message.edit_text("⏳ Loading...")
+
                 msg = await call.message.edit_text(text_final)
 
         except TelegramBadRequest:
@@ -204,7 +204,7 @@ async def receive_media(message: Message, state: FSMContext):
         else:
             return
 
-        # 🔥 IMMUTABLE UPDATE (FIX RACE)
+        # immutable update
         media = media + [{"file_id": fid, "type": ftype}]
         await state.update_data(media=media)
 
@@ -226,7 +226,7 @@ async def receive_media(message: Message, state: FSMContext):
         total = len(media)
 
         bar_len = 10
-        filled = int(total / MAX_MEDIA * bar_len)
+        filled = min(bar_len, int(total / MAX_MEDIA * bar_len))
         bar = "█" * filled + "░" * (bar_len - filled)
 
         text = (
@@ -236,6 +236,7 @@ async def receive_media(message: Message, state: FSMContext):
             "✅ accepted"
         )
 
+        # update text
         await safe_update(
             message.bot,
             message.chat.id,
@@ -244,13 +245,25 @@ async def receive_media(message: Message, state: FSMContext):
             user_id
         )
 
-        if total == 1 or total % 5 == 0:
-            kb = InlineKeyboardBuilder()
-            kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
-            kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
-            kb.adjust(2)
+        # =========================
+        # 🔥 FIX: ALWAYS SYNC BUTTON
+        # =========================
 
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
+        kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
+        kb.adjust(2)
+
+        try:
+            await message.bot.edit_message_reply_markup(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                reply_markup=kb.as_markup()
+            )
+        except Exception:
+            # retry sekali (biar ga ghost button)
             try:
+                await asyncio.sleep(0.15)
                 await message.bot.edit_message_reply_markup(
                     chat_id=message.chat.id,
                     message_id=msg_id,
