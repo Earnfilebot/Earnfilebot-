@@ -27,7 +27,7 @@ UPDATE_DELAY = 0.7  # anti spam edit (detik)
 router = Router()
 
 _last_update = {}  # user_id: last_update_time
-
+_user_locks = {}
 
 # =========================
 # SAFE EDIT MESSAGE
@@ -110,37 +110,25 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
         )
 
     # =========================
-    # BUTTON UI
-    # =========================
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ SAVE", callback_data="save_upfile")
-    kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
-    kb.adjust(2)
-
-    # =========================
-    # MAIN MESSAGE
+    # INITIAL UI (NO BUTTON DULU)
     # =========================
     text = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "📤 KIRIM MEDIA\n"
-        "• Foto / Video / Dokumen\n"
-        "• Maks 50 file\n\n"
-        "💡 Klik SAVE jika sudah selesai"
+        "📤 KIRIM MEDIA SEKARANG\n"
+        
     )
 
-    msg = await call.message.edit_text(
-        text,
-        reply_markup=kb.as_markup()
-    )
+    msg = await call.message.edit_text(text)
 
     # =========================
-    # INIT STATE
+    # INIT STATE (WAJIB UNTUK REAL PROGRESS)
     # =========================
     await state.update_data(
         media=[],
         upload_mode=True,
         preview_msg_id=msg.message_id,
+        total_received=0,   # 🔥 penting
         saved=False
     )
 
@@ -151,93 +139,113 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
 
-    data = await state.get_data()
-
-    if not data.get("upload_mode"):
-        return
+    user_id = message.from_user.id
 
     # =========================
-    # AMBIL DATA TERBARU (ANTI RACE)
+    # LOCK PER USER (ANTI LOMPAT)
     # =========================
-    media = list(data.get("media") or [])
+    if user_id not in _user_locks:
+        _user_locks[user_id] = asyncio.Lock()
 
-    if len(media) >= MAX_MEDIA:
-        return await message.answer("❌ Maksimal 50 media")
+    async with _user_locks[user_id]:
 
-    # =========================
-    # DETECT FILE
-    # =========================
-    if message.document:
-        fid = message.document.file_id
-        ftype = "document"
-    elif message.video:
-        fid = message.video.file_id
-        ftype = "video"
-    else:
-        fid = message.photo[-1].file_id
-        ftype = "photo"
+        data = await state.get_data()
 
-    # =========================
-    # QUICK FEEDBACK
-    # =========================
-    anim = await message.answer("⏳ Uploading...")
+        if not data.get("upload_mode"):
+            return
 
-    # =========================
-    # UPDATE STATE
-    # =========================
-    media.append({
-        "file_id": fid,
-        "type": ftype
-    })
+        media = list(data.get("media") or [])
+        total = data.get("total_received", 0)
 
-    await state.update_data(media=media)
+        if len(media) >= MAX_MEDIA:
+            return await message.answer("❌ Maksimal 50 media")
 
-    total = len(media)
+        # =========================
+        # DETECT FILE
+        # =========================
+        if message.document:
+            fid = message.document.file_id
+            ftype = "document"
+        elif message.video:
+            fid = message.video.file_id
+            ftype = "video"
+        else:
+            fid = message.photo[-1].file_id
+            ftype = "photo"
 
-    # =========================
-    # PROGRESS BAR (LIMIT BIAR RAPI)
-    # =========================
-    MAX_BAR = 10
-    filled = int(total / MAX_MEDIA * MAX_BAR)
-    bar = "█" * filled + "░" * (MAX_BAR - filled)
+        # =========================
+        # UPDATE DATA
+        # =========================
+        media.append({
+            "file_id": fid,
+            "type": ftype
+        })
 
-    text = (
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "📦 UPLOADING MEDIA\n"
-        f"[{bar}]\n"
-        f"📊 {total}/{MAX_MEDIA}"
-    )
+        total += 1
 
-    preview_id = data.get("preview_msg_id")
-
-    # =========================
-    # SAFE UPDATE (WAJIB)
-    # =========================
-    if preview_id:
-        await safe_update(
-            message.bot,
-            message.chat.id,
-            preview_id,
-            text,
-            message.from_user.id
+        await state.update_data(
+            media=media,
+            total_received=total
         )
 
-    # =========================
-    # CLEAN USER MESSAGE
-    # =========================
-    try:
-        await message.delete()
-    except Exception:
-        pass
+        # =========================
+        # DELETE USER MESSAGE
+        # =========================
+        try:
+            await message.delete()
+        except:
+            pass
 
-    # =========================
-    # CLOSE ANIMATION
-    # =========================
-    try:
-        await anim.edit_text("✅ Added")
-    except Exception:
-        pass
+        # =========================
+        # PROGRESS BAR
+        # =========================
+        MAX_BAR = 10
+        filled = int(total / MAX_MEDIA * MAX_BAR)
+        bar = "█" * filled + "░" * (MAX_BAR - filled)
+
+        text = (
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "📦 UPLOADING\n"
+            f"[{bar}]\n"
+            f"📊 {total}/{MAX_MEDIA}\n\n"
+            f"✅ {total} media accepted\n"
+            f"🧹 {total} media deleted"
+        )
+
+        preview_id = data.get("preview_msg_id")
+
+        # =========================
+        # SAFE UPDATE (WAJIB)
+        # =========================
+        if preview_id:
+            await safe_update(
+                message.bot,
+                message.chat.id,
+                preview_id,
+                text,
+                user_id
+            )
+
+        # =========================
+        # DONE STATE (TOMBOL)
+        # =========================
+        if total >= MAX_MEDIA:
+
+            kb = InlineKeyboardBuilder()
+            kb.button(text="✅ DONE", callback_data="done_upfile")
+            kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
+            kb.adjust(2)
+
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=preview_id,
+                    text=text + "\n\n🚀 Siap disimpan",
+                    reply_markup=kb.as_markup()
+                )
+            except:
+                pass
 # =========================
 # CANCEL
 # =========================
@@ -489,44 +497,25 @@ async def finalize_save(message: Message, state: FSMContext):
 # =========================
 async def show_progress(message, total):
 
-    MAX_BAR = 10  # biar gak kepanjangan
-    steps = min(total, MAX_BAR)
-
-    for i in range(1, steps + 1):
-
-        filled = i
-        empty = MAX_BAR - i
-
-        bar = "█" * filled + "░" * empty
-
-        progress = int(i / steps * total)
-
-        text = (
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-            "⏳ PROCESSING\n"
-            f"[{bar}]\n"
-            f"📊 {progress}/{total}"
-        )
-
-        try:
-            await message.edit_text(text)
-        except Exception:
-            pass
-
-        # delay adaptif (biar gak kerasa bot kaku)
-        await asyncio.sleep(0.25)
-
-    # =========================
-    # FINAL STATE
-    # =========================
-    final_text = (
+    text = (
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-        "✅ UPLOAD DONE\n"
-        f"[{'█' * MAX_BAR}]\n"
-        f"📊 {total}/{total}"
+        "⏳ MENYIMPAN...\n"
+        f"📦 {total} FILE"
     )
 
     try:
-        await message.edit_text(final_text)
-    except Exception:
+        await message.edit_text(text)
+    except:
+        pass
+
+    # delay kecil biar kerasa proses
+    await asyncio.sleep(0.8)
+
+    try:
+        await message.edit_text(
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+            "✅ SUCCESS\n"
+            f"📦 {total} FILE TERSIMPAN"
+        )
+    except:
         pass
