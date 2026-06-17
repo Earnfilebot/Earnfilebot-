@@ -38,7 +38,6 @@ async def check_sub_callback(call: CallbackQuery):
         call.bot,
         call.message,
         user_id,
-        call.from_user.username or "unknown"
     )
 
     await call.answer("✅ Verifikasi berhasil")
