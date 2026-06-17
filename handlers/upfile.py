@@ -349,15 +349,13 @@ async def finalize_save(message: Message, state: FSMContext):
                     message.chat.id,
                     msg_id
                 )
-        except TelegramBadRequest:
+        except:
             pass
 
         media = data.get("media", [])
 
         if not media:
-            return await message.answer(
-                "❌ Tidak ada media yang diupload"
-            )
+            return await message.answer("❌ Tidak ada media yang diupload")
 
         file_type = data.get("file_type", "free")
         is_paid = data.get("is_paid", False)
@@ -365,9 +363,8 @@ async def finalize_save(message: Message, state: FSMContext):
 
         pool = await get_pool()
 
-        # Generate code unik
+        # generate code unik
         while True:
-
             code = "EFB-" + "".join(
                 random.choices(
                     string.ascii_uppercase + string.digits,
@@ -383,27 +380,25 @@ async def finalize_save(message: Message, state: FSMContext):
             if not exists:
                 break
 
-        # Save database
+        # =========================
+        # FIXED INSERT (IMPORTANT)
+        # =========================
         await pool.execute(
             """
             INSERT INTO files
             (
                 code,
                 media,
-                file_id,
                 type,
                 price,
                 owner_id,
                 media_count
             )
             VALUES
-            (
-                $1,$2,$3,$4,$5,$6,$7
-            )
+            ($1,$2,$3,$4,$5,$6)
             """,
             code,
-            json.dumps(media),
-            media[0]["file_id"],
+            json.dumps(media, ensure_ascii=False),
             file_type,
             price,
             message.from_user.id,
@@ -424,19 +419,10 @@ async def finalize_save(message: Message, state: FSMContext):
         if is_paid:
             text += f"💰 Price : Rp {price:,}\n"
 
-        text += (
-            "\n━━━━━━━━━━━━━━\n"
-            "📥 Gunakan kode di atas untuk akses file."
-        )
+        text += "\n━━━━━━━━━━━━━━\n📥 Gunakan kode di atas untuk akses file."
 
-        await message.answer(
-            text,
-            parse_mode="Markdown"
-        )
+        await message.answer(text, parse_mode="Markdown")
 
-        # =========================
-        # LOG TO CHANNEL (FIXED)
-        # =========================
         try:
             await message.bot.send_message(
                 CHANNEL_ID,
