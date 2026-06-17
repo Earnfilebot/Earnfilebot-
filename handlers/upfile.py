@@ -18,7 +18,7 @@ from database import get_pool
 from utils.force_sub import check_force_sub
 from keyboards.join import join_kb
 
-
+router = Router()
 # =========================
 # GLOBAL CONFIG
 # =========================
