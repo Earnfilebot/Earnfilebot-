@@ -3,6 +3,7 @@ import json
 import random
 import string
 import time
+import re
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
@@ -22,46 +23,54 @@ from keyboards.join import join_kb
 # GLOBAL CONFIG
 # =========================
 MAX_MEDIA = 200
-UPDATE_DELAY = 0.5 # anti spam edit (detik)
+UPDATE_DELAY = 0.25
 
-router = Router()
-
-_last_update: dict[int, float] = {}  # user_id: last_update_time
+_last_update: dict[int, float] = {}
 _user_locks: dict[int, asyncio.Lock] = {}
 
+_lock_init = asyncio.Lock()
+
+
+async def get_lock(user_id: int) -> asyncio.Lock:
+    async with _lock_init:
+        lock = _user_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _user_locks[user_id] = lock
+        return lock
 # =========================
 # SAFE EDIT MESSAGE
 # =========================
 async def safe_update(bot, chat_id, message_id, text, user_id):
     now = time.time()
-
     last = _last_update.get(user_id, 0)
 
-    # ⛔ throttle
-    if now - last < UPDATE_DELAY:
-        return
+    # anti spam update (tapi tetap smooth)
+    wait = UPDATE_DELAY - (now - last)
+    if wait > 0:
+        await asyncio.sleep(wait)
 
-    _last_update[user_id] = now
+    _last_update[user_id] = time.time()
 
     try:
         await bot.edit_message_text(
+            text=text,
             chat_id=chat_id,
-            message_id=message_id,
-            text=text
+            message_id=message_id
         )
 
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            return
+    except TelegramBadRequest:
+        # message sudah tidak valid / sudah kehapus → abaikan
+        return
 
     except Exception:
-        # silent fail (biar tidak spam log)
-        pass
+        # error lain juga jangan bikin bot crash
+        return
 # =========================
 # STATE
 # =========================
 class UploadState(StatesGroup):
-    wait_type = State()
+    upload = State()
     wait_price = State()
 
 # =========================
@@ -108,45 +117,32 @@ async def generate_unique_code(pool, media_count, media_type):
 @router.callback_query(F.data == "upfile")
 async def start_upfile(call: CallbackQuery, state: FSMContext):
 
-    # =========================
-    # CLEAR STATE LAMA
-    # =========================
-    await state.clear()
+    async with get_lock(call.from_user.id):
 
-    # =========================
-    # FORCE SUB CHECK
-    # =========================
-    if not await check_force_sub(call.bot, call.from_user.id):
-        return await call.message.answer(
-            "❌ Join channel terlebih dahulu",
-            reply_markup=join_kb()
+        await state.clear()
+
+        ok = await check_force_sub(call.bot, call.from_user.id)
+        if not ok:
+            return await call.message.answer(
+                "❌ Join channel terlebih dahulu",
+                reply_markup=join_kb()
+            )
+
+        msg = await call.message.edit_text(
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
         )
 
-    # =========================
-    # SEND UPLOAD UI
-    # =========================
-    msg = await call.message.edit_text(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "📤 KIRIM MEDIA SEKARANG"
-    )
-
-    # =========================
-    # INIT STATE (FIXED & CONSISTENT)
-    # =========================
-    await state.update_data(
-        media=[],
-        idle_msg_id=msg.message_id,
-        progress_msg_id=None,
-        upload_mode=True,
-        total_received=0,
-        saved=False,
-        type=None,
-        is_paid=False,
-        price=0
-    )
-
-    await call.answer()
+        await state.update_data(
+            upload_mode=True,   # 🔥 FIX WAJIB
+            media=[],
+            progress_msg_id=msg.message_id,
+            total_received=0,
+            file_type=None,
+            is_paid=False,
+            price=0,
+            saving=False,
+            finalizing=False
+        )
 # =========================
 # RECEIVE MEDIA
 # =========================
@@ -154,112 +150,75 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 async def receive_media(message: Message, state: FSMContext):
 
     user_id = message.from_user.id
+    lock = get_lock(user_id)
 
-    # =========================
-    # USER LOCK (SAFE INIT)
-    # =========================
-    if user_id not in _user_locks:
-        _user_locks[user_id] = asyncio.Lock()
-
-    async with _user_locks[user_id]:
+    async with lock:
 
         data = await state.get_data()
 
-        # =========================
-        # VALIDASI MODE UPLOAD
-        # =========================
-        if not data.get("upload_mode"):
+        # ❗ HARD SESSION CHECK
+        if not data or data.get("upload_mode") is not True:
             return
 
-        media = data.get("media", [])
-        total = data.get("total_received", 0)
+        media = data.get("media") or []
 
-        # =========================
-        # LIMIT SAFETY
-        # =========================
-        if len(media) >= 200:
+        if len(media) >= MAX_MEDIA:
             return await message.answer("❌ Maksimal 200 media")
 
-        # =========================
-        # DETECT FILE
-        # =========================
+        # detect file
         if message.document:
             fid = message.document.file_id
             ftype = "document"
         elif message.video:
             fid = message.video.file_id
             ftype = "video"
-        else:
+        elif message.photo:
             fid = message.photo[-1].file_id
             ftype = "photo"
+        else:
+            return
 
-        # =========================
-        # APPEND MEDIA
-        # =========================
-        media.append({"file_id": fid, "type": ftype})
-        total += 1
+        # 🔥 IMMUTABLE UPDATE (FIX RACE)
+        media = media + [{"file_id": fid, "type": ftype}]
+        await state.update_data(media=media)
 
-        await state.update_data(media=media, total_received=total)
-
-        # delete user message (clean UI)
         try:
             await message.delete()
         except:
             pass
 
-        # =========================
-        # INIT PROGRESS (FIRST MEDIA ONLY)
-        # =========================
-        if total == 1:
+        msg_id = data.get("progress_msg_id")
 
-            idle_id = data.get("idle_msg_id")
-
-            if idle_id:
-                try:
-                    await message.bot.delete_message(message.chat.id, idle_id)
-                except:
-                    pass
-
+        if not msg_id:
             progress = await message.bot.send_message(
                 message.chat.id,
                 "📦 UPLOADING...\n[░░░░░░░░░░]\n0/200"
             )
-
-            await state.update_data(progress_msg_id=progress.message_id)
-
             msg_id = progress.message_id
+            await state.update_data(progress_msg_id=msg_id)
 
-        else:
-            msg_id = data.get("progress_msg_id")
+        total = len(media)
 
-        # =========================
-        # SAFETY CHECK (IMPORTANT)
-        # =========================
-        if not msg_id:
-            return
-
-        # =========================
-        # PROGRESS BAR
-        # =========================
         bar_len = 10
-        filled = int((total / 200) * bar_len)
+        filled = int(total / MAX_MEDIA * bar_len)
         bar = "█" * filled + "░" * (bar_len - filled)
 
         text = (
             "📦 UPLOADING...\n"
             f"[{bar}]\n"
-            f"{total}/200\n"
+            f"{total}/{MAX_MEDIA}\n"
             "✅ accepted"
         )
 
-        await safe_update(message.bot, message.chat.id, msg_id, text, user_id)
+        await safe_update(
+            message.bot,
+            message.chat.id,
+            msg_id,
+            text,
+            user_id
+        )
 
-        # =========================
-        # BUTTON (ANTI SPAM EDIT FIX)
-        # =========================
         if total == 1 or total % 5 == 0:
-            # update button tidak tiap message (biar tidak spam API)
-
             kb = InlineKeyboardBuilder()
             kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
             kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
@@ -295,368 +254,140 @@ async def choose_type(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
 
-    # =========================
-    # VALIDASI MEDIA
-    # =========================
-    media = data.get("media")
-    if not media:
-        return await call.answer("❌ Media kosong", show_alert=True)
+    if not data.get("media"):
+        return await call.answer("❌ No media", show_alert=True)
 
-    # =========================
-    # ANTI DOUBLE STATE FLOW
-    # =========================
-    if data.get("saved"):
-        return await call.answer("⚠️ Sudah diproses", show_alert=True)
+    if data.get("finalizing"):
+        return
 
-    # =========================
-    # SET STATE
-    # =========================
-    await state.set_state(UploadState.wait_type)
-
-    # =========================
-    # BUILD KEYBOARD
-    # =========================
     kb = InlineKeyboardBuilder()
     kb.button(text="🆓 FREE", callback_data="type_free")
     kb.button(text="💰 PAID", callback_data="type_paid")
     kb.adjust(2)
 
-    # =========================
-    # UPDATE UI
-    # =========================
-    try:
-        await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📦 PILIH TYPE",
-            reply_markup=kb.as_markup()
-        )
-    except:
-        pass
+    await state.set_state(UploadState.upload)
 
-    await call.answer()
+    await call.message.edit_text(
+        "📦 PILIH TYPE",
+        reply_markup=kb.as_markup()
+    )
 # =========================
 # HANDLE TYPE
 # =========================
-@router.callback_query(F.data.startswith("type_"), UploadState.wait_type)
+@router.callback_query(F.data.startswith("type_"), UploadState.upload)
 async def handle_type(call: CallbackQuery, state: FSMContext):
 
     choice = call.data.split("_")[1]
 
-    # =========================
-    # FREE
-    # =========================
     if choice == "free":
 
         await state.update_data(
             file_type="free",
             is_paid=False,
-            price=0
+            price=0,
+            finalizing=True
         )
 
-        await call.answer("Free selected")
-
-        # langsung final save
         return await finalize_save(call.message, state)
 
-    # =========================
-    # PAID
-    # =========================
-    if choice == "paid":
+    await state.update_data(
+        file_type="paid",
+        is_paid=True
+    )
 
-        await state.update_data(
-            file_type="paid",
-            is_paid=True,
-            price=0  # sementara, nanti diisi user
-        )
-
-        await state.set_state(UploadState.wait_price)
-
-        await call.answer()
-
-        return await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n💰 MASUKKAN HARGA\n\nContoh: 5000"
-        )
+    await state.set_state(UploadState.wait_price)
+    await call.message.edit_text("💰 INPUT PRICE")
 # =========================
 # INPUT PRICE
 # =========================
-import re
-
 @router.message(UploadState.wait_price)
 async def input_price(message: Message, state: FSMContext):
 
-    text = message.text.lower()
+    if not message.text:
+        return await message.answer("❌ Invalid")
 
-    # =========================
-    # CLEAN INPUT (hapus rp, spasi, titik)
-    # =========================
-    cleaned = re.sub(r"[^0-9]", "", text)
+    cleaned = re.sub(r"[^0-9]", "", message.text)
 
     if not cleaned:
-        return await message.answer("❌ Harga tidak valid")
+        return await message.answer("❌ Invalid")
 
     price = int(cleaned)
 
-    # =========================
-    # VALIDASI
-    # =========================
-    if price < 1000:
-        return await message.answer("❌ Minimal harga 1000")
+    if price < 1000 or price > 100000:
+        return await message.answer("❌ Range 1000 - 100000")
 
-    if price > 100_000:
-        return await message.answer("❌ Maksimal 100000")
+    await state.update_data(
+        price=price,
+        finalizing=False  # reset dulu
+    )
 
-    # =========================
-    # SAVE
-    # =========================
-    await state.update_data(price=price)
-
-    # =========================
-    # CLEAN CHAT
-    # =========================
     try:
         await message.delete()
     except:
         pass
 
-    # =========================
-    # CONTINUE FLOW
-    # =========================
     await finalize_save(message, state)
 # =========================
 # DONE
 # =========================
-@router.callback_query(F.data == "done_upfile")
-async def done(call: CallbackQuery, state: FSMContext):
-
-    user_id = call.from_user.id
-
-    if user_id not in _user_locks:
-        _user_locks[user_id] = asyncio.Lock()
-
-    async with _user_locks[user_id]:
-
-        data = await state.get_data()
-        media = data.get("media")
-
-        if not media:
-            return await call.answer("❌ No media", show_alert=True)
-
-        if data.get("saved"):
-            return await call.answer("⚠️ Sudah tersimpan", show_alert=True)
-
-        await call.answer("⏳ Menyimpan...")
-
-        saved = False
-
-        try:
-            await show_progress(call.message, len(media))
-            await finalize_save(call.message, state)
-            saved = True
-
-        except Exception as e:
-            print("SAVE ERROR:", e)
-            try:
-                await call.message.answer("❌ Gagal menyimpan data")
-            except:
-                pass
-
-        finally:
-            await state.update_data(saved=saved)
-# =========================
-# SAVE CORE (HARDENED)
-# =========================
 async def finalize_save(message: Message, state: FSMContext):
 
-    pool = await get_pool()
-    data = await state.get_data()
+    user_id = message.from_user.id
 
-    # =========================
-    # VALIDASI MEDIA
-    # =========================
-    media = data.get("media") or []
-    if not media:
-        return await message.answer("❌ Media kosong")
+    async with get_lock(user_id):
 
-    # =========================
-    # SAFE FIELD HANDLING
-    # =========================
-    is_paid = data.get("is_paid", False)
+        data = await state.get_data()
 
-    file_type = data.get("file_type")
-    if not file_type:
-        file_type = "paid" if is_paid else "free"
+        # 🔒 HARD GUARD
+        if data.get("saving"):
+            return
 
-    price = int(data.get("price") or 0)
+        await state.update_data(saving=True)
 
-    media_count = len(media)
-    user = message.from_user
-
-    # =========================
-    # DETECT MEDIA TYPE (SAFE)
-    # =========================
-    first_item = media[0] if isinstance(media[0], dict) else {}
-
-    first_type = first_item.get("type", "document")
-
-    suffix_map = {
-        "video": "v",
-        "photo": "p",
-        "document": "d"
-    }
-
-    suffix = suffix_map.get(first_type, "m")
-
-    # =========================
-    # GENERATE CODE
-    # =========================
-    code = await generate_unique_code(
-        pool,
-        media_count,
-        suffix
-    )
-
-    # =========================
-    # DATABASE TRANSACTION (SAFE)
-    # =========================
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-
-            await conn.execute(
-                """
-                INSERT INTO files (
-                    code, media, owner_id,
-                    media_count, price, type, creator
-                )
-                VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """,
-                code,
-                json.dumps(media),
-                user.id,
-                media_count,
-                price,
-                file_type,
-                user.full_name
-            )
-
-    # =========================
-    # CLEAR STATE
-    # =========================
-    await state.clear()
-
-    # =========================
-    # FORMAT PRICE (CLEAN)
-    # =========================
-    price_text = "FREE" if price == 0 else f"Rp {price:,}".replace(",", ".")
-
-    # =========================
-    # OUTPUT MESSAGE
-    # =========================
-    text = (
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "✅ <b>UPLOAD SUCCESS</b>\n"
-        "──────────────────\n\n"
-        f"🔑 <b>CODE</b> : <code>{code}</code>\n"
-        f"📦 <b>FILES</b> : {media_count}\n"
-        f"💰 <b>TYPE</b> : {file_type.upper()}\n"
-        f"💵 <b>PRICE</b> : {price_text}\n"
-        f"👤 <b>OWNER</b> : {user.full_name}\n"
-        "━━━━━━━━━━━━━━━━━━"
-    )
-
-    # =========================
-    # SEND RESULT (SAFE)
-    # =========================
-    try:
-        await message.edit_text(text, parse_mode="HTML")
-    except:
         try:
-            await message.answer(text, parse_mode="HTML")
-        except:
-            pass
+            media = data.get("media") or []
+            if not media:
+                return await message.answer("❌ No media")
 
-    # =========================
-    # LOG CHANNEL (SAFE)
-    # =========================
-    try:
-        await message.bot.send_message(
-            CHANNEL_ID,
-            text,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        print("LOG CHANNEL ERROR:", e)
-# =========================
-# PROGRESS (OPTIMIZED)
-# =========================
+            file_type = data.get("file_type") or "free"
+            is_paid = data.get("is_paid", file_type == "paid")
 
-import asyncio
-from aiogram.exceptions import TelegramBadRequest
+            price = int(data.get("price") or 0) if is_paid else 0
 
-async def show_progress(message, total):
+            pool = await get_pool()
 
-    frames = [
-        "⏳ MENYIMPAN",
-        "⏳ MENYIMPAN.",
-        "⏳ MENYIMPAN..",
-        "⏳ MENYIMPAN..."
-    ]
+            code = await generate_unique_code(pool, len(media), file_type)
 
-    last_text = None
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO files
+                    (code, media, owner_id, media_count, price, type, creator)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    code,
+                    json.dumps(media),
+                    user_id,
+                    len(media),
+                    price,
+                    file_type,
+                    message.from_user.full_name
+                )
 
-    try:
-        # =========================
-        # LOADING ANIMATION
-        # =========================
-        for frame in frames:
+            # ❗ JANGAN CLEAR DULU DATA YANG MASIH DIPAKAI
+            await state.update_data(finalizing="done")
 
             text = (
-                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-                f"{frame}\n"
-                f"📦 {total} FILE"
+                "💎 PREMIUM SAVED\n" if is_paid else "🎉 FREE SAVED\n"
+            ) + (
+                f"\n🔑 CODE: {code}\n"
+                f"📦 MEDIA: {len(media)}\n"
+                f"💰 PRICE: Rp {price:,}" if is_paid else
+                f"\n🔑 CODE: {code}\n📦 MEDIA: {len(media)}"
             )
 
-            # =========================
-            # AVOID DUPLICATE EDIT
-            # =========================
-            if text == last_text:
-                continue
+            await message.answer(text)
+            await message.bot.send_message(CHANNEL_ID, text)
 
-            last_text = text
-
-            try:
-                await message.edit_text(text)
-            except TelegramBadRequest as e:
-                if "message is not modified" in str(e):
-                    pass
-                else:
-                    break
-
-            await asyncio.sleep(0.5)
-
-        # =========================
-        # SUCCESS STATE
-        # =========================
-        success_text = (
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "✅ SUCCESS SAVED\n"
-            "──────────────────\n"
-            f"📦 FILES: {total}\n"
-            "━━━━━━━━━━━━━━━━━━"
-        )
-
-        try:
-            await message.edit_text(success_text)
-        except:
-            try:
-                await message.answer("✅ SUCCESS SAVED")
-            except:
-                pass
-
-    except Exception as e:
-        # fallback safety
-        try:
-            await message.answer("✅ SUCCESS SAVED")
-        except:
-            pass
-        print("PROGRESS ERROR:", e)
+        finally:
+            await state.update_data(saving=False)
