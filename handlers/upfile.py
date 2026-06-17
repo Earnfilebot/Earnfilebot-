@@ -433,3 +433,21 @@ async def finalize_save(message: Message, state: FSMContext):
             text,
             parse_mode="Markdown"
         )
+
+        # =========================
+        # LOG TO CHANNEL (FIXED)
+        # =========================
+        try:
+            await message.bot.send_message(
+                CHANNEL_ID,
+                f"""📦 FILE CREATED
+
+🔑 CODE: {code}
+👤 USER ID: {message.from_user.id}
+📁 MEDIA: {len(media)}
+💎 TYPE: {"PAID" if is_paid else "FREE"}
+💰 PRICE: Rp {price:,}
+"""
+            )
+        except Exception as e:
+            print("LOG ERROR:", e)
