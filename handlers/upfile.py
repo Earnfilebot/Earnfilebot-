@@ -112,8 +112,14 @@ async def generate_unique_code(pool, media_count, media_type):
 # =========================
 # START UPFILE
 # =========================
+import time
+
 @router.callback_query(F.data == "upfile")
 async def start_upfile(call: CallbackQuery, state: FSMContext):
+
+    start = time.time()
+
+    await call.answer()  # hilangkan loading Telegram
 
     async with get_lock(call.from_user.id):
 
@@ -126,14 +132,30 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
                 reply_markup=join_kb()
             )
 
-        text = "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
+        text_final = "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
+
+        elapsed = time.time() - start
+
+        # =========================
+        # 🔥 SMART UX DECISION
+        # =========================
 
         try:
-            if call.message.text != text:
-                msg = await call.message.edit_text(text)
+            if elapsed > 0.15:
+                # kalau agak lambat → kasih proses dulu
+                processing = "⏳ Processing...\n\n" + text_final
+                msg = await call.message.edit_text(processing)
+
+                # optional kecil delay biar smooth feel
+                await asyncio.sleep(0.1)
+
+                await call.message.edit_text(text_final)
+
             else:
-                msg = call.message
-        except Exception:
+                # kalau cepat → langsung tampil final UI
+                msg = await call.message.edit_text(text_final)
+
+        except TelegramBadRequest:
             msg = call.message
 
         await state.update_data(
