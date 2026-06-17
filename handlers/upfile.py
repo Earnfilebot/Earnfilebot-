@@ -311,7 +311,6 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
         return await call.message.edit_text(
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n💰 MASUKKAN HARGA\n\nContoh: 5000"
         )
-        )
 # =========================
 # INPUT PRICE
 # =========================
