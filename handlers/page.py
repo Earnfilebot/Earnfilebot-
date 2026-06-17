@@ -139,24 +139,18 @@ async def page_handler(call: CallbackQuery):
         )
 
         # =========================
-        # BUILD MEDIA GROUP (FIXED)
+        # TAKE FIRST MEDIA ONLY (IMPORTANT)
         # =========================
-        group = []
+        first = chunk[0]
+        fid = clean_file_id(first.get("file_id"))
+        ftype = normalize_type(first.get("type"))
 
-        for m in chunk:
-            fid = clean_file_id(m.get("file_id"))
-            ftype = normalize_type(m.get("type"))
+        if not fid:
+            return await call.answer("❌ Media invalid", show_alert=True)
 
-            if not fid:
-                continue
-
-            if ftype == "photo":
-                group.append(InputMediaPhoto(media=fid))
-            elif ftype == "video":
-                group.append(InputMediaVideo(media=fid))
-            else:
-                group.append(InputMediaDocument(media=fid))
-
+        # =========================
+        # KEYBOARD
+        # =========================
         nav = build_page_buttons(code, page, total_page)
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -174,26 +168,31 @@ async def page_handler(call: CallbackQuery):
         ])
 
         # =========================
-        # SEND PROPERLY
+        # SAFE EDIT (ONLY THIS WAY)
         # =========================
         try:
-            # kalau cuma 1 media → edit_media
-            if len(group) == 1:
-                await call.message.edit_media(media=group[0])
+            if ftype == "photo":
+                await call.message.edit_media(
+                    media=InputMediaPhoto(media=fid, caption=caption),
+                    reply_markup=keyboard
+                )
 
-            # kalau banyak → kirim media group (MAX 10 aman)
+            elif ftype == "video":
+                await call.message.edit_media(
+                    media=InputMediaVideo(media=fid, caption=caption),
+                    reply_markup=keyboard
+                )
+
             else:
-                await call.message.answer_media_group(group)
+                await call.message.edit_media(
+                    media=InputMediaDocument(media=fid, caption=caption),
+                    reply_markup=keyboard
+                )
 
-                # optional: kasih caption baru setelah group
-                await call.message.answer(caption, reply_markup=keyboard)
-
-        except Exception as e:
-            await call.message.answer(caption)
-
-        try:
-            await call.message.edit_reply_markup(reply_markup=keyboard)
         except:
-            pass
+            await call.message.edit_text(
+                caption,
+                reply_markup=keyboard
+            )
 
         await call.answer()
