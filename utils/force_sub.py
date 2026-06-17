@@ -28,7 +28,7 @@ async def check_force_sub(bot: Bot, user_id: int) -> bool:
                     f"Force sub error | channel={channel_id} | user={user_id} | error={e}"
                 )
 
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.7)
 
         if not ok:
             return False
