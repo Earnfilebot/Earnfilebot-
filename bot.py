@@ -7,6 +7,13 @@ from config import BOT_TOKEN
 from database import connect_db, close_db
 
 # =========================
+# HIDE AIROGRAM SPAM LOG
+# =========================
+logging.getLogger("aiogram").setLevel(logging.WARNING)
+logging.getLogger("aiohttp").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+# =========================
 # ROUTERS
 # =========================
 from handlers.start import router as start_router
@@ -40,16 +47,16 @@ dp.include_router(admin_router)
 async def main():
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format="%(asctime)s | %(levelname)s | %(message)s"
     )
 
     await connect_db()
-    logging.info("DATABASE CONNECTED")
+    print("DATABASE CONNECTED")
 
     try:
 
-        logging.info("BOT STARTED")
+        print("BOT STARTED")
 
         await dp.start_polling(
             bot,
@@ -61,7 +68,7 @@ async def main():
         await close_db()
         await bot.session.close()
 
-        logging.info("BOT STOPPED")
+        print("BOT STOPPED")
 
 
 # =========================
