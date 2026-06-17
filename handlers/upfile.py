@@ -65,18 +65,31 @@ class UploadState(StatesGroup):
     wait_type = State()
     wait_price = State()
 
-
 # =========================
-# GENERATE CODE
+# GENERATE CODE (PREMIUM LONG STYLE)
 # =========================
 def generate_code(media_count: int, media_type: str) -> str:
-    ...
 
+    type_map = {
+        "photo": "p",
+        "video": "v",
+        "document": "d"
+    }
 
+    type_part = type_map.get(media_type, "m")
+
+    # random panjang (premium feel)
+    rand_part = ''.join(random.choices(
+        string.ascii_letters + string.digits,
+        k=18
+    ))
+
+    return f"EFB-{media_count}{type_part}-{rand_part}"
 # =========================
 # GENERATE UNIQUE CODE (NEW)
 # =========================
 async def generate_unique_code(pool, media_count, media_type):
+
     for _ in range(5):
         code = generate_code(media_count, media_type)
 
@@ -88,7 +101,8 @@ async def generate_unique_code(pool, media_count, media_type):
         if not exists:
             return code
 
-    raise Exception("Failed to generate unique code")
+    # fallback super rare
+    return f"EFB-{media_count}{int(time.time())}"
 # =========================
 # START UPFILE
 # =========================
