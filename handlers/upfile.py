@@ -126,12 +126,18 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
                 reply_markup=join_kb()
             )
 
-        msg = await call.message.edit_text(
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
-        )
+        text = "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 SEND MEDIA NOW"
+
+        try:
+            if call.message.text != text:
+                msg = await call.message.edit_text(text)
+            else:
+                msg = call.message
+        except Exception:
+            msg = call.message
 
         await state.update_data(
-            upload_mode=True,   # 🔥 FIX WAJIB
+            upload_mode=True,
             media=[],
             progress_msg_id=msg.message_id,
             total_received=0,
