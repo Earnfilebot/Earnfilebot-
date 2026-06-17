@@ -37,7 +37,14 @@ def get_lock(user_id: int):
 # =========================
 # SAFE EDIT
 # =========================
-async def safe_update(bot, chat_id, message_id, text, user_id):
+async def safe_update(
+    bot,
+    chat_id,
+    message_id,
+    text,
+    user_id,
+    reply_markup=None
+):
     now = time.time()
     last = _last_update.get(user_id, 0)
 
@@ -48,14 +55,14 @@ async def safe_update(bot, chat_id, message_id, text, user_id):
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=text
+            text=text,
+            reply_markup=reply_markup
         )
+
         _last_update[user_id] = time.time()
 
     except TelegramBadRequest:
         pass
-
-
 # =========================
 # STATE
 # =========================
@@ -153,7 +160,10 @@ async def receive_media(message: Message, state: FSMContext):
 
         total = len(media)
 
-        progress = min(10, int((total / MAX_MEDIA) * 10))
+        progress = min(
+            10,
+            int((total / MAX_MEDIA) * 10)
+        )
 
         bar = (
             "█" * progress +
@@ -169,13 +179,25 @@ async def receive_media(message: Message, state: FSMContext):
 
         msg_id = data.get("progress_msg_id")
 
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="⏹ STOP & SAVE",
+            callback_data="save_upfile"
+        )
+        kb.button(
+            text="❌ CANCEL",
+            callback_data="cancel_upfile"
+        )
+        kb.adjust(2)
+
         if msg_id:
             await safe_update(
                 message.bot,
                 message.chat.id,
                 msg_id,
                 text,
-                message.from_user.id
+                message.from_user.id,
+                kb.as_markup()
             )
 # =========================
 # CANCEL
