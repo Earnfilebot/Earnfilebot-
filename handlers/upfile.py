@@ -221,7 +221,7 @@ async def receive_media(message: Message, state: FSMContext):
         if total >= 1:
 
             kb = InlineKeyboardBuilder()
-            kb.button(text="⏹ STOP & SAVE", callback_data="done_upfile")
+            kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
             kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
             kb.adjust(2)
 
