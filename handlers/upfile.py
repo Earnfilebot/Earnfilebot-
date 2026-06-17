@@ -26,18 +26,16 @@ MAX_MEDIA = 200
 UPDATE_DELAY = 0.25
 
 _last_update: dict[int, float] = {}
-_user_locks: dict[int, asyncio.Lock] = {}
 
 _lock_init = asyncio.Lock()
+_user_locks: dict[int, asyncio.Lock] = {}
 
-
-async def get_lock(user_id: int) -> asyncio.Lock:
-    async with _lock_init:
-        lock = _user_locks.get(user_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _user_locks[user_id] = lock
-        return lock
+def get_lock(user_id: int) -> asyncio.Lock:
+    lock = _user_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_locks[user_id] = lock
+    return lock
 # =========================
 # SAFE EDIT MESSAGE
 # =========================
