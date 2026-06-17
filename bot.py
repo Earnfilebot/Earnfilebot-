@@ -2,16 +2,21 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
 from database import connect_db, close_db
 
 # =========================
-# HIDE AIROGRAM SPAM LOG
+# LOGGING (PRODUCTION SAFE)
 # =========================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
 logging.getLogger("aiogram").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
-logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 # =========================
 # ROUTERS
@@ -22,12 +27,17 @@ from handlers.upfile import router as upfile_router
 from handlers.getfile import router as getfile_router
 from handlers.payment import router as payment_router
 from handlers.page import router as page_router
+from handlers.account import router as account_router
 from handlers.admin import router as admin_router
 
 # =========================
-# INIT
+# INIT (FIXED)
 # =========================
-bot = Bot(BOT_TOKEN)
+bot = Bot(
+    BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+
 dp = Dispatcher()
 
 # =========================
@@ -39,24 +49,18 @@ dp.include_router(upfile_router)
 dp.include_router(getfile_router)
 dp.include_router(payment_router)
 dp.include_router(page_router)
+dp.include_router(account_router)
 dp.include_router(admin_router)
 
 # =========================
 # START BOT
 # =========================
 async def main():
-
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s | %(levelname)s | %(message)s"
-    )
-
     await connect_db()
-    print("DATABASE CONNECTED")
+    logging.info("DATABASE CONNECTED")
 
     try:
-
-        print("BOT STARTED")
+        logging.info("BOT STARTED")
 
         await dp.start_polling(
             bot,
@@ -64,11 +68,12 @@ async def main():
         )
 
     finally:
+        logging.info("SHUTTING DOWN BOT...")
 
         await close_db()
         await bot.session.close()
 
-        print("BOT STOPPED")
+        logging.info("BOT STOPPED")
 
 
 # =========================
