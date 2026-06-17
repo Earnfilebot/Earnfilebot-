@@ -179,7 +179,9 @@ async def receive_media(message: Message, state: FSMContext):
         if len(media) >= MAX_MEDIA:
             return await message.answer("❌ Maksimal 200 media")
 
+        # =========================
         # detect file
+        # =========================
         if message.document:
             fid = message.document.file_id
             ftype = "document"
@@ -208,27 +210,19 @@ async def receive_media(message: Message, state: FSMContext):
         # =========================
         if not msg_id:
 
-            progress = await message.bot.send_message(
-                chat_id=message.chat.id,
-                text="📦 UPLOADING...\n[░░░░░░░░░░]\n0/200"
-            )
-
-            msg_id = progress.message_id
-            await state.update_data(progress_msg_id=msg_id)
-
             kb = InlineKeyboardBuilder()
             kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
             kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
             kb.adjust(2)
 
-            try:
-                await message.bot.edit_message_reply_markup(
-                    chat_id=message.chat.id,
-                    message_id=msg_id,
-                    reply_markup=kb.as_markup()
-                )
-            except:
-                pass
+            progress = await message.bot.send_message(
+                chat_id=message.chat.id,
+                text="📦 UPLOADING...\n[░░░░░░░░░░]\n0/200",
+                reply_markup=kb.as_markup()
+            )
+
+            msg_id = progress.message_id
+            await state.update_data(progress_msg_id=msg_id)
 
         # =========================
         # UPDATE PROGRESS TEXT
