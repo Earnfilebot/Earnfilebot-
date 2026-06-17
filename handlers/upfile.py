@@ -288,7 +288,7 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
             price=0
         )
 
-        return await finalize_upload(call, state)
+        return await finalize_save(call.message, state)
 
     # =========================
     # PAID
@@ -328,7 +328,7 @@ async def input_price(message: Message, state: FSMContext):
     except:
         pass
 
-    await finalize_upload(message, state)
+    await finalize_save(message, state)
 # =========================
 # DONE
 # =========================
