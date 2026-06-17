@@ -1,34 +1,44 @@
+import asyncio
+import json
 import random
 import string
-import json
-import asyncio
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database import get_pool
 from config import CHANNEL_ID
+from database import get_pool
+
+from utils.force_sub import check_force_sub
+from keyboards.join import join_kb
+
+
+MAX_MEDIA = 50
 
 router = Router()
-
-
 # =========================
 # STATE
 # =========================
 class UploadState(StatesGroup):
     wait_type = State()
     wait_price = State()
-
-
 # =========================
 # GENERATE CODE
 # =========================
-def generate_code():
-    return "EF_" + "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
+def generate_code(media_count: int, media_type: str):
 
+    random_part = "".join(
+        random.choices(
+            string.ascii_letters + string.digits,
+            k=20
+        )
+    )
+
+    return f"EFB_{random_part}_{media_count}{media_type}"
 
 # =========================
 # START UPFILE
@@ -37,6 +47,15 @@ def generate_code():
 async def start_upfile(call: CallbackQuery, state: FSMContext):
 
     await state.clear()
+
+    if not await check_force_sub(
+        call.bot,
+        call.from_user.id
+    ):
+        return await call.message.answer(
+            "❌ Join channel terlebih dahulu",
+            reply_markup=join_kb()
+        )
 
     msg = await call.message.edit_text(
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n📤 KIRIM MEDIA (foto / video / dokumen)"
@@ -50,8 +69,6 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
     )
 
     await call.answer()
-
-
 # =========================
 # RECEIVE MEDIA
 # =========================
@@ -63,6 +80,13 @@ async def receive_media(message: Message, state: FSMContext):
     if not data.get("upload_mode"):
         return
 
+    media = data.get("media", [])
+
+    if len(media) >= MAX_MEDIA:
+        return await message.answer(
+            "❌ Maksimal 50 media per produk"
+        )
+
     if message.document:
         fid = message.document.file_id
         ftype = "document"
@@ -73,8 +97,10 @@ async def receive_media(message: Message, state: FSMContext):
         fid = message.photo[-1].file_id
         ftype = "photo"
 
-    media = data.get("media", [])
-    media.append({"file_id": fid, "type": ftype})
+    media.append({
+        "file_id": fid,
+        "type": ftype
+    })
 
     await state.update_data(media=media)
 
@@ -182,42 +208,59 @@ async def input_price(message: Message, state: FSMContext):
     raw = "".join(filter(str.isdigit, message.text or ""))
 
     if not raw:
-        return await message.answer("❌ Format salah")
+        return await message.answer(
+            "❌ Format harga salah"
+        )
 
-    await state.update_data(price=int(raw))
+    price = int(raw)
+
+    if price < 100:
+        return await message.answer(
+            "❌ Minimal harga Rp100"
+        )
+
+    await state.update_data(price=price)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ DONE", callback_data="done_upfile")
-    kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
+    kb.button(
+        text="✅ DONE",
+        callback_data="done_upfile"
+    )
+    kb.button(
+        text="❌ CANCEL",
+        callback_data="cancel_upfile"
+    )
     kb.adjust(2)
 
     await message.answer(
-        "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n⚙️ KONFIRMASI",
+        f"𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+        f"💰 HARGA : Rp{price:,}\n\n"
+        f"Klik DONE untuk menyimpan",
         reply_markup=kb.as_markup()
     )
 
 
 # =========================
 # DONE
-# =========================
-@router.callback_query(F.data == "done_upfile")
+# =========================@router.callback_query(F.data == "done_upfile")
 async def done(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
 
-    if data.get("saved"):
-        return await call.answer("⚠️ Sudah tersimpan", show_alert=True)
-
     if not data.get("media"):
         return await call.answer("❌ No media", show_alert=True)
 
+    if data.get("saved"):
+        return await call.answer("⚠️ Sudah tersimpan", show_alert=True)
+
+    # LOCK dulu biar anti double click
     await state.update_data(saved=True)
+
+    await call.answer("⏳ Menyimpan file...")
 
     await show_progress(call.message, len(data["media"]))
 
     await finalize_save(call.message, state)
-
-    await call.answer()
 
 
 # =========================
@@ -235,18 +278,33 @@ async def finalize_save(message: Message, state: FSMContext):
     file_type = data.get("type", "free")
     price = data.get("price", 0)
 
-    code = generate_code()
+    media_count = len(media)
+
+    first_type = media[0]["type"]
+
+    if first_type == "video":
+        suffix = "v"
+    elif first_type == "photo":
+        suffix = "p"
+    else:
+        suffix = "d"
+
+    code = generate_code(media_count, suffix)
+
     user = message.from_user
 
     await pool.execute(
         """
-        INSERT INTO files (code, media, owner_id, media_count, price, type, creator)
+        INSERT INTO files (
+            code, media, owner_id,
+            media_count, price, type, creator
+        )
         VALUES ($1,$2,$3,$4,$5,$6,$7)
         """,
         code,
         json.dumps(media),
         user.id,
-        len(media),
+        media_count,
         price,
         file_type,
         user.full_name
@@ -260,7 +318,7 @@ async def finalize_save(message: Message, state: FSMContext):
         "📦 𝗦𝗨𝗖𝗖𝗘𝗦𝗦 𝗦𝗔𝗩𝗘𝗗\n"
         "──────────────────\n\n"
         f"🔑 CODE : <code>{code}</code>\n"
-        f"📊 MEDIA : {len(media)} FILE\n"
+        f"📊 MEDIA : {media_count} FILE\n"
         f"💰 TYPE : {file_type.upper()}\n"
         f"👤 OWNER : {user.full_name}\n"
         "━━━━━━━━━━━━━━━━━━"
@@ -282,12 +340,28 @@ async def finalize_save(message: Message, state: FSMContext):
 # =========================
 async def show_progress(message, total):
 
+    last = 0
+
     for i in range(1, total + 1):
+
+        # biar gak spam edit tiap langkah kecil (lebih smooth)
+        if i - last < 1:
+            continue
+
+        last = i
+
         try:
             await message.edit_text(
-                f"𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n⏳ UPLOADING\n📊 {i}/{total}"
+                f"𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+                f"⏳ UPLOADING\n"
+                f"📊 {i}/{total}"
             )
-        except:
+
+        except TelegramBadRequest:
+            # kalau message sudah tidak bisa diedit, skip
             pass
 
-        await asyncio.sleep(0.12)
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.2)
