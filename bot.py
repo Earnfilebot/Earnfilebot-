@@ -25,7 +25,7 @@ from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
 from handlers.getfile import router as getfile_router
-from handlers.payment import router as payment_router
+from handlers.buy import router as buy_router
 from handlers.page import router as page_router
 from handlers.account import router as account_router
 from handlers.withdraw import router as withdraw_router
@@ -50,7 +50,7 @@ dp.include_router(start_router)
 dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
 dp.include_router(getfile_router)
-dp.include_router(payment_router)
+dp.include_router(buy_router)
 dp.include_router(page_router)
 dp.include_router(account_router)
 dp.include_router(withdraw_router)
