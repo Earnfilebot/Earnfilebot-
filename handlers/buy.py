@@ -1,32 +1,39 @@
 import json
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import get_pool
 from utils.qr import generate_qr_image
+from utils.payment import create_invoice   # ✅ FIX UTAMA DI SINI
 
 router = Router()
 
 
-def safe_get_data(res):
+# =========================
+# SAFE PARSER BAYARGG RESPONSE
+# =========================
+def extract_data(res):
     if not res:
         return {}
 
     data = res.get("data")
 
-    # kalau string JSON
     if isinstance(data, str):
         try:
             data = json.loads(data)
         except:
             return {}
 
-    if not isinstance(data, dict):
-        return {}
+    if isinstance(data, dict):
+        return data
 
-    return data
+    return {}
 
 
+# =========================
+# BUY HANDLER
+# =========================
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
@@ -56,15 +63,13 @@ async def buy_handler(call: CallbackQuery):
     if not res:
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
 
-    # =========================
-    # SAFE PARSE
-    # =========================
-    data = safe_get_data(res)
+    data = extract_data(res)
 
     qris = data.get("qris_string")
     pay_url = (
         data.get("payment_url")
         or data.get("checkout_url")
+        or data.get("invoice_url")
         or data.get("url")
     )
 
@@ -79,7 +84,7 @@ async def buy_handler(call: CallbackQuery):
             [
                 InlineKeyboardButton(
                     text="💳 BAYAR SEKARANG",
-                    url=pay_url
+                    url=pay_url if pay_url else "https://www.bayar.gg"
                 )
             ],
             [
@@ -91,26 +96,27 @@ async def buy_handler(call: CallbackQuery):
         ]
     )
 
+    caption = (
+        "💰 PEMBAYARAN FILE\n\n"
+        "━━━━━━━━━━━━━━\n"
+        f"📦 CODE: {code}\n"
+        f"💵 PRICE: Rp {amount}\n\n"
+    )
+
     # =========================
-    # QRIS IMAGE (FIXED)
+    # QRIS IMAGE FIX (INI YANG BENAR)
     # =========================
     if qris:
         qr_img = generate_qr_image(qris)
 
         await call.message.answer_photo(
             qr_img,
-            caption=(
-                "💰 PEMBAYARAN FILE\n\n"
-                "━━━━━━━━━━━━━━\n"
-                f"📦 CODE: {code}\n"
-                f"💵 PRICE: Rp {amount}\n\n"
-                "📲 Scan QRIS atau klik tombol di bawah"
-            ),
+            caption=caption + "📲 Scan QRIS atau klik tombol di bawah",
             reply_markup=kb
         )
     else:
         await call.message.answer(
-            "💰 PEMBAYARAN FILE\n\nQRIS tidak tersedia.",
+            caption + "🔗 QRIS tidak tersedia, gunakan tombol di bawah",
             reply_markup=kb
         )
 
