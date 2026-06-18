@@ -18,6 +18,9 @@ router = Router()
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
+    # Jawab callback secepat mungkin
+    await call.answer()
+
     code = call.data.split(":")[1]
     user_id = call.from_user.id
 
@@ -29,10 +32,8 @@ async def buy_handler(call: CallbackQuery):
     )
 
     if not file:
-        return await call.answer(
-            "❌ File tidak ditemukan",
-            show_alert=True
-        )
+        await call.message.answer("❌ File tidak ditemukan")
+        return
 
     # =========================
     # SAFE PRICE
@@ -61,8 +62,7 @@ async def buy_handler(call: CallbackQuery):
             "🆓 FILE GRATIS",
             reply_markup=kb
         )
-
-        return await call.answer()
+        return
 
     # =========================
     # CREATE INVOICE
@@ -74,10 +74,10 @@ async def buy_handler(call: CallbackQuery):
     )
 
     if not res:
-        return await call.answer(
-            "❌ Gagal membuat invoice",
-            show_alert=True
+        await call.message.answer(
+            "❌ Gagal membuat invoice"
         )
+        return
 
     # =========================
     # EXTRACT DATA
@@ -88,10 +88,10 @@ async def buy_handler(call: CallbackQuery):
     if not qris and not pay_url:
         print("DEBUG RES:", res)
 
-        return await call.answer(
-            "❌ Response BayarGG tidak valid",
-            show_alert=True
+        await call.message.answer(
+            "❌ Response BayarGG tidak valid"
         )
+        return
 
     # =========================
     # BUTTON
@@ -127,6 +127,9 @@ async def buy_handler(call: CallbackQuery):
         try:
             qr_img = generate_qr_image(qris)
 
+            if not qr_img:
+                raise ValueError("QR image is None")
+
             photo = BufferedInputFile(
                 qr_img.getvalue(),
                 filename="qris.png"
@@ -151,5 +154,3 @@ async def buy_handler(call: CallbackQuery):
             caption + "🔗 QRIS tidak tersedia",
             reply_markup=kb
         )
-
-    await call.answer()
