@@ -258,42 +258,52 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
     if not data.get("media"):
-        return await call.answer("Upload kosong", show_alert=True)
+        return await call.answer(
+            "Upload kosong",
+            show_alert=True
+        )
 
     choice = call.data.split("_")[1]
 
-    # =========================
-    # FREE FILE
-    # =========================
+    # FREE
     if choice == "free":
 
         await state.update_data(
             file_type="free",
             is_paid=False,
-            price=0
+            price=0,
+            saving=False
         )
 
-        await call.message.edit_text("⏳ Saving...")
+        await call.message.edit_text(
+            "⏳ Saving file..."
+        )
 
         await finalize_save(call.message, state)
         return
 
-    # =========================
-    # PAID FILE
-    # =========================
+    # PAID
     await state.update_data(
         file_type="paid",
         is_paid=True,
-        price=None   # 🔥 IMPORTANT FIX
+        price=None,
+        saving=False   # 🔥 PENTING
     )
 
-    await state.set_state(UploadState.wait_price)
+    await state.set_state(
+        UploadState.wait_price
+    )
 
-    await call.message.edit_text("💰 INPUT PRICE")
+    await call.message.edit_text(
+        "💰 MASUKKAN HARGA FILE\n\n"
+        "Contoh:\n"
+        "<code>5000</code>",
+        parse_mode="HTML"
+    )
 # =========================
 # PRICE
 # =========================
-@router.message(UploadState.wait_price)
+@router.message(F.text, UploadState.wait_price)
 async def input_price(message: Message, state: FSMContext):
 
     data = await state.get_data()
@@ -302,12 +312,15 @@ async def input_price(message: Message, state: FSMContext):
     # ANTI DOUBLE SUBMIT
     # =========================
     if data.get("saving"):
-        return
+        return await message.answer("⏳ Processing...")
 
     if not data.get("media"):
+        await state.clear()
         return await message.answer("❌ Upload kosong")
 
-    cleaned = re.sub(r"[^0-9]", "", message.text or "")
+    text = message.text or ""
+
+    cleaned = re.sub(r"[^0-9]", "", text)
 
     if not cleaned:
         return await message.answer("❌ Masukkan angka yang valid")
@@ -315,25 +328,26 @@ async def input_price(message: Message, state: FSMContext):
     price = int(cleaned)
 
     # =========================
-    # VALIDASI RANGE BAYARGG
+    # VALIDASI RANGE
     # =========================
     if price < 1000 or price > 100000:
         return await message.answer("❌ Range 1000 - 100000")
 
     # =========================
-    # SAVE PRICE KE STATE
+    # LOCK STATE
     # =========================
     await state.update_data(
         price=price,
-        saving=True   # 🔥 penting biar tidak double submit
+        saving=True
     )
 
-    try:
-        await message.delete()
-    except TelegramBadRequest:
-        pass
+    await message.answer("⏳ Saving file...")
 
-    await finalize_save(message, state)
+    try:
+        await finalize_save(message, state)
+    except Exception as e:
+        await state.update_data(saving=False)
+        await message.answer(f"❌ ERROR: {e}")
 # =========================
 # FINAL SAVE
 # =========================
