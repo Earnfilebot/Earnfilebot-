@@ -45,6 +45,9 @@ async def buy_handler(call: CallbackQuery):
     except:
         amount = 0
 
+    # =========================
+    # FREE FILE
+    # =========================
     if amount <= 0:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -68,6 +71,9 @@ async def buy_handler(call: CallbackQuery):
             reply_markup=kb
         )
 
+    # =========================
+    # CREATE INVOICE
+    # =========================
     res = await create_invoice(amount, code, user_id)
 
     if not res:
@@ -78,6 +84,9 @@ async def buy_handler(call: CallbackQuery):
     if not qris:
         return await loading.edit_text("❌ QRIS tidak tersedia")
 
+    # =========================
+    # BUTTON
+    # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -96,10 +105,16 @@ async def buy_handler(call: CallbackQuery):
         f"💵 PRICE: Rp {amount}\n\n"
     )
 
+    # =========================
+    # QRIS GENERATE (FIXED)
+    # =========================
     try:
         await loading.edit_text("⏳ Membuat QRIS...")
 
         qr_img = generate_qr_image(qris)
+
+        if not qr_img:
+            return await loading.edit_text("❌ Gagal generate QR")
 
         photo = BufferedInputFile(
             qr_img.getvalue(),
@@ -117,3 +132,12 @@ async def buy_handler(call: CallbackQuery):
     except Exception as e:
         print("QR ERROR:", repr(e))
         await loading.edit_text("⚠️ Gagal membuat QRIS")
+
+
+# =========================
+# CANCEL HANDLER
+# =========================
+@router.callback_query(F.data == "cancel")
+async def cancel_handler(call: CallbackQuery):
+    await call.answer("❌ Pembayaran dibatalkan", show_alert=True)
+    await call.message.edit_text(home_text())
