@@ -42,7 +42,7 @@ def verify_signature(payload: dict, signature: str):
 # WEBHOOK
 # =========================
 @router.post("/bayargg/webhook")
-async def bayargg_webhook(req: Request, x_signature: str = Header(None)):
+async def webhook(req: Request, x_signature: str = Header(None)):
 
     body = await req.body()
     data = json.loads(body.decode())
@@ -51,110 +51,77 @@ async def bayargg_webhook(req: Request, x_signature: str = Header(None)):
     reference = payload.get("reference")
     status = payload.get("status")
 
-    if not reference or not status:
+    if status != "PAID":
+        return {"ok": True}
+
+    # 🔐 SIGNATURE CHECK
+    expected = hmac.new(
+        BAYARGG_SECRET.encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+
+    if x_signature and not hmac.compare_digest(expected, x_signature):
         return {"ok": False}
-
-    # =========================
-    # SIGNATURE CHECK
-    # =========================
-    if x_signature:
-        expected = hmac.new(
-            BAYARGG_SECRET.encode(),
-            body,
-            hashlib.sha256
-        ).hexdigest()
-
-        if not hmac.compare_digest(expected, x_signature):
-            return {"ok": False, "error": "invalid signature"}
 
     user_id, code = parse_reference(reference)
-    if not user_id or not code:
+    if not user_id:
         return {"ok": False}
-
-    if status.upper() != "PAID":
-        return {"ok": True}
 
     pool = await get_pool()
 
-    # =========================
-    # ANTI DOUBLE PAYMENT
-    # =========================
-    updated = await pool.execute("""
+    # 🔒 ANTI DOUBLE PAYMENT (LOCK ROW)
+    updated = await pool.fetchval("""
         UPDATE payments
         SET status='paid'
         WHERE user_id=$1 AND code=$2 AND status!='paid'
+        RETURNING id
     """, user_id, code)
 
-    if updated == "UPDATE 0":
+    if not updated:
         return {"ok": True}
 
-    # =========================
-    # CEK DUPLICATE TRANSACTION (FIXED POSITION)
-    # =========================
-    sent = await pool.fetchval("""
-        SELECT 1 FROM transactions
-        WHERE user_id=$1 AND code=$2
-    """, user_id, code)
-
-    if sent:
-        return {"ok": True}
-
-    # =========================
-    # AMBIL FILE
-    # =========================
+    # 🔥 ambil file + seller
     file = await pool.fetchrow("""
         SELECT seller_id, price, media
         FROM files
         WHERE code=$1
     """, code)
 
-    if not file:
-        return {"ok": False}
-
     seller_id = file["seller_id"]
-    price = int(file["price"] or 0)
-
-    media = file["media"]
-    if isinstance(media, str):
-        try:
-            media = json.loads(media)
-        except:
-            media = []
-
-    if not isinstance(media, list):
-        media = []
+    price = int(file["price"])
 
     # =========================
-    # HITUNG FEE
+    # FEE SYSTEM
     # =========================
-    admin_fee = int(price * 0.10)
-    seller_income = price - admin_fee
+    fee = int(price * 0.10)
+    seller_income = price - fee
 
     # =========================
-    # UPDATE SALDO SELLER
+    # UPDATE BALANCE SELLER
     # =========================
     await pool.execute("""
         UPDATE users
         SET balance = balance + $1
-        WHERE user_id = $2
+        WHERE user_id=$2
     """, seller_income, seller_id)
 
     # =========================
-    # SAVE ACCESS USER
-    # =========================
-    await pool.execute("""
-        INSERT INTO user_access(user_id, code, paid)
-        VALUES($1,$2,true)
-        ON CONFLICT (user_id, code) DO UPDATE SET paid=true
-    """, user_id, code)
-
-    # =========================
-    # INSERT TRANSACTION
+    # TRANSACTION LOG
     # =========================
     await pool.execute("""
         INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
         VALUES($1,$2,$3,$4,$5,'paid')
-    """, user_id, seller_id, code, price, admin_fee)
+    """, user_id, seller_id, code, price, fee)
+
+    # =========================
+    # SAVE ACCESS
+    # =========================
+    await pool.execute("""
+        INSERT INTO user_access(user_id, code, paid)
+        VALUES($1,$2,true)
+        ON CONFLICT DO NOTHING
+    """, user_id, code)
 
     # =========================
     # NOTIFY USER
@@ -165,29 +132,13 @@ async def bayargg_webhook(req: Request, x_signature: str = Header(None)):
     )
 
     # =========================
-    # POST KE CHANNEL
+    # CHANNEL LOG
     # =========================
-    CHANNEL_ID = -1001234567890
-
     await bot.send_message(
-        CHANNEL_ID,
+        -1001234567890,
         f"💰 NEW SALE\n"
-        f"📦 CODE: {code}\n"
-        f"👤 USER: {user_id}\n"
-        f"💸 PRICE: {price}\n"
-        f"🏦 SELLER EARN: {seller_income}\n"
-        f"🧾 FEE: {admin_fee}"
+        f"📦 {code}\n"
+        f"💸 {price}\n"
     )
-
-    # =========================
-    # SEND FILE
-    # =========================
-    for m in media[:10]:
-        try:
-            fid = m.get("file_id")
-            if fid:
-                await bot.send_document(user_id, fid)
-        except:
-            pass
 
     return {"ok": True}
