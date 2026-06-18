@@ -8,7 +8,7 @@ router = Router()
 
 
 @router.callback_query(F.data.startswith("buy:"))
-async def buy_access(call: CallbackQuery):
+async def buy(call: CallbackQuery):
     code = call.data.split(":")[1]
     user_id = call.from_user.id
 
@@ -19,32 +19,28 @@ async def buy_access(call: CallbackQuery):
         code
     )
 
-    if not file:
-        return await call.answer("❌ File tidak ditemukan", show_alert=True)
+    price = int(file["price"])
 
-    price = int(file["price"] or 0)
-
-    result = await create_bayargg_invoice(
-        amount=price,
-        code=code,
-        user_id=user_id
-    )
+    result = await create_bayargg_invoice(price, code, user_id)
 
     if not result:
-        return await call.answer("❌ Gagal buat invoice", show_alert=True)
+        return await call.answer("❌ invoice gagal", show_alert=True)
 
-    checkout = result.get("checkout_url")
     qris = result.get("qris_string")
+    checkout = result.get("checkout_url")
 
-    text = (
-        "💳 INVOICE CREATED\n\n"
-        f"🔗 Checkout: {checkout or '-'}\n"
-        f"📦 CODE: {code}\n"
-        f"💰 PRICE: {price}\n"
-    )
+    text = f"""
+💳 INVOICE CREATED
+
+📦 CODE: {code}
+💰 PRICE: {price}
+
+"""
 
     if qris:
-        text += "\n⚡ QRIS ready"
+        text += f"\n📲 QRIS:\n`{qris}`"
+    else:
+        text += f"\n🔗 PAY LINK:\n{checkout}"
 
     await call.message.edit_text(text)
     await call.answer()
