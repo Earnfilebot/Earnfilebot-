@@ -258,13 +258,13 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
     if not data.get("media"):
-        return await call.answer(
-            "Upload kosong",
-            show_alert=True
-        )
+        return await call.answer("Upload kosong", show_alert=True)
 
     choice = call.data.split("_")[1]
 
+    # =========================
+    # FREE FILE
+    # =========================
     if choice == "free":
 
         await state.update_data(
@@ -275,25 +275,21 @@ async def handle_type(call: CallbackQuery, state: FSMContext):
 
         await call.message.edit_text("⏳ Saving...")
 
-        await finalize_save(
-            call.message,
-            state
-        )
+        await finalize_save(call.message, state)
         return
 
+    # =========================
+    # PAID FILE
+    # =========================
     await state.update_data(
         file_type="paid",
-        is_paid=True
+        is_paid=True,
+        price=None   # 🔥 IMPORTANT FIX
     )
 
-    await state.set_state(
-        UploadState.wait_price
-    )
+    await state.set_state(UploadState.wait_price)
 
-    await call.message.edit_text(
-        "💰 INPUT PRICE"
-    )
-
+    await call.message.edit_text("💰 INPUT PRICE")
 # =========================
 # PRICE
 # =========================
@@ -302,36 +298,42 @@ async def input_price(message: Message, state: FSMContext):
 
     data = await state.get_data()
 
+    # =========================
+    # ANTI DOUBLE SUBMIT
+    # =========================
+    if data.get("saving"):
+        return
+
     if not data.get("media"):
         return await message.answer("❌ Upload kosong")
 
     cleaned = re.sub(r"[^0-9]", "", message.text or "")
 
     if not cleaned:
-        return await message.answer(
-            "❌ Masukkan angka yang valid"
-        )
+        return await message.answer("❌ Masukkan angka yang valid")
 
     price = int(cleaned)
 
+    # =========================
+    # VALIDASI RANGE BAYARGG
+    # =========================
     if price < 1000 or price > 100000:
-        return await message.answer(
-            "❌ Range 1000 - 100000"
-        )
+        return await message.answer("❌ Range 1000 - 100000")
 
-    await state.update_data(price=price)
+    # =========================
+    # SAVE PRICE KE STATE
+    # =========================
+    await state.update_data(
+        price=price,
+        saving=True   # 🔥 penting biar tidak double submit
+    )
 
     try:
         await message.delete()
     except TelegramBadRequest:
         pass
 
-    await finalize_save(
-        message,
-        state
-    )
-
-
+    await finalize_save(message, state)
 # =========================
 # FINAL SAVE
 # =========================
@@ -345,10 +347,7 @@ async def finalize_save(message: Message, state: FSMContext):
 
         try:
             if msg_id:
-                await message.bot.delete_message(
-                    message.chat.id,
-                    msg_id
-                )
+                await message.bot.delete_message(message.chat.id, msg_id)
         except:
             pass
 
@@ -357,13 +356,31 @@ async def finalize_save(message: Message, state: FSMContext):
         if not media:
             return await message.answer("❌ Tidak ada media yang diupload")
 
-        file_type = data.get("file_type", "free")
+        # =========================
+        # FIX PRICE SAFETY
+        # =========================
         is_paid = data.get("is_paid", False)
-        price = data.get("price", 0)
+
+        price = data.get("price")
+
+        if is_paid:
+            if not price:
+                return await message.answer("❌ Price belum diisi")
+
+            price = int(price)
+
+            if price < 1000:
+                return await message.answer("❌ Minimal 1000")
+        else:
+            price = 0
+
+        file_type = "paid" if is_paid else "free"
 
         pool = await get_pool()
 
-        # generate code unik
+        # =========================
+        # GENERATE CODE
+        # =========================
         while True:
             code = "EFB-" + "".join(
                 random.choices(
@@ -381,21 +398,13 @@ async def finalize_save(message: Message, state: FSMContext):
                 break
 
         # =========================
-        # FIXED INSERT (IMPORTANT)
+        # INSERT DB
         # =========================
         await pool.execute(
             """
             INSERT INTO files
-            (
-                code,
-                media,
-                type,
-                price,
-                owner_id,
-                media_count
-            )
-            VALUES
-            ($1,$2,$3,$4,$5,$6)
+            (code, media, type, price, owner_id, media_count)
+            VALUES ($1,$2,$3,$4,$5,$6)
             """,
             code,
             json.dumps(media, ensure_ascii=False),
@@ -407,6 +416,9 @@ async def finalize_save(message: Message, state: FSMContext):
 
         await state.clear()
 
+        # =========================
+        # RESPONSE USER
+        # =========================
         status = "💎 PREMIUM FILE" if is_paid else "🆓 FREE FILE"
 
         text = (
@@ -419,20 +431,23 @@ async def finalize_save(message: Message, state: FSMContext):
         if is_paid:
             text += f"💰 Price : Rp {price:,}\n"
 
-        text += "\n━━━━━━━━━━━━━━\n📥 Gunakan kode di atas untuk akses file."
+        text += "\n━━━━━━━━━━━━━━\n📥 Gunakan kode untuk akses file."
 
         await message.answer(text, parse_mode="Markdown")
 
+        # =========================
+        # CHANNEL LOG (FIXED)
+        # =========================
         try:
             await message.bot.send_message(
                 CHANNEL_ID,
                 f"""📦 FILE CREATED
 
-f"🔑 Code : `{code}`\n"
+🔑 Code: `{code}`
 👤 USER ID: {message.from_user.id}
 📁 MEDIA: {len(media)}
-💎 TYPE: {"PAID" if is_paid else "FREE"}
-💰 PRICE: Rp {price:,}
+💎 TYPE: {file_type}
+💰 PRICE: Rp {price}
 """
             )
         except Exception as e:
