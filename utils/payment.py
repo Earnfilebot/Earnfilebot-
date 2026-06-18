@@ -49,7 +49,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": amount,
         "description": f"Purchase file {code}",
-        "payment_url": "https://earnfilebox.com",
+        "payment_url": "https://earnfileboxbot.com/file.php",
         "payment_method": "qris",
         "external_id": external_id
     }
