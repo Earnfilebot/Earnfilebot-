@@ -4,11 +4,15 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
+from fastapi import FastAPI
+import uvicorn
+
 from config import BOT_TOKEN
 from database import connect_db, close_db
 
+
 # =========================
-# LOGGING (PRODUCTION SAFE)
+# LOGGING
 # =========================
 logging.basicConfig(
     level=logging.INFO,
@@ -17,6 +21,18 @@ logging.basicConfig(
 
 logging.getLogger("aiogram").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
+
+
+# =========================
+# BOT INIT
+# =========================
+bot = Bot(
+    BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+
+dp = Dispatcher()
+
 
 # =========================
 # ROUTERS
@@ -33,19 +49,10 @@ from handlers.help import router as help_router
 from handlers.about import router as about_router
 from handlers.admin import router as admin_router
 
-# =========================
-# INIT (FIXED)
-# =========================
-bot = Bot(
-    BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode="HTML")
-)
+# webhook (BARU)
+from handlers.webhook_bayargg import router as webhook_router
 
-dp = Dispatcher()
 
-# =========================
-# REGISTER ROUTERS
-# =========================
 dp.include_router(start_router)
 dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
@@ -58,32 +65,47 @@ dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
 
+# webhook route
+dp.include_router(webhook_router)
+
+
 # =========================
-# START BOT
+# FASTAPI APP (WAJIB UNTUK WEBHOOK)
 # =========================
-async def main():
+app = FastAPI()
+
+# inject bot ke app context (IMPORTANT)
+app.state.bot = bot
+
+
+# =========================
+# TELEGRAM STARTUP
+# =========================
+async def start_bot():
     await connect_db()
     logging.info("DATABASE CONNECTED")
 
-    try:
-        logging.info("BOT STARTED")
+    logging.info("BOT STARTED")
 
-        await dp.start_polling(
-            bot,
-            allowed_updates=dp.resolve_used_update_types()
-        )
-
-    finally:
-        logging.info("SHUTTING DOWN BOT...")
-
-        await close_db()
-        await bot.session.close()
-
-        logging.info("BOT STOPPED")
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types()
+    )
 
 
 # =========================
 # ENTRY POINT
 # =========================
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.create_task(start_bot())
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000
+    )
