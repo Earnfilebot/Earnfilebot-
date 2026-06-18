@@ -12,7 +12,7 @@ from aiogram.types import (
 from database import get_pool
 from utils.qr import generate_qr_image
 from utils.payment import create_invoice
-from handlers.start import home_text
+
 
 router = Router()
 
@@ -137,7 +137,14 @@ async def buy_handler(call: CallbackQuery):
 # =========================
 # CANCEL HANDLER
 # =========================
+from handlers.start import render_home_fast
+
 @router.callback_query(F.data == "cancel")
 async def cancel_handler(call: CallbackQuery):
     await call.answer("❌ Pembayaran dibatalkan", show_alert=True)
-    await call.message.edit_text(home_text())
+
+    await render_home_fast(
+        call.bot,
+        call.message,
+        call.from_user.id
+    )
