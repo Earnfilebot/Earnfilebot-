@@ -5,13 +5,13 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 from database import get_pool
 from utils.qr import generate_qr_image
-from utils.payment import create_invoice   # ✅ FIX UTAMA DI SINI
+from utils.payment import create_invoice
 
 router = Router()
 
 
 # =========================
-# SAFE PARSER BAYARGG RESPONSE
+# SAFE PARSER
 # =========================
 def extract_data(res):
     if not res:
@@ -25,10 +25,7 @@ def extract_data(res):
         except:
             return {}
 
-    if isinstance(data, dict):
-        return data
-
-    return {}
+    return data if isinstance(data, dict) else {}
 
 
 # =========================
@@ -50,7 +47,13 @@ async def buy_handler(call: CallbackQuery):
     if not file:
         return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
-    amount = int(file.get("price") or 0)
+    # =========================
+    # SAFE PRICE PARSE (FIX IMPORTANT)
+    # =========================
+    try:
+        amount = int(file.get("price") or 0)
+    except:
+        amount = 0
 
     if amount <= 0:
         return await call.answer("❌ File ini tidak berbayar", show_alert=True)
@@ -66,6 +69,7 @@ async def buy_handler(call: CallbackQuery):
     data = extract_data(res)
 
     qris = data.get("qris_string")
+
     pay_url = (
         data.get("payment_url")
         or data.get("checkout_url")
@@ -73,6 +77,9 @@ async def buy_handler(call: CallbackQuery):
         or data.get("url")
     )
 
+    # =========================
+    # VALIDATION
+    # =========================
     if not qris and not pay_url:
         return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
 
@@ -84,7 +91,7 @@ async def buy_handler(call: CallbackQuery):
             [
                 InlineKeyboardButton(
                     text="💳 BAYAR SEKARANG",
-                    url=pay_url if pay_url else "https://www.bayar.gg"
+                    url=pay_url or "https://www.bayar.gg"
                 )
             ],
             [
@@ -104,19 +111,33 @@ async def buy_handler(call: CallbackQuery):
     )
 
     # =========================
-    # QRIS IMAGE FIX (INI YANG BENAR)
+    # QRIS RENDER (STABLE VERSION)
     # =========================
     if qris:
-        qr_img = generate_qr_image(qris)
+        try:
+            qr_img = generate_qr_image(qris)
 
-        await call.message.answer_photo(
-            qr_img,
-            caption=caption + "📲 Scan QRIS atau klik tombol di bawah",
-            reply_markup=kb
-        )
+            if qr_img:
+                await call.message.answer_photo(
+                    qr_img,
+                    caption=caption + "📲 Scan QRIS atau klik tombol di bawah",
+                    reply_markup=kb
+                )
+            else:
+                await call.message.answer(
+                    caption + "⚠️ QR gagal dibuat",
+                    reply_markup=kb
+                )
+
+        except Exception as e:
+            await call.message.answer(
+                caption + f"⚠️ QR ERROR: {e}",
+                reply_markup=kb
+            )
+
     else:
         await call.message.answer(
-            caption + "🔗 QRIS tidak tersedia, gunakan tombol di bawah",
+            caption + "🔗 QRIS tidak tersedia",
             reply_markup=kb
         )
 
