@@ -10,26 +10,6 @@ from utils.payment import create_invoice
 router = Router()
 
 
-# =========================
-# SAFE PARSER BAYARGG
-# =========================
-def safe_data(res):
-    if not isinstance(res, dict):
-        return {}
-
-    data = res.get("data")
-
-    if isinstance(data, dict):
-        return data
-
-    if isinstance(data, str):
-        try:
-            return json.loads(data)
-        except:
-            return {}
-
-    return {}
-
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
@@ -73,20 +53,21 @@ async def buy_handler(call: CallbackQuery):
         return await call.answer()
 
     # =========================
-    # CREATE INVOICE (FIXED INDENT)
+    # CREATE INVOICE
     # =========================
     res = await create_invoice(amount, code, user_id)
 
     if not res:
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
 
-    data = safe_data(res)
-
-    qris = data.get("qris_string")
-    pay_url = data.get("payment_url")
+    # =========================
+    # EXTRACT DATA (FLAT RESPONSE)
+    # =========================
+    qris = res.get("qris_string")
+    pay_url = res.get("payment_url")
 
     if not qris and not pay_url:
-        print("DEBUG BAYARGG:", res)
+        print("DEBUG RES:", res)
         return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
 
     # =========================
