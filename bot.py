@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+
 from fastapi import FastAPI
 import uvicorn
 
@@ -58,30 +59,48 @@ dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
 
-# =========================
-# WEBHOOK ROUTER
-# =========================
+# webhook router
 from webhook import bayargg as webhook_handler
 
 
 # =========================
-# FASTAPI LIFESPAN (WEBHOOK ONLY)
+# LIFESPAN (WEBHOOK ONLY)
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     await connect_db()
     logging.info("DATABASE CONNECTED")
 
-    # 🔥 PENTING: hanya webhook, jangan polling
-    await bot.delete_webhook(drop_pending_updates=True)
+    # =========================
+    # ANTI CONFLICT FIX (WAJIB)
+    # =========================
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("OLD WEBHOOK CLEARED")
 
-    logging.info("BOT RUNNING VIA WEBHOOK MODE")
+        # SET WEBHOOK BARU (GANTI URL INI DI RAILWAY)
+        await bot.set_webhook(
+            url="https://earnfilebot.up.railway.app/bot/webhook",
+            drop_pending_updates=True
+        )
+
+        logging.info("WEBHOOK SET SUCCESS")
+
+    except Exception as e:
+        logging.error(f"WEBHOOK SET ERROR: {e}")
+
+    # =========================
+    # IMPORTANT: NO POLLING
+    # =========================
+    logging.info("BOT RUNNING IN WEBHOOK MODE ONLY")
 
     yield
 
     await close_db()
     await bot.session.close()
     logging.info("BOT STOPPED")
+
 
 # =========================
 # FASTAPI APP
@@ -91,8 +110,9 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(webhook_handler.router)
 app.state.bot = bot
 
+
 # =========================
-# RUN SERVER
+# ENTRY
 # =========================
 if __name__ == "__main__":
     uvicorn.run(
