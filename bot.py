@@ -59,48 +59,45 @@ dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
 
-# webhook router
+# =========================
+# WEBHOOK ROUTER
+# =========================
 from webhook import bayargg as webhook_handler
 
+# =========================
+# POLLING TASK
+# =========================
+async def start_polling():
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types()
+    )
 
 # =========================
-# LIFESPAN (WEBHOOK ONLY)
+# FASTAPI LIFESPAN (FIX MODERN)
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
+    # =========================
+    # STARTUP
+    # =========================
     await connect_db()
     logging.info("DATABASE CONNECTED")
 
-    # =========================
-    # ANTI CONFLICT FIX (WAJIB)
-    # =========================
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        logging.info("OLD WEBHOOK CLEARED")
+    await bot.delete_webhook(drop_pending_updates=True)
 
-        # SET WEBHOOK BARU (GANTI URL INI DI RAILWAY)
-        await bot.set_webhook(
-            url="https://earnfilebot.up.railway.app/bot/webhook",
-            drop_pending_updates=True
-        )
+    polling_task = asyncio.create_task(start_polling())
+    logging.info("BOT STARTED")
 
-        logging.info("WEBHOOK SET SUCCESS")
-
-    except Exception as e:
-        logging.error(f"WEBHOOK SET ERROR: {e}")
+    yield  # server running
 
     # =========================
-    # IMPORTANT: NO POLLING
+    # SHUTDOWN
     # =========================
-    logging.info("BOT RUNNING IN WEBHOOK MODE ONLY")
-
-    yield
-
+    polling_task.cancel()
     await close_db()
     await bot.session.close()
     logging.info("BOT STOPPED")
-
 
 # =========================
 # FASTAPI APP
@@ -110,9 +107,8 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(webhook_handler.router)
 app.state.bot = bot
 
-
 # =========================
-# ENTRY
+# ENTRY POINT
 # =========================
 if __name__ == "__main__":
     uvicorn.run(
