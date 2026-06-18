@@ -82,16 +82,22 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     # =========================
-    # NORMALIZE DATA
+    # SAFE PRICE FIX (INI PENTING)
     # =========================
-    media = safe_json(file.get("media"))
-    price = int(file.get("price") or 0)
-    file_type = str(file.get("type") or "document")
+    try:
+        price = int(str(file.get("price") or 0))
+    except:
+        price = 0
 
     # =========================
-    # EMPTY MEDIA CHECK
+    # MEDIA SAFE PARSE
     # =========================
-    if not isinstance(media, list) or len(media) == 0:
+    media = safe_json(file.get("media"))
+
+    if not isinstance(media, list):
+        media = []
+
+    if len(media) == 0:
         await message.answer("❌ FILE KOSONG")
         await state.clear()
         return
@@ -107,11 +113,15 @@ async def receive_code(message: Message, state: FSMContext):
     ftype = (first.get("type") or "document").lower()
 
     # =========================
-    # FREE FILE LOGIC FIX
+    # FREE FILE CHECK (FIXED)
     # =========================
-    is_free = price <= 0
+    is_free = (price <= 0)
 
+    # =========================
+    # FREE FLOW
+    # =========================
     if is_free:
+
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -139,13 +149,13 @@ async def receive_code(message: Message, state: FSMContext):
                 await message.answer_document(fid, caption=caption, reply_markup=keyboard)
 
         except Exception as e:
-            await message.answer(f"❌ ERROR: {e}")
+            await message.answer(f"❌ MEDIA ERROR: {e}")
 
         await state.clear()
         return
 
     # =========================
-    # PAID FILE LOGIC
+    # PAID FLOW
     # =========================
     access = await pool.fetchval(
         """
@@ -214,6 +224,6 @@ async def receive_code(message: Message, state: FSMContext):
             await message.answer_document(fid, caption=caption, reply_markup=keyboard)
 
     except Exception as e:
-        await message.answer(f"❌ ERROR: {e}")
+        await message.answer(f"❌ MEDIA ERROR: {e}")
 
     await state.clear()
