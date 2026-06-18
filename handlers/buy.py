@@ -102,7 +102,7 @@ async def buy_handler(call: CallbackQuery):
             [
                 InlineKeyboardButton(
                     text="💳 BAYAR SEKARANG",
-                    url=pay_url or "https://www.bayar.gg"
+                    url=pay_url
                 )
             ],
             [
