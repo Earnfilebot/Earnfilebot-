@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-
 from fastapi import FastAPI
 import uvicorn
 
@@ -66,36 +65,20 @@ from webhook import bayargg as webhook_handler
 
 
 # =========================
-# POLLING TASK
-# =========================
-async def start_polling():
-    await dp.start_polling(
-        bot,
-        allowed_updates=dp.resolve_used_update_types()
-    )
-
-# =========================
-# FASTAPI LIFESPAN (FIX MODERN)
+# FASTAPI LIFESPAN (WEBHOOK ONLY)
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # =========================
-    # STARTUP
-    # =========================
     await connect_db()
     logging.info("DATABASE CONNECTED")
 
+    # 🔥 PENTING: hanya webhook, jangan polling
     await bot.delete_webhook(drop_pending_updates=True)
 
-    polling_task = asyncio.create_task(start_polling())
-    logging.info("BOT STARTED")
+    logging.info("BOT RUNNING VIA WEBHOOK MODE")
 
-    yield  # server running
+    yield
 
-    # =========================
-    # SHUTDOWN
-    # =========================
-    polling_task.cancel()
     await close_db()
     await bot.session.close()
     logging.info("BOT STOPPED")
@@ -109,7 +92,7 @@ app.include_router(webhook_handler.router)
 app.state.bot = bot
 
 # =========================
-# ENTRY POINT
+# RUN SERVER
 # =========================
 if __name__ == "__main__":
     uvicorn.run(
