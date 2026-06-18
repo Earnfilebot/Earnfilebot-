@@ -48,20 +48,39 @@ async def buy_handler(call: CallbackQuery):
         return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
     # =========================
-    # SAFE PRICE PARSE (FIX IMPORTANT)
+    # SAFE PRICE
     # =========================
     try:
         amount = int(file.get("price") or 0)
     except:
         amount = 0
 
+    # =========================
+    # FREE FILE HANDLER (FIX IMPORTANT)
+    # =========================
     if amount <= 0:
-        return await call.answer("❌ File ini tidak berbayar", show_alert=True)
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📂 OPEN FILE",
+                        callback_data=f"page:{code}:1"
+                    )
+                ]
+            ]
+        )
+
+        await call.message.answer(
+            "🆓 FILE GRATIS\n\nKlik tombol untuk buka file",
+            reply_markup=kb
+        )
+
+        return await call.answer()
 
     # =========================
-    # CREATE INVOICE
+    # CREATE INVOICE (FIX ORDER IMPORTANT)
     # =========================
-    res = await create_invoice(code, user_id, amount)
+    res = await create_invoice(amount, code, user_id)
 
     if not res:
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
@@ -77,9 +96,6 @@ async def buy_handler(call: CallbackQuery):
         or data.get("url")
     )
 
-    # =========================
-    # VALIDATION
-    # =========================
     if not qris and not pay_url:
         return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
 
@@ -111,23 +127,17 @@ async def buy_handler(call: CallbackQuery):
     )
 
     # =========================
-    # QRIS RENDER (STABLE VERSION)
+    # QRIS RENDER (SAFE)
     # =========================
     if qris:
         try:
             qr_img = generate_qr_image(qris)
 
-            if qr_img:
-                await call.message.answer_photo(
-                    qr_img,
-                    caption=caption + "📲 Scan QRIS atau klik tombol di bawah",
-                    reply_markup=kb
-                )
-            else:
-                await call.message.answer(
-                    caption + "⚠️ QR gagal dibuat",
-                    reply_markup=kb
-                )
+            await call.message.answer_photo(
+                qr_img,
+                caption=caption + "📲 Scan QRIS atau klik tombol di bawah",
+                reply_markup=kb
+            )
 
         except Exception as e:
             await call.message.answer(
