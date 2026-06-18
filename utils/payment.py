@@ -15,7 +15,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         "payment_url": "https://www.bayar.gg/pay",
 
         # SANGAT DISARANKAN (biar webhook jalan)
-        "callback_url": "https://your-domain.com/bayargg/webhook",
+        "callback_url": "https://earnfilebot.railway.app/bayargg/webhook",
 
         "payment_method": "qris"
     }
