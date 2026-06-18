@@ -35,7 +35,7 @@ dp = Dispatcher()
 
 
 # =========================
-# ROUTERS
+# ROUTERS (AIROGRAM ONLY)
 # =========================
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
@@ -48,9 +48,6 @@ from handlers.withdraw import router as withdraw_router
 from handlers.help import router as help_router
 from handlers.about import router as about_router
 from handlers.admin import router as admin_router
-
-# webhook (BARU)
-from handlers.webhook_bayargg import router as webhook_router
 
 
 dp.include_router(start_router)
@@ -65,26 +62,25 @@ dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
 
-# webhook route
-dp.include_router(webhook_router)
-
 
 # =========================
-# FASTAPI APP (WAJIB UNTUK WEBHOOK)
+# FASTAPI APP (WEBHOOK)
 # =========================
 app = FastAPI()
 
-# inject bot ke app context (IMPORTANT)
+from handlers.webhook_bayargg import router as webhook_router
+app.include_router(webhook_router)
+
+# inject bot ke fastapi
 app.state.bot = bot
 
 
 # =========================
-# TELEGRAM STARTUP
+# START BOT
 # =========================
 async def start_bot():
     await connect_db()
     logging.info("DATABASE CONNECTED")
-
     logging.info("BOT STARTED")
 
     await dp.start_polling(
@@ -97,8 +93,6 @@ async def start_bot():
 # ENTRY POINT
 # =========================
 if __name__ == "__main__":
-    import uvicorn
-
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
