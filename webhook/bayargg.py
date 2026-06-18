@@ -2,16 +2,18 @@ import hmac
 import hashlib
 import json
 import os
+import logging
 
 from fastapi import APIRouter, Request, Header
 from database import get_pool
-from config import BAYARGG_API_KEY
 from bot import bot
+from config import GROUP_ID
 
 router = APIRouter()
 
-# 🔐 MOVE TO ENV (WAJIB)
 BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
+
+logging.basicConfig(level=logging.INFO)
 
 
 # =========================
@@ -26,16 +28,16 @@ def parse_reference(ref: str):
 
 
 # =========================
-# SAFE SIGNATURE VERIFY
+# SIGNATURE VERIFY (ROBUST)
 # =========================
-def verify_signature(raw_body: bytes, signature: str):
+def verify_signature(body: bytes, signature: str):
 
-    if not signature:
+    if not signature or not BAYARGG_SECRET:
         return False
 
     expected = hmac.new(
         BAYARGG_SECRET.encode(),
-        raw_body,
+        body,
         hashlib.sha256
     ).hexdigest()
 
@@ -50,19 +52,18 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     body = await req.body()
 
-    # =========================
-    # VERIFY SIGNATURE FIRST (SECURITY)
-    # =========================
+    logging.info("Webhook hit received")
+
+    # 🔐 SECURITY CHECK FIRST
     if not verify_signature(body, x_signature):
+        logging.warning("Invalid signature rejected")
         return {"ok": False, "reason": "invalid signature"}
 
-    # =========================
-    # PARSE JSON SAFE
-    # =========================
     try:
         data = json.loads(body.decode())
-    except:
-        return {"ok": False, "reason": "invalid json"}
+    except Exception as e:
+        logging.error(f"JSON parse error: {e}")
+        return {"ok": False}
 
     payload = data.get("data") or data
 
@@ -80,17 +81,20 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     pool = await get_pool()
 
     # =========================
-    # 🔥 HARD ANTI DOUBLE (ATOMIC LOCK)
+    # ATOMIC PAYMENT LOCK
     # =========================
     updated = await pool.fetchval("""
         UPDATE payments
         SET status='paid'
-        WHERE user_id=$1 AND code=$2 AND status='pending'
+        WHERE user_id=$1
+          AND code=$2
+          AND status='pending'
         RETURNING id
     """, user_id, code)
 
     if not updated:
-        return {"ok": True, "duplicate ignored"}
+        logging.info("Duplicate webhook ignored")
+        return {"ok": True}
 
     # =========================
     # GET FILE
@@ -102,7 +106,8 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, code)
 
     if not file:
-        return {"ok": False, "reason": "file not found"}
+        logging.error("File not found in DB")
+        return {"ok": False}
 
     seller_id = file["seller_id"]
     price = int(file["price"])
@@ -149,21 +154,21 @@ async def webhook(req: Request, x_signature: str = Header(None)):
             f"🔓 Code: {code}\n"
             f"💰 Paid: Rp {price}"
         )
-    except:
-        pass
+    except Exception as e:
+        logging.error(f"Notify user failed: {e}")
 
     # =========================
-    # LOG GROUP (SAFE)
+    # GROUP LOG
     # =========================
     try:
         await bot.send_message(
-            -1001234567890,
+            GROUP_ID,
             f"💰 NEW SALE\n"
             f"📦 {code}\n"
             f"💸 Rp {price}\n"
             f"👤 User: {user_id}"
         )
-    except:
-        pass
+    except Exception as e:
+        logging.error(f"Group log failed: {e}")
 
     return {"ok": True}
