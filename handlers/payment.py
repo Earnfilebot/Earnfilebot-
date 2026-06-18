@@ -1,11 +1,4 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
-
-from utils.payment import create_bayargg_invoice
-from database import get_pool
-
-router = Router()
-
+from utils.qr import generate_qr_image
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy(call: CallbackQuery):
@@ -29,18 +22,22 @@ async def buy(call: CallbackQuery):
     qris = result.get("qris_string")
     checkout = result.get("checkout_url")
 
-    text = f"""
-💳 INVOICE CREATED
-
-📦 CODE: {code}
-💰 PRICE: {price}
-
-"""
-
+    # =========================
+    # QRIS IMAGE MODE (FIX)
+    # =========================
     if qris:
-        text += f"\n📲 QRIS:\n`{qris}`"
-    else:
-        text += f"\n🔗 PAY LINK:\n{checkout}"
+        qr_img = generate_qr_image(qris)
 
-    await call.message.edit_text(text)
+        await call.message.answer_photo(
+            qr_img,
+            caption=(
+                "💳 INVOICE CREATED\n\n"
+                f"📦 CODE: {code}\n"
+                f"💰 PRICE: {price}\n\n"
+                "🔽 Scan QR di bawah"
+            )
+        )
+    else:
+        await call.message.answer(f"🔗 PAY LINK:\n{checkout}")
+
     await call.answer()
