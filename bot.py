@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -59,36 +60,9 @@ dp.include_router(about_router)
 dp.include_router(admin_router)
 
 # =========================
-# FASTAPI APP
+# WEBHOOK ROUTER
 # =========================
-app = FastAPI()
-
-import webhook.bayargg as webhook_handler
-app.include_router(webhook_handler.router)
-
-app.state.bot = bot
-
-
-# =========================
-# STARTUP & SHUTDOWN (FIXED)
-# =========================
-@app.on_event("startup")
-async def on_startup():
-    await connect_db()
-    logging.info("DATABASE CONNECTED")
-
-    # penting: hapus webhook kalau pakai polling
-    await bot.delete_webhook(drop_pending_updates=True)
-
-    asyncio.create_task(start_polling())
-    logging.info("BOT STARTED")
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    await close_db()
-    await bot.session.close()
-    logging.info("BOT STOPPED")
+from webhook import bayargg as webhook_handler
 
 
 # =========================
@@ -100,6 +74,39 @@ async def start_polling():
         allowed_updates=dp.resolve_used_update_types()
     )
 
+# =========================
+# FASTAPI LIFESPAN (FIX MODERN)
+# =========================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # =========================
+    # STARTUP
+    # =========================
+    await connect_db()
+    logging.info("DATABASE CONNECTED")
+
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    polling_task = asyncio.create_task(start_polling())
+    logging.info("BOT STARTED")
+
+    yield  # server running
+
+    # =========================
+    # SHUTDOWN
+    # =========================
+    polling_task.cancel()
+    await close_db()
+    await bot.session.close()
+    logging.info("BOT STOPPED")
+
+# =========================
+# FASTAPI APP
+# =========================
+app = FastAPI(lifespan=lifespan)
+
+app.include_router(webhook_handler.router)
+app.state.bot = bot
 
 # =========================
 # ENTRY POINT
