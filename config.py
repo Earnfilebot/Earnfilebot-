@@ -11,6 +11,16 @@ BAYARGG_API_KEY = os.getenv("BAYARGG_API_KEY")
 BAYARGG_BASE_URL = "https://www.bayar.gg/api"
 
 # =========================
+# CHANNEL / GROUP SETTING
+# =========================
+
+# channel (sudah ada)
+CHANNEL_ID = -1003721009353
+
+# 🔥 TAMBAHAN WAJIB UNTUK WEBHOOK GROUP POST
+GROUP_ID = int(os.getenv("GROUP_ID", CHANNEL_ID))
+
+# =========================
 # VALIDASI
 # =========================
 if not BOT_TOKEN:
@@ -21,9 +31,6 @@ if not DATABASE_URL:
 
 if not BAYARGG_API_KEY:
     raise ValueError("BAYARGG_API_KEY belum di-set di .env")
-
-
-CHANNEL_ID = -1003721009353
 
 
 # =========================
