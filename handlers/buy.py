@@ -1,47 +1,32 @@
-import httpx
 import json
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from database import get_pool
-from config import BAYARGG_API_KEY, BAYARGG_MERCHANT
+from utils.qr import generate_qr_image
 
 router = Router()
 
 
-# =========================
-# CREATE INVOICE BAYARGG
-# =========================
-async def create_invoice(code: str, user_id: int, amount: int):
+def safe_get_data(res):
+    if not res:
+        return {}
 
-    url = "https://api.bayargg.com/v1/transaction/create"
+    data = res.get("data")
 
-    payload = {
-        "merchant": BAYARGG_MERCHANT,
-        "apikey": BAYARGG_API_KEY,
-        "amount": int(amount),
-        "external_id": f"{user_id}_{code}",
-        "callback_url": "https://earnfilebot.up.railway.app/bayargg/webhook"
-    }
+    # kalau string JSON
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except:
+            return {}
 
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(url, json=payload)
+    if not isinstance(data, dict):
+        return {}
 
-        data = r.json()
-
-        print("BAYARGG RESPONSE:", data)
-
-        return data
-
-    except Exception as e:
-        print("CREATE INVOICE ERROR:", e)
-        return None
+    return data
 
 
-# =========================
-# BUY HANDLER
-# =========================
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
@@ -72,9 +57,9 @@ async def buy_handler(call: CallbackQuery):
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
 
     # =========================
-    # AMBIL DATA
+    # SAFE PARSE
     # =========================
-    data = res.get("data") or {}
+    data = safe_get_data(res)
 
     qris = data.get("qris_string")
     pay_url = (
@@ -85,11 +70,6 @@ async def buy_handler(call: CallbackQuery):
 
     if not qris and not pay_url:
         return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
-
-    # =========================
-    # IMPORT (taruh di atas file kalau bisa)
-    # =========================
-    from utils.qr import generate_qr_image
 
     # =========================
     # BUTTON
@@ -112,7 +92,7 @@ async def buy_handler(call: CallbackQuery):
     )
 
     # =========================
-    # QRIS REAL IMAGE + BUTTON (1 MESSAGE)
+    # QRIS IMAGE (FIXED)
     # =========================
     if qris:
         qr_img = generate_qr_image(qris)
@@ -124,14 +104,13 @@ async def buy_handler(call: CallbackQuery):
                 "━━━━━━━━━━━━━━\n"
                 f"📦 CODE: {code}\n"
                 f"💵 PRICE: Rp {amount}\n\n"
-                "🔽 Scan QR atau klik tombol di bawah"
+                "📲 Scan QRIS atau klik tombol di bawah"
             ),
             reply_markup=kb
         )
     else:
         await call.message.answer(
-            "💰 PEMBAYARAN FILE\n\n"
-            "QRIS tidak tersedia, gunakan tombol di bawah",
+            "💰 PEMBAYARAN FILE\n\nQRIS tidak tersedia.",
             reply_markup=kb
         )
 
