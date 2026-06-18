@@ -72,40 +72,27 @@ async def buy_handler(call: CallbackQuery):
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
 
     # =========================
-    # IMPORT (HARUS DI ATAS BLOK INI)
-    # =========================
-    from utils.qris import extract_qris
-    from utils.qr import generate_qr_image
-
-    # =========================
-    # QRIS IMAGE (BENAR POSISI)
-    # =========================
-    qris = res.get("data", {}).get("qris_string")
-
-    if qris:
-        qr_img = generate_qr_image(qris)
-
-        await call.message.answer_photo(
-            qr_img,
-            caption="💳 Scan QRIS untuk pembayaran"
-        )
-
-    # =========================
-    # SAFE PARSE RESPONSE
+    # AMBIL DATA
     # =========================
     data = res.get("data") or {}
 
+    qris = data.get("qris_string")
     pay_url = (
         data.get("payment_url")
         or data.get("checkout_url")
         or data.get("url")
     )
 
-    if not pay_url:
-        return await call.answer("❌ Payment URL tidak ditemukan", show_alert=True)
+    if not qris and not pay_url:
+        return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
 
     # =========================
-    # BUTTON PAYMENT
+    # IMPORT (taruh di atas file kalau bisa)
+    # =========================
+    from utils.qr import generate_qr_image
+
+    # =========================
+    # BUTTON
     # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -124,13 +111,28 @@ async def buy_handler(call: CallbackQuery):
         ]
     )
 
-    await call.message.answer(
-        "💰 PEMBAYARAN FILE\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"📦 CODE: {code}\n"
-        f"💵 PRICE: {amount}\n\n"
-        "Klik tombol di bawah untuk pembayaran",
-        reply_markup=kb
-    )
+    # =========================
+    # QRIS REAL IMAGE + BUTTON (1 MESSAGE)
+    # =========================
+    if qris:
+        qr_img = generate_qr_image(qris)
+
+        await call.message.answer_photo(
+            qr_img,
+            caption=(
+                "💰 PEMBAYARAN FILE\n\n"
+                "━━━━━━━━━━━━━━\n"
+                f"📦 CODE: {code}\n"
+                f"💵 PRICE: Rp {amount}\n\n"
+                "🔽 Scan QR atau klik tombol di bawah"
+            ),
+            reply_markup=kb
+        )
+    else:
+        await call.message.answer(
+            "💰 PEMBAYARAN FILE\n\n"
+            "QRIS tidak tersedia, gunakan tombol di bawah",
+            reply_markup=kb
+        )
 
     await call.answer()
