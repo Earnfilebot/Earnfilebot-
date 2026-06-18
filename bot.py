@@ -10,7 +10,6 @@ import uvicorn
 from config import BOT_TOKEN
 from database import connect_db, close_db
 
-
 # =========================
 # LOGGING
 # =========================
@@ -22,7 +21,6 @@ logging.basicConfig(
 logging.getLogger("aiogram").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
-
 # =========================
 # BOT INIT
 # =========================
@@ -33,9 +31,8 @@ bot = Bot(
 
 dp = Dispatcher()
 
-
 # =========================
-# ROUTERS (AIROGRAM ONLY)
+# ROUTERS
 # =========================
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
@@ -49,7 +46,6 @@ from handlers.help import router as help_router
 from handlers.about import router as about_router
 from handlers.admin import router as admin_router
 
-
 dp.include_router(start_router)
 dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
@@ -62,27 +58,43 @@ dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
 
-
 # =========================
-# FASTAPI APP (WEBHOOK)
+# FASTAPI APP
 # =========================
 app = FastAPI()
 
 import webhook.bayargg as webhook_handler
-
 app.include_router(webhook_handler.router)
 
-# 🔥 INI SATU-SATUNYA CARA YANG BENAR
 app.state.bot = bot
 
+
 # =========================
-# START BOT
+# STARTUP & SHUTDOWN (FIXED)
 # =========================
-async def start_bot():
+@app.on_event("startup")
+async def on_startup():
     await connect_db()
     logging.info("DATABASE CONNECTED")
+
+    # penting: hapus webhook kalau pakai polling
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    asyncio.create_task(start_polling())
     logging.info("BOT STARTED")
 
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await close_db()
+    await bot.session.close()
+    logging.info("BOT STOPPED")
+
+
+# =========================
+# POLLING TASK
+# =========================
+async def start_polling():
     await dp.start_polling(
         bot,
         allowed_updates=dp.resolve_used_update_types()
@@ -93,11 +105,6 @@ async def start_bot():
 # ENTRY POINT
 # =========================
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    loop.create_task(start_bot())
-
     uvicorn.run(
         app,
         host="0.0.0.0",
