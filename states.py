@@ -38,3 +38,9 @@ class AdminState(StatesGroup):
 class PaymentState(StatesGroup):
     wait_invoice = State()
     wait_callback = State()
+
+# =========================
+# 💸 WITHDRAW
+# =========================
+class WithdrawState(StatesGroup):
+    amount = State()
