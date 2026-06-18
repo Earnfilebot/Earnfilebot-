@@ -1,4 +1,5 @@
 import httpx
+import json
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -18,14 +19,24 @@ async def create_invoice(code: str, user_id: int, amount: int):
     payload = {
         "merchant": BAYARGG_MERCHANT,
         "apikey": BAYARGG_API_KEY,
-        "amount": amount,
-        "external_id": f"{code}:{user_id}",
-        "callback_url": "https://yourdomain.com/webhook/bayargg"
+        "amount": int(amount),
+        "external_id": f"{user_id}_{code}",
+        "callback_url": "https://earnfilebot.up.railway.app/bayargg/webhook"
     }
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(url, json=payload)
-        return r.json()
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+
+        data = r.json()
+
+        print("BAYARGG RESPONSE:", data)
+
+        return data
+
+    except Exception as e:
+        print("CREATE INVOICE ERROR:", e)
+        return None
 
 
 # =========================
@@ -34,10 +45,8 @@ async def create_invoice(code: str, user_id: int, amount: int):
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
-    try:
-        _, code = call.data.split(":")
-    except:
-        return await call.answer("❌ Invalid data", show_alert=True)
+    code = call.data.split(":")[1]
+    user_id = call.from_user.id
 
     pool = await get_pool()
 
@@ -49,44 +58,51 @@ async def buy_handler(call: CallbackQuery):
     if not file:
         return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
-    user_id = call.from_user.id
+    amount = int(file.get("price") or 0)
+
+    if amount <= 0:
+        return await call.answer("❌ File ini tidak berbayar", show_alert=True)
 
     # =========================
-    # ANTI DOUBLE BUY (basic)
+    # ANTI DOUBLE BUY (SAFE)
     # =========================
-    buyers = file.get("buyers")
+    buyers = file.get("buyers") or []
 
-    if buyers:
-        if isinstance(buyers, str):
-            try:
-                import json
-                buyers = json.loads(buyers)
-            except:
-                buyers = []
+    if isinstance(buyers, str):
+        try:
+            buyers = json.loads(buyers)
+        except:
+            buyers = []
 
-    if not buyers:
-        buyers = []
+    buyers = [int(b) for b in buyers if str(b).isdigit()]
 
     if user_id in buyers:
         return await call.answer("✔ Sudah pernah membeli", show_alert=True)
-
-    amount = file.get("price", 0)
-
-    if amount <= 0:
-        return await call.answer("❌ File ini gratis", show_alert=True)
 
     # =========================
     # CREATE INVOICE
     # =========================
     res = await create_invoice(code, user_id, amount)
 
-    if not res or not res.get("status"):
-        return await call.answer("❌ Gagal membuat pembayaran", show_alert=True)
-
-    pay_url = res["data"]["payment_url"]
+    if not res:
+        return await call.answer("❌ Gagal membuat invoice", show_alert=True)
 
     # =========================
-    # PAYMENT BUTTON
+    # SAFE PARSE RESPONSE
+    # =========================
+    data = res.get("data") or {}
+
+    pay_url = (
+        data.get("payment_url")
+        or data.get("checkout_url")
+        or data.get("url")
+    )
+
+    if not pay_url:
+        return await call.answer("❌ Payment URL tidak ditemukan", show_alert=True)
+
+    # =========================
+    # BUTTON PAYMENT
     # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -108,8 +124,9 @@ async def buy_handler(call: CallbackQuery):
     await call.message.answer(
         "💰 PEMBAYARAN FILE\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "Klik tombol di bawah untuk melakukan pembayaran\n"
-        "Setelah bayar, file akan otomatis terbuka",
+        f"📦 CODE: {code}\n"
+        f"💵 PRICE: {amount}\n\n"
+        "Klik tombol di bawah untuk pembayaran",
         reply_markup=kb
     )
 
