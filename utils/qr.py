@@ -2,7 +2,6 @@ import qrcode
 from io import BytesIO
 from aiogram.types import BufferedInputFile
 
-
 def generate_qr_image(qris_string: str):
     qr = qrcode.make(qris_string)
 
