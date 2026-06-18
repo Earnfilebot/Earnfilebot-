@@ -1,19 +1,23 @@
 import httpx
+import time
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
 
 async def create_bayargg_invoice(amount: int, code: str, user_id: int):
-    url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
-    # 🔐 UNIQUE ID (WAJIB FIX)
-    external_id = f"{user_id}_{code}_{int(__import__('time').time())}"
+    url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
     payload = {
         "amount": int(amount),
         "description": f"Purchase file {code}",
+
+        # WAJIB sesuai docs
         "payment_url": "https://www.bayar.gg/pay",
-        "payment_method": "qris",
-        "external_id": external_id
+
+        # SANGAT DISARANKAN (biar webhook jalan)
+        "callback_url": "https://your-domain.com/bayargg/webhook",
+
+        "payment_method": "qris"
     }
 
     headers = {
@@ -26,9 +30,24 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, json=payload, headers=headers)
 
-        data = r.json()
+        # =========================
+        # DEBUG WAJIB (kalau error)
+        # =========================
+        print("STATUS:", r.status_code)
+        print("RESPONSE:", r.text)
+        print("PAYLOAD:", payload)
 
-        if r.status_code != 200 or not data.get("success"):
+        # kalau bukan success HTTP
+        if r.status_code != 200:
+            return None
+
+        try:
+            data = r.json()
+        except:
+            return None
+
+        if not data.get("success"):
+            print("❌ BAYARGG ERROR:", data)
             return None
 
         result = data.get("data") or {}
@@ -36,29 +55,24 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         if not isinstance(result, dict):
             return None
 
-        qris_string = result.get("qris_string")
-
-        checkout_url = (
-            result.get("payment_url")
-            or result.get("checkout_url")
-            or result.get("invoice_url")
-            or result.get("url")
-        )
-
-        invoice_id = (
-            result.get("invoice_id")
-            or result.get("id")
-        )
-
         return {
-            "invoice_id": invoice_id,
-            "qris_string": qris_string,
-            "checkout_url": checkout_url,
-            "reference": external_id,
+            "invoice_id": result.get("invoice_id") or result.get("id"),
+            "qris_string": result.get("qris_string"),
+            "checkout_url": (
+                result.get("payment_url")
+                or result.get("checkout_url")
+                or result.get("invoice_url")
+                or result.get("url")
+            ),
             "raw": result
         }
 
-    except Exception:
+    except httpx.RequestError as e:
+        print("❌ REQUEST ERROR:", e)
+        return None
+
+    except Exception as e:
+        print("❌ UNKNOWN ERROR:", e)
         return None
 
 
