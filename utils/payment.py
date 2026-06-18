@@ -47,30 +47,56 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
 
-        if r.status_code != 200:
+        # =========================
+        # SAFE PARSE JSON
+        # =========================
+        try:
+            data = r.json()
+        except:
+            print("❌ INVALID JSON RESPONSE")
             return None
 
-        data = r.json()
+        if not isinstance(data, dict):
+            return None
 
-        if not isinstance(data, dict) or not data.get("success"):
+        if not data.get("success"):
             print("❌ BAYARGG ERROR:", data)
             return None
 
         result = data.get("data") or {}
+        if not isinstance(result, dict):
+            return None
+
+        # =========================
+        # PAYMENT URL FALLBACK SAFE
+        # =========================
+        payment_url = (
+            result.get("payment_url")
+            or result.get("checkout_url")
+            or result.get("invoice_url")
+            or result.get("url")
+        )
 
         return {
             "success": True,
-            "invoice_id": result.get("invoice_id"),
+            "invoice_id": result.get("invoice_id") or result.get("id"),
             "qris_string": result.get("qris_string"),
-            "payment_url": result.get("payment_url"),
+            "payment_url": payment_url,
+            "external_id": external_id,
             "raw": result
         }
+
+    except httpx.RequestError as e:
+        print("❌ REQUEST ERROR:", e)
+        return None
 
     except Exception as e:
         print("❌ CREATE INVOICE ERROR:", e)
         return None
 
 
-# wrapper biar aman dipanggil di handler
+# =========================
+# WRAPPER (WAJIB DIPAKAI DI HANDLER)
+# =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
