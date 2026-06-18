@@ -1,3 +1,41 @@
+import hmac
+import hashlib
+import json
+import os
+import logging
+
+from fastapi import APIRouter, Request, Header
+from database import get_pool
+from config import GROUP_ID
+
+router = APIRouter()
+
+BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
+
+logging.basicConfig(level=logging.INFO)
+
+
+def parse_reference(ref: str):
+    try:
+        user_id, code = ref.split("_", 1)
+        return int(user_id), code
+    except:
+        return None, None
+
+
+def verify_signature(body: bytes, signature: str):
+    if not signature or not BAYARGG_SECRET:
+        return False
+
+    expected = hmac.new(
+        BAYARGG_SECRET.encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+
+    return hmac.compare_digest(expected, signature)
+
+
 @router.post("/bayargg/webhook")
 async def webhook(req: Request, x_signature: str = Header(None)):
 
@@ -6,12 +44,10 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     logging.info("📩 Webhook received")
 
-    # VERIFY SIGNATURE
     if not verify_signature(body, x_signature):
         logging.warning("❌ Invalid signature")
         return {"ok": True}
 
-    # PARSE JSON
     try:
         data = json.loads(body.decode())
     except Exception as e:
@@ -31,7 +67,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     pool = await get_pool()
 
-    # LOCK PAYMENT
     updated = await pool.fetchval("""
         UPDATE payments
         SET status='paid'
@@ -40,10 +75,9 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, user_id, code)
 
     if not updated:
-        logging.info("⚠️ Payment already processed")
+        logging.info("⚠️ Already processed")
         return {"ok": True}
 
-    # GET FILE + MEDIA
     file = await pool.fetchrow("""
         SELECT seller_id, price, media_json
         FROM files
@@ -61,21 +95,22 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     fee = int(price * 0.10)
     seller_income = price - fee
 
-    # UPDATE BALANCE
-    await pool.execute("""
-        UPDATE users
-        SET balance = COALESCE(balance,0) + $1
-        WHERE telegram_id=$2
-    """, seller_income, seller_id)
+    logging.info(f"SELLER: {seller_id} | INCOME: {seller_income}")
 
-    # TRANSACTION
+    # ✅ UPSERT BALANCE (AMAN)
+    await pool.execute("""
+        INSERT INTO users (telegram_id, balance)
+        VALUES ($1, $2)
+        ON CONFLICT (telegram_id)
+        DO UPDATE SET balance = users.balance + $2
+    """, seller_id, seller_income)
+
     await pool.execute("""
         INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
         VALUES($1,$2,$3,$4,$5,'paid')
         ON CONFLICT DO NOTHING
     """, user_id, seller_id, code, price, fee)
 
-    # GRANT ACCESS
     await pool.execute("""
         INSERT INTO user_access(user_id, code, paid)
         VALUES($1,$2,true)
@@ -88,16 +123,16 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     # SEND FILE
     # =========================
     try:
-        media_list = json.loads(media_json)
+        if isinstance(media_json, str):
+            media_list = json.loads(media_json)
+        else:
+            media_list = media_json
+
+        logging.info(f"MEDIA: {media_list}")
 
         await bot.send_message(
             user_id,
-            (
-                "✅ PAYMENT SUCCESS\n\n"
-                f"🔓 Access Granted\n"
-                f"📦 Code: {code}\n"
-                f"📁 Total File: {len(media_list)}"
-            )
+            f"✅ PAYMENT SUCCESS\n📦 {code}\n📁 {len(media_list)} file"
         )
 
         for item in media_list:
@@ -106,10 +141,8 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
             if media_type == "document":
                 await bot.send_document(user_id, file_id)
-
             elif media_type == "video":
                 await bot.send_video(user_id, file_id)
-
             elif media_type == "photo":
                 await bot.send_photo(user_id, file_id)
 
@@ -117,18 +150,13 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         logging.exception(f"SEND FILE ERROR: {e}")
 
     # =========================
-    # NOTIFY GROUP
+    # GROUP LOG
     # =========================
     try:
         if GROUP_ID:
             await bot.send_message(
                 GROUP_ID,
-                (
-                    "💰 NEW SALE\n"
-                    f"📦 {code}\n"
-                    f"💸 Rp {price:,}\n"
-                    f"👤 {user_id}"
-                )
+                f"💰 SALE\n📦 {code}\n💸 Rp {price:,}\n👤 {user_id}"
             )
     except Exception as e:
         logging.error(f"GROUP ERROR: {e}")
