@@ -6,9 +6,6 @@ from database import get_pool
 router = Router()
 
 
-# =========================
-# FORMAT RUPIAH
-# =========================
 def rupiah(n):
     try:
         return f"{int(n):,}".replace(",", ".")
@@ -35,30 +32,31 @@ async def account_handler(call: CallbackQuery):
     total_tx = await pool.fetchval(
         "SELECT COUNT(*) FROM transactions WHERE user_id=$1",
         user_id
-    )
+    ) or 0
 
+    # ❌ FIX: tidak pakai seller_id (biar aman)
     total_income = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE seller_id=$1",
+        "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE user_id=$1",
         user_id
-    )
+    ) or 0
 
     # =========================
-    # 🔥 HOT PRODUCT (PALING SERING DIBELI)
+    # HOT PRODUCT
     # =========================
     hot = await pool.fetch(
         """
-        SELECT code, COUNT(*) as total
+        SELECT code, COUNT(*) AS total
         FROM transactions
+        WHERE code IS NOT NULL
         GROUP BY code
         ORDER BY total DESC
         LIMIT 3
         """
     )
 
-    hot_text = ""
-    if hot:
-        for h in hot:
-            hot_text += f"🔥 {h['code']} — {h['total']} sold\n"
+    hot_text = "\n".join(
+        [f"🔥 {h['code']} — {h['total']} sold" for h in hot]
+    ) if hot else "Belum ada data"
 
     text = (
         "╭━━━ 💼 ACCOUNT DASHBOARD ━━━╮\n\n"
@@ -68,25 +66,19 @@ async def account_handler(call: CallbackQuery):
         f"💸 INCOME    : <b>Rp {rupiah(total_income)}</b>\n\n"
         "━━━━━━━━━━━━━━\n"
         "🔥 HOT PRODUCT:\n"
-        f"{hot_text if hot_text else 'Belum ada data'}\n"
+        f"{hot_text}\n"
         "╰━━━━━━━━━━━━━━━━━━━━━━╯"
     )
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton("🔄 REFRESH", callback_data="account")
-            ],
+            [InlineKeyboardButton("🔄 REFRESH", callback_data="account")],
             [
                 InlineKeyboardButton("📜 TRANSACTIONS", callback_data="trx"),
                 InlineKeyboardButton("💸 WITHDRAW", callback_data="withdraw")
             ],
-            [
-                InlineKeyboardButton("🏆 TOP PRODUCT", callback_data="top_product")
-            ],
-            [
-                InlineKeyboardButton("🏠 HOME", callback_data="home")
-            ]
+            [InlineKeyboardButton("🏆 TOP PRODUCT", callback_data="top_product")],
+            [InlineKeyboardButton("🏠 HOME", callback_data="home")]
         ]
     )
 
@@ -129,11 +121,14 @@ async def transaction_history(call: CallbackQuery):
     for r in rows:
         status = "✅ PAID" if r["status"] == "paid" else "⏳ PENDING"
 
+        created = r["created_at"]
+        created_text = created.strftime("%d-%m-%Y %H:%M") if created else "-"
+
         text += (
-            f"📦 {r['code']}\n"
-            f"💰 Rp {rupiah(r['amount'])}\n"
+            f"📦 {r.get('code','-')}\n"
+            f"💰 Rp {rupiah(r.get('amount',0))}\n"
             f"📊 {status}\n"
-            f"🕒 {r['created_at']:%d-%m-%Y %H:%M}\n"
+            f"🕒 {created_text}\n"
             "━━━━━━━━━━━━━━\n"
         )
 
@@ -148,7 +143,7 @@ async def transaction_history(call: CallbackQuery):
 
 
 # =========================
-# TOP PRODUCT (DETAIL LEBIH DALAM)
+# TOP PRODUCT
 # =========================
 @router.callback_query(F.data == "top_product")
 async def top_product(call: CallbackQuery):
@@ -159,6 +154,7 @@ async def top_product(call: CallbackQuery):
         """
         SELECT code, COUNT(*) AS sold, SUM(amount) AS revenue
         FROM transactions
+        WHERE code IS NOT NULL
         GROUP BY code
         ORDER BY sold DESC
         LIMIT 10
@@ -167,7 +163,7 @@ async def top_product(call: CallbackQuery):
 
     if not rows:
         return await call.message.edit_text(
-            "🏆 TOP PRODUCT\n\n❌ Belum ada data penjualan",
+            "🏆 TOP PRODUCT\n\n❌ Belum ada data",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton("🔙 BACK", callback_data="account")]
