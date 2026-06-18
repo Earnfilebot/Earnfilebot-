@@ -5,19 +5,39 @@ from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
 async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
+    # =========================
+    # VALIDASI AMOUNT (INI WAJIB)
+    # =========================
+    try:
+        amount = int(amount)
+    except:
+        return None
+
+    if amount < 1000:
+        print("❌ AMOUNT TOO SMALL:", amount)
+        return None
+
+    # =========================
+    # UNIQUE EXTERNAL ID
+    # =========================
+    external_id = f"{user_id}_{code}_{int(time.time())}"
+
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
     payload = {
-        "amount": int(amount),
+        "amount": amount,
         "description": f"Purchase file {code}",
 
-        # WAJIB sesuai docs
+        # WAJIB BAYARGG
         "payment_url": "https://www.bayar.gg/pay",
 
-        # SANGAT DISARANKAN (biar webhook jalan)
+        # WAJIB biar webhook stabil
         "callback_url": "https://earnfilebot.railway.app/bayargg/webhook",
 
-        "payment_method": "qris"
+        "payment_method": "qris",
+
+        # optional tapi bagus
+        "external_id": external_id
     }
 
     headers = {
@@ -30,21 +50,14 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, json=payload, headers=headers)
 
-        # =========================
-        # DEBUG WAJIB (kalau error)
-        # =========================
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
         print("PAYLOAD:", payload)
 
-        # kalau bukan success HTTP
         if r.status_code != 200:
             return None
 
-        try:
-            data = r.json()
-        except:
-            return None
+        data = r.json()
 
         if not data.get("success"):
             print("❌ BAYARGG ERROR:", data)
@@ -64,6 +77,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
                 or result.get("invoice_url")
                 or result.get("url")
             ),
+            "reference": external_id,
             "raw": result
         }
 
