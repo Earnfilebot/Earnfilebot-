@@ -12,7 +12,6 @@ from aiogram.types import (
 from database import get_pool
 from utils.qr import generate_qr_image
 from utils.payment import create_invoice
-from keyboards.menu import home_kb   # 🔥 TAMBAHAN HOME
 
 router = Router()
 
@@ -26,9 +25,9 @@ async def buy_handler(call: CallbackQuery):
     user_id = call.from_user.id
 
     # =========================
-    # ⏳ LOADING (NEW)
+    # ⏳ LOADING (NEW ADD)
     # =========================
-    loading = await call.message.edit_text("⏳ Membuat invoice...")
+    loading = await call.message.edit_text("⏳ Memproses pembayaran...")
 
     pool = await get_pool()
 
@@ -42,7 +41,7 @@ async def buy_handler(call: CallbackQuery):
 
     try:
         amount = int(file.get("price") or 0)
-    except:
+    except Exception:
         amount = 0
 
     # =========================
@@ -60,7 +59,7 @@ async def buy_handler(call: CallbackQuery):
                 [
                     InlineKeyboardButton(
                         text="🏠 HOME",
-                        callback_data="home"
+                        callback_data="home"   # 🔥 FIX BACK TO HOME
                     )
                 ]
             ]
@@ -81,14 +80,19 @@ async def buy_handler(call: CallbackQuery):
     )
 
     if not res:
-        return await loading.edit_text("❌ Gagal membuat invoice")
+        return await loading.edit_text(
+            "❌ Gagal membuat invoice"
+        )
 
     qris = res.get("qris_string")
     pay_url = res.get("payment_url")
 
     if not qris and not pay_url:
         print("DEBUG RES:", res)
-        return await loading.edit_text("❌ Response BayarGG tidak valid")
+
+        return await loading.edit_text(
+            "❌ Response BayarGG tidak valid"
+        )
 
     # =========================
     # BUTTON (FIX BACK -> HOME)
@@ -118,16 +122,16 @@ async def buy_handler(call: CallbackQuery):
     )
 
     # =========================
-    # QRIS (LOADING REPLACE FIX)
+    # QRIS (LOADING ADD BEFORE GENERATE)
     # =========================
     if qris:
         try:
             await loading.edit_text("⏳ Membuat QRIS...")
 
-            qr_img = generate_qr_image(qr)
+            qr_img = generate_qr_image(qris)
 
             if not qr_img:
-                raise ValueError("QR image None")
+                raise ValueError("QR image is None")
 
             photo = BufferedInputFile(
                 qr_img.getvalue(),
@@ -144,6 +148,7 @@ async def buy_handler(call: CallbackQuery):
 
         except Exception as e:
             print("QR ERROR:", repr(e))
+
             await loading.edit_text(
                 caption + "⚠️ Gagal membuat QRIS",
                 reply_markup=kb
