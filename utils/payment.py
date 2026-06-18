@@ -1,16 +1,25 @@
-import httpx
 import time
+import httpx
+
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
 
-async def create_bayargg_invoice(amount: int, code: str, user_id: int):
+async def create_bayargg_invoice(
+    amount: int,
+    code: str,
+    user_id: int
+):
 
     # =========================
     # NORMALIZE AMOUNT
     # =========================
     try:
-        amount = int(str(amount).replace(".", "").replace(",", ""))
-    except:
+        amount = int(
+            str(amount)
+            .replace(".", "")
+            .replace(",", "")
+        )
+    except Exception:
         print("❌ INVALID AMOUNT:", amount)
         return None
 
@@ -21,7 +30,9 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     # =========================
     # UNIQUE ID
     # =========================
-    external_id = f"{user_id}_{code}_{int(time.time() * 1000)}"
+    external_id = (
+        f"{user_id}_{code}_{int(time.time() * 1000)}"
+    )
 
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
@@ -42,21 +53,31 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, json=payload, headers=headers)
+            r = await client.post(
+                url,
+                json=payload,
+                headers=headers
+            )
 
-        print("STATUS:", r.status_code)
-        print("RESPONSE:", r.text)
+        # =========================
+        # HTTP STATUS CHECK
+        # =========================
+        if r.status_code != 200:
+            print("❌ BAYARGG STATUS:", r.status_code)
+            print("❌ BAYARGG RESPONSE:", r.text)
+            return None
 
         # =========================
         # SAFE PARSE JSON
         # =========================
         try:
             data = r.json()
-        except:
-            print("❌ INVALID JSON RESPONSE")
+        except Exception as e:
+            print("❌ INVALID JSON RESPONSE:", repr(e))
             return None
 
         if not isinstance(data, dict):
+            print("❌ RESPONSE NOT DICT")
             return None
 
         if not data.get("success"):
@@ -64,11 +85,13 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             return None
 
         result = data.get("data") or {}
+
         if not isinstance(result, dict):
+            print("❌ INVALID DATA FORMAT")
             return None
 
         # =========================
-        # PAYMENT URL FALLBACK SAFE
+        # PAYMENT URL FALLBACK
         # =========================
         payment_url = (
             result.get("payment_url")
@@ -79,7 +102,10 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
         return {
             "success": True,
-            "invoice_id": result.get("invoice_id") or result.get("id"),
+            "invoice_id": (
+                result.get("invoice_id")
+                or result.get("id")
+            ),
             "qris_string": result.get("qris_string"),
             "payment_url": payment_url,
             "external_id": external_id,
@@ -87,16 +113,24 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         }
 
     except httpx.RequestError as e:
-        print("❌ REQUEST ERROR:", e)
+        print("❌ REQUEST ERROR:", repr(e))
         return None
 
     except Exception as e:
-        print("❌ CREATE INVOICE ERROR:", e)
+        print("❌ CREATE INVOICE ERROR:", repr(e))
         return None
 
 
 # =========================
-# WRAPPER (WAJIB DIPAKAI DI HANDLER)
+# WRAPPER
 # =========================
-async def create_invoice(amount: int, code: str, user_id: int):
-    return await create_bayargg_invoice(amount, code, user_id)
+async def create_invoice(
+    amount: int,
+    code: str,
+    user_id: int
+):
+    return await create_bayargg_invoice(
+        amount,
+        code,
+        user_id
+    )
