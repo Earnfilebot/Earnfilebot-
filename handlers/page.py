@@ -258,11 +258,11 @@ async def page_handler(call: CallbackQuery):
                 [
                     InlineKeyboardButton(
                         text="📢 Channel Update",
-                        url="https://t.me/yourchannel"
+                        url="https://t.me/+F6-XB1gFA9VhMDc1"
                     ),
                     InlineKeyboardButton(
                         text="🔔 Notifikasi Code",
-                        callback_data=f"notify:{code}"
+                        url="https://t.me/+VebkFndPTeFkMGU1"
                     )
                 ]
             ]
