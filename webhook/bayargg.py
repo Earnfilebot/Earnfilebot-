@@ -1,18 +1,21 @@
 import hmac
 import hashlib
 import json
+import os
 
 from fastapi import APIRouter, Request, Header
 from database import get_pool
+from config import BAYARGG_API_KEY
 from bot import bot
 
 router = APIRouter()
 
-BAYARGG_SECRET = "whsec_81c259f2d3291e377957b7b56155683290aacc63e41a0df2"
+# 🔐 MOVE TO ENV (WAJIB)
+BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
 
 
 # =========================
-# SAFE PARSE REFERENCE
+# PARSE REFERENCE
 # =========================
 def parse_reference(ref: str):
     try:
@@ -23,15 +26,16 @@ def parse_reference(ref: str):
 
 
 # =========================
-# SIGNATURE VERIFY FIXED
+# SAFE SIGNATURE VERIFY
 # =========================
-def verify_signature(payload: dict, signature: str):
-    # IMPORTANT: normalize JSON
-    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+def verify_signature(raw_body: bytes, signature: str):
+
+    if not signature:
+        return False
 
     expected = hmac.new(
         BAYARGG_SECRET.encode(),
-        raw,
+        raw_body,
         hashlib.sha256
     ).hexdigest()
 
@@ -45,48 +49,60 @@ def verify_signature(payload: dict, signature: str):
 async def webhook(req: Request, x_signature: str = Header(None)):
 
     body = await req.body()
-    data = json.loads(body.decode())
-    payload = data.get("data", data)
+
+    # =========================
+    # VERIFY SIGNATURE FIRST (SECURITY)
+    # =========================
+    if not verify_signature(body, x_signature):
+        return {"ok": False, "reason": "invalid signature"}
+
+    # =========================
+    # PARSE JSON SAFE
+    # =========================
+    try:
+        data = json.loads(body.decode())
+    except:
+        return {"ok": False, "reason": "invalid json"}
+
+    payload = data.get("data") or data
 
     reference = payload.get("reference")
     status = payload.get("status")
 
     if status != "PAID":
-        return {"ok": True}
-
-    # 🔐 SIGNATURE CHECK
-    expected = hmac.new(
-        BAYARGG_SECRET.encode(),
-        body,
-        hashlib.sha256
-    ).hexdigest()
-
-    if x_signature and not hmac.compare_digest(expected, x_signature):
-        return {"ok": False}
+        return {"ok": True, "ignored": True}
 
     user_id, code = parse_reference(reference)
-    if not user_id:
-        return {"ok": False}
+
+    if not user_id or not code:
+        return {"ok": False, "reason": "invalid reference"}
 
     pool = await get_pool()
 
-    # 🔒 ANTI DOUBLE PAYMENT (LOCK ROW)
+    # =========================
+    # 🔥 HARD ANTI DOUBLE (ATOMIC LOCK)
+    # =========================
     updated = await pool.fetchval("""
         UPDATE payments
         SET status='paid'
-        WHERE user_id=$1 AND code=$2 AND status!='paid'
+        WHERE user_id=$1 AND code=$2 AND status='pending'
         RETURNING id
     """, user_id, code)
 
     if not updated:
-        return {"ok": True}
+        return {"ok": True, "duplicate ignored"}
 
-    # 🔥 ambil file + seller
+    # =========================
+    # GET FILE
+    # =========================
     file = await pool.fetchrow("""
-        SELECT seller_id, price, media
+        SELECT seller_id, price
         FROM files
         WHERE code=$1
     """, code)
+
+    if not file:
+        return {"ok": False, "reason": "file not found"}
 
     seller_id = file["seller_id"]
     price = int(file["price"])
@@ -98,12 +114,12 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     seller_income = price - fee
 
     # =========================
-    # UPDATE BALANCE SELLER
+    # UPDATE SELLER BALANCE
     # =========================
     await pool.execute("""
         UPDATE users
-        SET balance = balance + $1
-        WHERE user_id=$2
+        SET balance = COALESCE(balance,0) + $1
+        WHERE telegram_id=$2
     """, seller_income, seller_id)
 
     # =========================
@@ -115,7 +131,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, user_id, seller_id, code, price, fee)
 
     # =========================
-    # SAVE ACCESS
+    # UNLOCK ACCESS
     # =========================
     await pool.execute("""
         INSERT INTO user_access(user_id, code, paid)
@@ -126,19 +142,28 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     # =========================
     # NOTIFY USER
     # =========================
-    await bot.send_message(
-        user_id,
-        f"✅ PAYMENT SUCCESS\n🔓 CODE: {code}"
-    )
+    try:
+        await bot.send_message(
+            user_id,
+            f"✅ PAYMENT SUCCESS\n\n"
+            f"🔓 Code: {code}\n"
+            f"💰 Paid: Rp {price}"
+        )
+    except:
+        pass
 
     # =========================
-    # CHANNEL LOG
+    # LOG GROUP (SAFE)
     # =========================
-    await bot.send_message(
-        -1001234567890,
-        f"💰 NEW SALE\n"
-        f"📦 {code}\n"
-        f"💸 {price}\n"
-    )
+    try:
+        await bot.send_message(
+            -1001234567890,
+            f"💰 NEW SALE\n"
+            f"📦 {code}\n"
+            f"💸 Rp {price}\n"
+            f"👤 User: {user_id}"
+        )
+    except:
+        pass
 
     return {"ok": True}
