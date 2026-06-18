@@ -3,13 +3,10 @@ import time
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
 
-# =========================
-# CORE INVOICE CREATOR
-# =========================
 async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     # =========================
-    # SAFE AMOUNT
+    # NORMALIZE AMOUNT
     # =========================
     try:
         amount = int(str(amount).replace(".", "").replace(",", ""))
@@ -21,6 +18,9 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("❌ AMOUNT INVALID:", amount)
         return None
 
+    # =========================
+    # UNIQUE ID
+    # =========================
     external_id = f"{user_id}_{code}_{int(time.time() * 1000)}"
 
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
@@ -52,44 +52,25 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
         data = r.json()
 
-        if not isinstance(data, dict):
-            return None
-
-        # =========================
-        # FLEXIBLE SUCCESS CHECK (FIX IMPORTANT)
-        # =========================
-        if not (data.get("success") or data.get("status")):
+        if not isinstance(data, dict) or not data.get("success"):
             print("❌ BAYARGG ERROR:", data)
             return None
 
         result = data.get("data") or {}
 
-        if not isinstance(result, dict):
-            return None
-
         return {
-            "invoice_id": result.get("invoice_id") or result.get("id"),
+            "success": True,
+            "invoice_id": result.get("invoice_id"),
             "qris_string": result.get("qris_string"),
-            "payment_url": (
-                result.get("payment_url")
-                or result.get("checkout_url")
-                or result.get("url")
-            ),
-            "external_id": external_id,
+            "payment_url": result.get("payment_url"),
             "raw": result
         }
 
-    except httpx.RequestError as e:
-        print("❌ REQUEST ERROR:", e)
-        return None
-
     except Exception as e:
-        print("❌ UNKNOWN ERROR:", e)
+        print("❌ CREATE INVOICE ERROR:", e)
         return None
 
 
-# =========================
-# COMPAT WRAPPER (JANGAN DIHAPUS)
-# =========================
+# wrapper biar aman dipanggil di handler
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
