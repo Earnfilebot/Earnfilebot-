@@ -80,7 +80,7 @@ async def buy_handler(call: CallbackQuery):
     # =========================
     # QRIS IMAGE (BENAR POSISI)
     # =========================
-    qris = extract_qris(res)
+    qris = res.get("data", {}).get("qris_string")
 
     if qris:
         qr_img = generate_qr_image(qris)
