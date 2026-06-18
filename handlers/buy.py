@@ -64,28 +64,31 @@ async def buy_handler(call: CallbackQuery):
         return await call.answer("❌ File ini tidak berbayar", show_alert=True)
 
     # =========================
-    # ANTI DOUBLE BUY (SAFE)
-    # =========================
-    buyers = file.get("buyers") or []
-
-    if isinstance(buyers, str):
-        try:
-            buyers = json.loads(buyers)
-        except:
-            buyers = []
-
-    buyers = [int(b) for b in buyers if str(b).isdigit()]
-
-    if user_id in buyers:
-        return await call.answer("✔ Sudah pernah membeli", show_alert=True)
-
-    # =========================
     # CREATE INVOICE
     # =========================
     res = await create_invoice(code, user_id, amount)
 
     if not res:
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
+
+    # =========================
+    # IMPORT (HARUS DI ATAS BLOK INI)
+    # =========================
+    from utils.qris import extract_qris
+    from utils.qr import generate_qr_image
+
+    # =========================
+    # QRIS IMAGE (BENAR POSISI)
+    # =========================
+    qris = extract_qris(res)
+
+    if qris:
+        qr_img = generate_qr_image(qris)
+
+        await call.message.answer_photo(
+            qr_img,
+            caption="💳 Scan QRIS untuk pembayaran"
+        )
 
     # =========================
     # SAFE PARSE RESPONSE
