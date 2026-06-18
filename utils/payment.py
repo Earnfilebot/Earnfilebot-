@@ -9,7 +9,7 @@ from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     # =========================
-    # SAFE AMOUNT VALIDATION
+    # SAFE AMOUNT
     # =========================
     try:
         amount = int(str(amount).replace(".", "").replace(",", ""))
@@ -17,13 +17,10 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("❌ INVALID AMOUNT:", amount)
         return None
 
-    if amount < 1000:
-        print("❌ AMOUNT TOO SMALL:", amount)
+    if amount <= 0:
+        print("❌ AMOUNT INVALID:", amount)
         return None
 
-    # =========================
-    # UNIQUE ID (ANTI DUPLICATE)
-    # =========================
     external_id = f"{user_id}_{code}_{int(time.time() * 1000)}"
 
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
@@ -49,11 +46,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
         print("STATUS:", r.status_code)
         print("RESPONSE:", r.text)
-        print("PAYLOAD:", payload)
 
-        # =========================
-        # HTTP CHECK
-        # =========================
         if r.status_code != 200:
             return None
 
@@ -62,7 +55,10 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         if not isinstance(data, dict):
             return None
 
-        if not data.get("success"):
+        # =========================
+        # FLEXIBLE SUCCESS CHECK (FIX IMPORTANT)
+        # =========================
+        if not (data.get("success") or data.get("status")):
             print("❌ BAYARGG ERROR:", data)
             return None
 
@@ -71,24 +67,14 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         if not isinstance(result, dict):
             return None
 
-        # =========================
-        # EXTRACT QRIS
-        # =========================
-        qris_string = result.get("qris_string")
-
         return {
-            "success": True,
             "invoice_id": result.get("invoice_id") or result.get("id"),
-            "qris_string": qris_string,
-            "has_qris": bool(qris_string),
-
+            "qris_string": result.get("qris_string"),
             "payment_url": (
                 result.get("payment_url")
                 or result.get("checkout_url")
-                or result.get("invoice_url")
                 or result.get("url")
             ),
-
             "external_id": external_id,
             "raw": result
         }
@@ -103,7 +89,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
 
 # =========================
-# COMPATIBILITY WRAPPER (PENTING)
+# COMPAT WRAPPER (JANGAN DIHAPUS)
 # =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
