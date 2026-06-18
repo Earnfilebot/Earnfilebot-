@@ -1,17 +1,18 @@
 import hmac
 import hashlib
-from fastapi import APIRouter, Request, Header
+import json
 
+from fastapi import APIRouter, Request, Header
 from database import get_pool
 from bot import bot
 
 router = APIRouter()
 
-BAYARGG_SECRET = "whsec_81c259f2d3291e377957b7b56155683290aacc63e41a0df2"  # dari dashboard BayarGG
+BAYARGG_SECRET = "whsec_81c259f2d3291e377957b7b56155683290aacc63e41a0df2"
 
 
 # =========================
-# PARSE REFERENCE
+# SAFE PARSE REFERENCE
 # =========================
 def parse_reference(ref: str):
     try:
@@ -22,10 +23,12 @@ def parse_reference(ref: str):
 
 
 # =========================
-# VERIFY SIGNATURE (ANTI FAKE 🔴)
+# SIGNATURE VERIFY FIXED
 # =========================
 def verify_signature(payload: dict, signature: str):
-    raw = str(payload).encode()
+    # IMPORTANT: normalize JSON
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+
     expected = hmac.new(
         BAYARGG_SECRET.encode(),
         raw,
@@ -43,15 +46,17 @@ async def bayargg_webhook(req: Request, x_signature: str = Header(None)):
     data = await req.json()
 
     payload = data.get("data", data)
+
     reference = payload.get("reference")
     status = payload.get("status")
 
     if not reference or not status:
         return {"ok": False}
 
-    # 🔴 SECURITY CHECK
-    if x_signature and not verify_signature(payload, x_signature):
-        return {"ok": False, "error": "invalid signature"}
+    # 🔐 VERIFY SIGNATURE
+    if x_signature:
+        if not verify_signature(payload, x_signature):
+            return {"ok": False, "error": "invalid signature"}
 
     user_id, code = parse_reference(reference)
 
@@ -63,14 +68,15 @@ async def bayargg_webhook(req: Request, x_signature: str = Header(None)):
 
     pool = await get_pool()
 
-    # 🔴 ANTI DUPLICATE RACE CONDITION
+    # =========================
+    # ATOMIC UPDATE (ANTI DOUBLE)
+    # =========================
     updated = await pool.execute("""
         UPDATE payments
         SET status='paid'
         WHERE user_id=$1 AND code=$2 AND status!='paid'
     """, user_id, code)
 
-    # kalau sudah pernah paid, stop
     if updated == "UPDATE 0":
         return {"ok": True}
 
@@ -88,20 +94,36 @@ async def bayargg_webhook(req: Request, x_signature: str = Header(None)):
     media = file.get("media") or []
 
     if isinstance(media, str):
-        import json
         media = json.loads(media)
 
+    if not isinstance(media, list):
+        media = []
+
     # =========================
-    # 🔴 AUTO UNLOCK REAL TIME
+    # SAVE ACCESS (IMPORTANT!)
+    # =========================
+    await pool.execute("""
+        INSERT INTO user_access(user_id, code, paid)
+        VALUES($1,$2,true)
+        ON CONFLICT DO NOTHING
+    """, user_id, code)
+
+    # =========================
+    # NOTIF USER
     # =========================
     await bot.send_message(
         user_id,
-        "✅ PAYMENT SUCCESS\n🔓 FILE UNLOCKED"
+        f"✅ PAYMENT SUCCESS\n🔓 CODE: {code}\n📂 FILE UNLOCKED"
     )
 
+    # =========================
+    # SEND FILES SAFELY
+    # =========================
     for m in media[:10]:
         try:
-            await bot.send_document(user_id, m["file_id"])
+            fid = m.get("file_id")
+            if fid:
+                await bot.send_document(user_id, fid)
         except:
             pass
 
