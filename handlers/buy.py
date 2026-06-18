@@ -11,9 +11,9 @@ router = Router()
 
 
 # =========================
-# SAFE PARSER
+# SAFE PARSER BAYARGG
 # =========================
-def extract_data(res):
+def safe_data(res):
     if not res:
         return {}
 
@@ -28,9 +28,6 @@ def extract_data(res):
     return data if isinstance(data, dict) else {}
 
 
-# =========================
-# BUY HANDLER
-# =========================
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
@@ -55,9 +52,6 @@ async def buy_handler(call: CallbackQuery):
     except:
         amount = 0
 
-    # =========================
-    # FREE FILE HANDLER (FIX IMPORTANT)
-    # =========================
     if amount <= 0:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -70,31 +64,21 @@ async def buy_handler(call: CallbackQuery):
             ]
         )
 
-        await call.message.answer(
-            "🆓 FILE GRATIS\n\nKlik tombol untuk buka file",
-            reply_markup=kb
-        )
-
+        await call.message.answer("🆓 FILE GRATIS", reply_markup=kb)
         return await call.answer()
 
     # =========================
-    # CREATE INVOICE (FIX ORDER IMPORTANT)
+    # CREATE INVOICE
     # =========================
     res = await create_invoice(amount, code, user_id)
 
     if not res:
         return await call.answer("❌ Gagal membuat invoice", show_alert=True)
 
-    data = extract_data(res)
+    data = safe_data(res)
 
     qris = data.get("qris_string")
-
-    pay_url = (
-        data.get("payment_url")
-        or data.get("checkout_url")
-        or data.get("invoice_url")
-        or data.get("url")
-    )
+    pay_url = data.get("payment_url")
 
     if not qris and not pay_url:
         return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
@@ -127,7 +111,7 @@ async def buy_handler(call: CallbackQuery):
     )
 
     # =========================
-    # QRIS RENDER (SAFE)
+    # QRIS HANDLER FIX
     # =========================
     if qris:
         try:
@@ -135,15 +119,12 @@ async def buy_handler(call: CallbackQuery):
 
             await call.message.answer_photo(
                 qr_img,
-                caption=caption + "📲 Scan QRIS atau klik tombol di bawah",
+                caption=caption + "📲 Scan QRIS atau klik tombol",
                 reply_markup=kb
             )
 
         except Exception as e:
-            await call.message.answer(
-                caption + f"⚠️ QR ERROR: {e}",
-                reply_markup=kb
-            )
+            await call.message.answer(caption + f"⚠️ QR ERROR: {e}", reply_markup=kb)
 
     else:
         await call.message.answer(
