@@ -71,11 +71,9 @@ app = FastAPI()
 import webhook.bayargg as webhook_handler
 
 app.include_router(webhook_handler.router)
-webhook_handler.bot = bot
 
-# inject bot ke fastapi
+# 🔥 INI SATU-SATUNYA CARA YANG BENAR
 app.state.bot = bot
-
 
 # =========================
 # START BOT
