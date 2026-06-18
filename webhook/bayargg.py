@@ -6,10 +6,12 @@ import logging
 
 from fastapi import APIRouter, Request, Header
 from database import get_pool
-from bot import bot
 from config import GROUP_ID
+from aiogram import Bot
 
 router = APIRouter()
+
+bot: Bot = None
 
 BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
 
