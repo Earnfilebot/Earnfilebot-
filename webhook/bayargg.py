@@ -49,13 +49,12 @@ def verify_signature(body: bytes, signature: str):
 async def webhook(req: Request, x_signature: str = Header(None)):
 
     bot = req.app.state.bot
-
     body = await req.body()
 
     logging.info("📩 Webhook received")
 
     # =========================
-    # SECURITY CHECK
+    # VERIFY SIGNATURE
     # =========================
     if not verify_signature(body, x_signature):
         logging.warning("❌ Invalid signature")
@@ -72,9 +71,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     payload = data.get("data") or data
 
-    # =========================
-    # ONLY PAID
-    # =========================
     if payload.get("status") != "PAID":
         return {"ok": True}
 
@@ -87,7 +83,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     pool = await get_pool()
 
     # =========================
-    # ANTI DOUBLE PAYMENT
+    # LOCK PAYMENT (ANTI DOUBLE)
     # =========================
     updated = await pool.fetchval("""
         UPDATE payments
@@ -97,13 +93,11 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, user_id, code)
 
     if not updated:
-        logging.info("⚠️ Already processed payment")
+        logging.info("⚠️ Payment already processed")
         return {"ok": True}
 
-    logging.info(f"💰 PAYMENT CONFIRMED: {user_id} | {code}")
-
     # =========================
-    # GET FILE INFO
+    # GET FILE
     # =========================
     file = await pool.fetchrow("""
         SELECT seller_id, price
@@ -112,7 +106,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, code)
 
     if not file:
-        logging.error("❌ File not found")
+        logging.error(f"❌ FILE NOT FOUND: {code}")
         return {"ok": True}
 
     seller_id = file["seller_id"]
@@ -131,11 +125,12 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, seller_income, seller_id)
 
     # =========================
-    # TRANSACTION LOG
+    # INSERT TRANSACTION (SAFE)
     # =========================
     await pool.execute("""
         INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
         VALUES($1,$2,$3,$4,$5,'paid')
+        ON CONFLICT DO NOTHING
     """, user_id, seller_id, code, price, fee)
 
     # =========================
@@ -147,13 +142,15 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         ON CONFLICT DO NOTHING
     """, user_id, code)
 
+    logging.info(f"💰 PAID SUCCESS: {user_id} | {code}")
+
     # =========================
-    # NOTIFICATION (SAFE)
+    # NOTIFY USER
     # =========================
     try:
         await bot.send_message(
             user_id,
-            f"✅ PAYMENT SUCCESS\n🔓 {code}\n💰 Rp {price}"
+            f"✅ PAYMENT SUCCESS\n🔓 CODE: {code}\n💰 Rp {price}"
         )
 
         await bot.send_message(
