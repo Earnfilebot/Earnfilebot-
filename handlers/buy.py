@@ -1,5 +1,5 @@
-import json
 import asyncio
+import json
 
 from aiogram import Router, F
 from aiogram.types import (
@@ -12,10 +12,14 @@ from aiogram.types import (
 from database import get_pool
 from utils.qr import generate_qr_image
 from utils.payment import create_invoice
+from handlers.start import home_text
 
 router = Router()
 
 
+# =========================
+# BUY HANDLER
+# =========================
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
 
@@ -24,9 +28,6 @@ async def buy_handler(call: CallbackQuery):
     code = call.data.split(":")[1]
     user_id = call.from_user.id
 
-    # =========================
-    # ⏳ LOADING (NEW ADD)
-    # =========================
     loading = await call.message.edit_text("⏳ Memproses pembayaran...")
 
     pool = await get_pool()
@@ -41,12 +42,9 @@ async def buy_handler(call: CallbackQuery):
 
     try:
         amount = int(file.get("price") or 0)
-    except Exception:
+    except:
         amount = 0
 
-    # =========================
-    # FREE FILE
-    # =========================
     if amount <= 0:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -59,7 +57,7 @@ async def buy_handler(call: CallbackQuery):
                 [
                     InlineKeyboardButton(
                         text="🏠 HOME",
-                        callback_data="home"   # 🔥 FIX BACK TO HOME
+                        callback_data="home"
                     )
                 ]
             ]
@@ -70,45 +68,22 @@ async def buy_handler(call: CallbackQuery):
             reply_markup=kb
         )
 
-    # =========================
-    # CREATE INVOICE
-    # =========================
-    res = await create_invoice(
-        amount,
-        code,
-        user_id
-    )
+    res = await create_invoice(amount, code, user_id)
 
     if not res:
-        return await loading.edit_text(
-            "❌ Gagal membuat invoice"
-        )
+        return await loading.edit_text("❌ Gagal membuat invoice")
 
     qris = res.get("qris_string")
-    pay_url = res.get("payment_url")
 
-    if not qris and not pay_url:
-        print("DEBUG RES:", res)
+    if not qris:
+        return await loading.edit_text("❌ QRIS tidak tersedia")
 
-        return await loading.edit_text(
-            "❌ Response BayarGG tidak valid"
-        )
-
-    # =========================
-    # BUTTON (FIX BACK -> HOME)
-    # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="💳 BAYAR SEKARANG",
-                    url=pay_url
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🏠 HOME",
-                    callback_data="home"   # 🔥 FIXED
+                    text="❌ BATAL",
+                    callback_data="cancel"
                 )
             ]
         ]
@@ -121,41 +96,24 @@ async def buy_handler(call: CallbackQuery):
         f"💵 PRICE: Rp {amount}\n\n"
     )
 
-    # =========================
-    # QRIS (LOADING ADD BEFORE GENERATE)
-    # =========================
-    if qris:
-        try:
-            await loading.edit_text("⏳ Membuat QRIS...")
+    try:
+        await loading.edit_text("⏳ Membuat QRIS...")
 
-            qr_img = generate_qr_image(qris)
+        qr_img = generate_qr_image(qris)
 
-            if not qr_img:
-                raise ValueError("QR image is None")
+        photo = BufferedInputFile(
+            qr_img.getvalue(),
+            filename="qris.png"
+        )
 
-            photo = BufferedInputFile(
-                qr_img.getvalue(),
-                filename="qris.png"
-            )
+        await loading.delete()
 
-            await loading.delete()
-
-            await call.message.answer_photo(
-                photo=photo,
-                caption=caption + "📲 Scan QRIS atau klik tombol",
-                reply_markup=kb
-            )
-
-        except Exception as e:
-            print("QR ERROR:", repr(e))
-
-            await loading.edit_text(
-                caption + "⚠️ Gagal membuat QRIS",
-                reply_markup=kb
-            )
-
-    else:
-        await loading.edit_text(
-            caption + "🔗 QRIS tidak tersedia",
+        await call.message.answer_photo(
+            photo=photo,
+            caption=caption + "📲 Scan QR untuk bayar",
             reply_markup=kb
         )
+
+    except Exception as e:
+        print("QR ERROR:", repr(e))
+        await loading.edit_text("⚠️ Gagal membuat QRIS")
