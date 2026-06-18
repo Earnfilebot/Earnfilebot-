@@ -15,6 +15,9 @@ BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
 logging.basicConfig(level=logging.INFO)
 
 
+# =========================
+# PARSE REFERENCE
+# =========================
 def parse_reference(ref: str):
     try:
         user_id, code = ref.split("_", 1)
@@ -23,6 +26,9 @@ def parse_reference(ref: str):
         return None, None
 
 
+# =========================
+# VERIFY SIGNATURE
+# =========================
 def verify_signature(body: bytes, signature: str):
     if not signature or not BAYARGG_SECRET:
         return False
@@ -36,35 +42,53 @@ def verify_signature(body: bytes, signature: str):
     return hmac.compare_digest(expected, signature)
 
 
+# =========================
+# WEBHOOK
+# =========================
 @router.post("/bayargg/webhook")
 async def webhook(req: Request, x_signature: str = Header(None)):
 
-    bot = req.app.state.bot  # 🔥 INI FIX UTAMA
+    bot = req.app.state.bot
 
     body = await req.body()
 
-    logging.info("Webhook hit received")
+    logging.info("📩 Webhook received")
 
+    # =========================
+    # SECURITY CHECK
+    # =========================
     if not verify_signature(body, x_signature):
-        return {"ok": False}
+        logging.warning("❌ Invalid signature")
+        return {"ok": True}
 
+    # =========================
+    # PARSE JSON
+    # =========================
     try:
         data = json.loads(body.decode())
-    except:
-        return {"ok": False}
+    except Exception as e:
+        logging.error(f"JSON error: {e}")
+        return {"ok": True}
 
     payload = data.get("data") or data
 
+    # =========================
+    # ONLY PAID
+    # =========================
     if payload.get("status") != "PAID":
         return {"ok": True}
 
     user_id, code = parse_reference(payload.get("reference"))
 
     if not user_id or not code:
-        return {"ok": False}
+        logging.warning("❌ Invalid reference")
+        return {"ok": True}
 
     pool = await get_pool()
 
+    # =========================
+    # ANTI DOUBLE PAYMENT
+    # =========================
     updated = await pool.fetchval("""
         UPDATE payments
         SET status='paid'
@@ -73,8 +97,14 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, user_id, code)
 
     if not updated:
+        logging.info("⚠️ Already processed payment")
         return {"ok": True}
 
+    logging.info(f"💰 PAYMENT CONFIRMED: {user_id} | {code}")
+
+    # =========================
+    # GET FILE INFO
+    # =========================
     file = await pool.fetchrow("""
         SELECT seller_id, price
         FROM files
@@ -82,7 +112,8 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     """, code)
 
     if not file:
-        return {"ok": False}
+        logging.error("❌ File not found")
+        return {"ok": True}
 
     seller_id = file["seller_id"]
     price = int(file["price"])
@@ -90,23 +121,35 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     fee = int(price * 0.10)
     seller_income = price - fee
 
+    # =========================
+    # UPDATE SELLER BALANCE
+    # =========================
     await pool.execute("""
         UPDATE users
         SET balance = COALESCE(balance,0) + $1
         WHERE telegram_id=$2
     """, seller_income, seller_id)
 
+    # =========================
+    # TRANSACTION LOG
+    # =========================
     await pool.execute("""
         INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
         VALUES($1,$2,$3,$4,$5,'paid')
     """, user_id, seller_id, code, price, fee)
 
+    # =========================
+    # GRANT ACCESS
+    # =========================
     await pool.execute("""
         INSERT INTO user_access(user_id, code, paid)
         VALUES($1,$2,true)
         ON CONFLICT DO NOTHING
     """, user_id, code)
 
+    # =========================
+    # NOTIFICATION (SAFE)
+    # =========================
     try:
         await bot.send_message(
             user_id,
@@ -117,6 +160,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
             GROUP_ID,
             f"💰 NEW SALE\n📦 {code}\n💸 Rp {price}\n👤 {user_id}"
         )
+
     except Exception as e:
         logging.error(f"notify error: {e}")
 
