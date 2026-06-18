@@ -1,11 +1,13 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-
 from database import get_pool
 
 router = Router()
 
 
+# =========================
+# FORMAT RUPIAH
+# =========================
 def rupiah(n):
     try:
         return f"{int(n):,}".replace(",", ".")
@@ -22,6 +24,9 @@ async def account_handler(call: CallbackQuery):
     user_id = call.from_user.id
     pool = await get_pool()
 
+    # =========================
+    # USER BALANCE
+    # =========================
     user = await pool.fetchrow(
         "SELECT balance FROM users WHERE telegram_id=$1",
         user_id
@@ -29,23 +34,28 @@ async def account_handler(call: CallbackQuery):
 
     balance = user["balance"] if user else 0
 
+    # =========================
+    # TOTAL TRANSACTIONS
+    # =========================
     total_tx = await pool.fetchval(
         "SELECT COUNT(*) FROM transactions WHERE user_id=$1",
         user_id
     ) or 0
 
-    # ❌ FIX: tidak pakai seller_id (biar aman)
+    # =========================
+    # TOTAL INCOME (SAFE)
+    # =========================
     total_income = await pool.fetchval(
         "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE user_id=$1",
         user_id
     ) or 0
 
     # =========================
-    # HOT PRODUCT
+    # HOT PRODUCT (SAFE GROUP BY)
     # =========================
     hot = await pool.fetch(
         """
-        SELECT code, COUNT(*) AS total
+        SELECT COALESCE(code,'UNKNOWN') AS code, COUNT(*) AS total
         FROM transactions
         WHERE code IS NOT NULL
         GROUP BY code
@@ -58,6 +68,9 @@ async def account_handler(call: CallbackQuery):
         [f"🔥 {h['code']} — {h['total']} sold" for h in hot]
     ) if hot else "Belum ada data"
 
+    # =========================
+    # TEXT UI
+    # =========================
     text = (
         "╭━━━ 💼 ACCOUNT DASHBOARD ━━━╮\n\n"
         f"👤 ID USER   : <code>{user_id}</code>\n"
@@ -70,15 +83,24 @@ async def account_handler(call: CallbackQuery):
         "╰━━━━━━━━━━━━━━━━━━━━━━╯"
     )
 
+    # =========================
+    # KEYBOARD (AIROGRAM V3 FIXED)
+    # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton("🔄 REFRESH", callback_data="account")],
             [
-                InlineKeyboardButton("📜 TRANSACTIONS", callback_data="trx"),
-                InlineKeyboardButton("💸 WITHDRAW", callback_data="withdraw")
+                InlineKeyboardButton(text="🔄 REFRESH", callback_data="account")
             ],
-            [InlineKeyboardButton("🏆 TOP PRODUCT", callback_data="top_product")],
-            [InlineKeyboardButton("🏠 HOME", callback_data="home")]
+            [
+                InlineKeyboardButton(text="📜 TRANSACTIONS", callback_data="trx"),
+                InlineKeyboardButton(text="💸 WITHDRAW", callback_data="withdraw")
+            ],
+            [
+                InlineKeyboardButton(text="🏆 TOP PRODUCT", callback_data="top_product")
+            ],
+            [
+                InlineKeyboardButton(text="🏠 HOME", callback_data="home")
+            ]
         ]
     )
 
@@ -92,8 +114,8 @@ async def account_handler(call: CallbackQuery):
 @router.callback_query(F.data == "trx")
 async def transaction_history(call: CallbackQuery):
 
-    user_id = call.from_user.id
     pool = await get_pool()
+    user_id = call.from_user.id
 
     rows = await pool.fetch(
         """
@@ -111,7 +133,7 @@ async def transaction_history(call: CallbackQuery):
             "📜 TRANSAKSI\n\n❌ Belum ada transaksi",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton("🏠 HOME", callback_data="home")]
+                    [InlineKeyboardButton(text="🏠 HOME", callback_data="home")]
                 ]
             )
         )
@@ -134,7 +156,7 @@ async def transaction_history(call: CallbackQuery):
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton("🔙 BACK", callback_data="account")]
+            [InlineKeyboardButton(text="🔙 BACK", callback_data="account")]
         ]
     )
 
@@ -152,7 +174,9 @@ async def top_product(call: CallbackQuery):
 
     rows = await pool.fetch(
         """
-        SELECT code, COUNT(*) AS sold, SUM(amount) AS revenue
+        SELECT COALESCE(code,'UNKNOWN') AS code,
+               COUNT(*) AS sold,
+               COALESCE(SUM(amount),0) AS revenue
         FROM transactions
         WHERE code IS NOT NULL
         GROUP BY code
@@ -166,7 +190,7 @@ async def top_product(call: CallbackQuery):
             "🏆 TOP PRODUCT\n\n❌ Belum ada data",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton("🔙 BACK", callback_data="account")]
+                    [InlineKeyboardButton(text="🔙 BACK", callback_data="account")]
                 ]
             )
         )
@@ -177,13 +201,13 @@ async def top_product(call: CallbackQuery):
         text += (
             f"📦 {r['code']}\n"
             f"🔥 Sold: {r['sold']}\n"
-            f"💰 Revenue: Rp {rupiah(r['revenue'] or 0)}\n"
+            f"💰 Revenue: Rp {rupiah(r['revenue'])}\n"
             "━━━━━━━━━━━━━━\n"
         )
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton("🔙 BACK", callback_data="account")]
+            [InlineKeyboardButton(text="🔙 BACK", callback_data="account")]
         ]
     )
 
