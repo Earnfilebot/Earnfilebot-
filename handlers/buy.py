@@ -14,19 +14,21 @@ router = Router()
 # SAFE PARSER BAYARGG
 # =========================
 def safe_data(res):
-    if not res:
+    if not isinstance(res, dict):
         return {}
 
     data = res.get("data")
 
+    if isinstance(data, dict):
+        return data
+
     if isinstance(data, str):
         try:
-            data = json.loads(data)
+            return json.loads(data)
         except:
             return {}
 
-    return data if isinstance(data, dict) else {}
-
+    return {}
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_handler(call: CallbackQuery):
@@ -52,6 +54,9 @@ async def buy_handler(call: CallbackQuery):
     except:
         amount = 0
 
+    # =========================
+    # FREE FILE
+    # =========================
     if amount <= 0:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -68,7 +73,7 @@ async def buy_handler(call: CallbackQuery):
         return await call.answer()
 
     # =========================
-    # CREATE INVOICE
+    # CREATE INVOICE (FIXED INDENT)
     # =========================
     res = await create_invoice(amount, code, user_id)
 
@@ -81,6 +86,7 @@ async def buy_handler(call: CallbackQuery):
     pay_url = data.get("payment_url")
 
     if not qris and not pay_url:
+        print("DEBUG BAYARGG:", res)
         return await call.answer("❌ Response BayarGG tidak valid", show_alert=True)
 
     # =========================
@@ -111,7 +117,7 @@ async def buy_handler(call: CallbackQuery):
     )
 
     # =========================
-    # QRIS HANDLER FIX
+    # QRIS
     # =========================
     if qris:
         try:
@@ -124,8 +130,10 @@ async def buy_handler(call: CallbackQuery):
             )
 
         except Exception as e:
-            await call.message.answer(caption + f"⚠️ QR ERROR: {e}", reply_markup=kb)
-
+            await call.message.answer(
+                caption + f"⚠️ QR ERROR: {e}",
+                reply_markup=kb
+            )
     else:
         await call.message.answer(
             caption + "🔗 QRIS tidak tersedia",
