@@ -3,6 +3,9 @@ import time
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
 
 
+# =========================
+# CORE INVOICE CREATOR
+# =========================
 async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     # =========================
@@ -19,7 +22,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
     # =========================
-    # STRONG UNIQUE ID
+    # UNIQUE ID (ANTI DUPLICATE)
     # =========================
     external_id = f"{user_id}_{code}_{int(time.time() * 1000)}"
 
@@ -28,15 +31,9 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     payload = {
         "amount": amount,
         "description": f"Purchase file {code}",
-
-        # WAJIB
         "payment_url": "https://www.bayar.gg/pay",
-
-        # WAJIB webhook
         "callback_url": "https://earnfilebot.railway.app/bayargg/webhook",
-
         "payment_method": "qris",
-
         "external_id": external_id
     }
 
@@ -54,10 +51,16 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("RESPONSE:", r.text)
         print("PAYLOAD:", payload)
 
+        # =========================
+        # HTTP CHECK
+        # =========================
         if r.status_code != 200:
             return None
 
         data = r.json()
+
+        if not isinstance(data, dict):
+            return None
 
         if not data.get("success"):
             print("❌ BAYARGG ERROR:", data)
@@ -68,19 +71,25 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         if not isinstance(result, dict):
             return None
 
-        qris = result.get("qris_string")
+        # =========================
+        # EXTRACT QRIS
+        # =========================
+        qris_string = result.get("qris_string")
 
         return {
+            "success": True,
             "invoice_id": result.get("invoice_id") or result.get("id"),
-            "qris_string": qris,
-            "checkout_url": (
+            "qris_string": qris_string,
+            "has_qris": bool(qris_string),
+
+            "payment_url": (
                 result.get("payment_url")
                 or result.get("checkout_url")
                 or result.get("invoice_url")
                 or result.get("url")
             ),
-            "reference": external_id,
-            "has_qris": bool(qris),
+
+            "external_id": external_id,
             "raw": result
         }
 
@@ -93,5 +102,8 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
 
+# =========================
+# COMPATIBILITY WRAPPER (PENTING)
+# =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
