@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Request
-import json, hmac, hashlib
-from database import get_pool
+from fastapi import FastAPI
 from bot import bot
-from utils.crypto import decrypt
-from utils.reseller import give_commission
+from webhook.bayargg import router as bayargg_router
 
 app = FastAPI()
 
-BAYARGG_SECRET = "ISI_SECRET"
+# =========================
+# ATTACH BOT KE APP STATE
+# =========================
+@app.on_event("startup")
+async def startup():
+    app.state.bot = bot
