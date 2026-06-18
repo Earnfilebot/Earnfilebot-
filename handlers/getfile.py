@@ -76,10 +76,9 @@ async def receive_code(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    media = json.loads(file["media"])
+    media = safe_json(file["media"])
 
-    # ❌ JANGAN pakai "free" fallback
-    file_type = file.get("type")
+    file_type = str(file.get("type") or "document")
     price = file.get("price", 0)
 
     if not media:
@@ -88,6 +87,12 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     first = get_first_media(media)
+
+    if not first:
+        await message.answer("❌ FILE INVALID")
+        await state.clear()
+        return
+
     fid = first.get("file_id")
     ftype = (first.get("type") or "document").lower()
 
@@ -99,45 +104,42 @@ async def receive_code(message: Message, state: FSMContext):
     # =========================
     # 🔒 FINAL SECURITY GATE (ONLY ONCE)
     # =========================
-    is_paid = file_type == "paid"
+    access = await pool.fetchrow(
+        """
+        SELECT 1 FROM user_access
+        WHERE user_id=$1 AND code=$2 AND paid=true
+        """,
+        user_id, code
+    )
 
-    if is_paid:
-        access = await pool.fetchrow(
+    if not access:
+
+        pending = await pool.fetchrow(
             """
-            SELECT 1 FROM user_access
-            WHERE user_id=$1 AND code=$2 AND paid=true
+            SELECT 1 FROM payments
+            WHERE user_id=$1 AND code=$2 AND status='pending'
             """,
             user_id, code
         )
 
-        if not access:
-
-            pending = await pool.fetchrow(
-                """
-                SELECT 1 FROM payments
-                WHERE user_id=$1 AND code=$2 AND status='pending'
-                """,
-                user_id, code
+        if pending:
+            await message.answer("⏳ INVOICE MASIH AKTIF")
+        else:
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=f"💰 BUY ACCESS ({price})",
+                            callback_data=f"buy:{code}"
+                        )
+                    ]
+                ]
             )
 
-            if pending:
-                await message.answer("⏳ INVOICE MASIH AKTIF")
-            else:
-                keyboard = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text=f"💰 BUY ACCESS ({price})",
-                                callback_data=f"buy:{code}"
-                            )
-                        ]
-                    ]
-                )
+            await message.answer("🔒 FILE BERBAYAR", reply_markup=keyboard)
 
-                await message.answer("🔒 FILE BERBAYAR", reply_markup=keyboard)
-
-            await state.clear()
-            return
+        await state.clear()
+        return
 
     # =========================
     # SHOW FILE (ONLY IF PASS GATE)
