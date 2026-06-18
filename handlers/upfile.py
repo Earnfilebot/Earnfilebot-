@@ -428,7 +428,7 @@ async def finalize_save(message: Message, state: FSMContext):
                 CHANNEL_ID,
                 f"""📦 FILE CREATED
 
-🔑 CODE: {code}
+f"🔑 Code : `{code}`\n"
 👤 USER ID: {message.from_user.id}
 📁 MEDIA: {len(media)}
 💎 TYPE: {"PAID" if is_paid else "FREE"}
