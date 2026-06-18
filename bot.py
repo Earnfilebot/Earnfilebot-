@@ -9,7 +9,7 @@ from fastapi import FastAPI
 import uvicorn
 
 from config import BOT_TOKEN
-from database import connect_db, close_db
+from database import get_pool, close_db
 
 # =========================
 # LOGGING
@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
     # =========================
     # STARTUP
     # =========================
-    await connect_db()
+    await get_pool()
     logging.info("DATABASE CONNECTED")
 
     await bot.delete_webhook(drop_pending_updates=True)
