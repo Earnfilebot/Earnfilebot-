@@ -61,6 +61,9 @@ async def getfile_start(call: CallbackQuery, state: FSMContext):
 @router.message(GetFileState.wait_code)
 async def receive_code(message: Message, state: FSMContext):
 
+    if not message.text:
+        return await message.answer("❌ Kode kosong")
+
     code = message.text.strip().upper()
     user_id = message.from_user.id
 
@@ -77,9 +80,8 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     media = safe_json(file["media"])
-
     file_type = str(file.get("type") or "document")
-    price = file.get("price", 0)
+    price = int(file.get("price") or 0)
 
     if not media:
         await message.answer("❌ FILE KOSONG")
@@ -88,23 +90,18 @@ async def receive_code(message: Message, state: FSMContext):
 
     first = get_first_media(media)
 
-    if not first:
+    if not first or not first.get("file_id"):
         await message.answer("❌ FILE INVALID")
         await state.clear()
         return
 
-    fid = first.get("file_id")
+    fid = first["file_id"]
     ftype = (first.get("type") or "document").lower()
 
-    if not fid:
-        await message.answer("❌ FILE INVALID")
-        await state.clear()
-        return
-
     # =========================
-    # 🔒 FINAL SECURITY GATE (ONLY ONCE)
+    # CHECK ACCESS (PAID USER)
     # =========================
-    access = await pool.fetchrow(
+    access = await pool.fetchval(
         """
         SELECT 1 FROM user_access
         WHERE user_id=$1 AND code=$2 AND paid=true
@@ -114,7 +111,10 @@ async def receive_code(message: Message, state: FSMContext):
 
     if not access:
 
-        pending = await pool.fetchrow(
+        # =========================
+        # CHECK PAYMENT STATUS (FIXED)
+        # =========================
+        pending = await pool.fetchval(
             """
             SELECT 1 FROM payments
             WHERE user_id=$1 AND code=$2 AND status='pending'
@@ -123,7 +123,7 @@ async def receive_code(message: Message, state: FSMContext):
         )
 
         if pending:
-            await message.answer("⏳ INVOICE MASIH AKTIF")
+            await message.answer("⏳ INVOICE MASIH AKTIF / BELUM LUNAS")
         else:
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -142,7 +142,7 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     # =========================
-    # SHOW FILE (ONLY IF PASS GATE)
+    # SHOW FILE
     # =========================
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
