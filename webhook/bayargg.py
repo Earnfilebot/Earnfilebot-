@@ -38,7 +38,7 @@ def verify_signature(body: bytes, signature: str):
     return hmac.compare_digest(expected, signature)
 
 
-@router.post("/webhook")
+@router.post("/bayargg/webhook")
 async def webhook(req: Request, x_signature: str = Header(None)):
 
     logging.info("🔥 WEBHOOK HIT MASUK")
