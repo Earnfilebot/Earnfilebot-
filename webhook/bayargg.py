@@ -94,11 +94,17 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     payload = data.get("data") or data
 
+    logging.info(f"PAYLOAD={payload}")
+    logging.info(f"REFERENCE={payload.get('reference')}")
+    logging.info(f"STATUS={payload.get('status')}")
+
     if payload.get("status") != "PAID":
         return {"ok": True}
 
     ref = payload.get("reference")
     user_id, code = parse_reference(ref)
+
+    logging.info(f"USER_ID={user_id} CODE={code}")
 
     if not user_id or not code:
         return {"ok": True}
@@ -106,6 +112,9 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     pool = await get_pool()
 
     try:
+        # =========================
+        # UPDATE PAYMENT
+        # =========================
         updated = await pool.fetchval("""
             UPDATE payments
             SET status='paid'
@@ -117,6 +126,9 @@ async def webhook(req: Request, x_signature: str = Header(None)):
             logging.warning("❌ PAYMENT NOT FOUND / NOT PENDING")
             return {"ok": True}
 
+        # =========================
+        # GET FILE
+        # =========================
         file = await pool.fetchrow("""
             SELECT seller_id, price, media_json
             FROM files
@@ -134,19 +146,28 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         fee = int(price * 0.10)
         seller_income = price - fee
 
+        # =========================
+        # UPDATE SELLER BALANCE (FIXED)
+        # =========================
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
             VALUES ($1, $2)
             ON CONFLICT (telegram_id)
-            DO UPDATE SET balance = users.balance + $2
+            DO UPDATE SET balance = users.balance + EXCLUDED.balance
         """, seller_id, seller_income)
 
+        # =========================
+        # TRANSACTION LOG
+        # =========================
         await pool.execute("""
             INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
             VALUES($1,$2,$3,$4,$5,'paid')
             ON CONFLICT DO NOTHING
         """, user_id, seller_id, code, price, fee)
 
+        # =========================
+        # ACCESS USER
+        # =========================
         await pool.execute("""
             INSERT INTO user_access(user_id, code, paid)
             VALUES($1,$2,true)
