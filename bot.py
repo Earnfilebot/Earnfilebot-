@@ -1,24 +1,7 @@
-import logging
-
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-
 from config import BOT_TOKEN
 
-# =========================
-# LOGGING
-# =========================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-
-logging.getLogger("aiogram").setLevel(logging.WARNING)
-logging.getLogger("aiohttp").setLevel(logging.WARNING)
-
-# =========================
-# BOT INIT
-# =========================
 bot = Bot(
     BOT_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML")
@@ -26,9 +9,7 @@ bot = Bot(
 
 dp = Dispatcher()
 
-# =========================
-# ROUTERS (AIogram ONLY)
-# =========================
+# routers
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
