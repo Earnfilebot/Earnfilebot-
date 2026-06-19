@@ -39,6 +39,8 @@ def verify_signature(body: bytes, signature: str):
 @router.post("/webhook")
 async def webhook(req: Request, x_signature: str = Header(None)):
 
+    logging.info("🔥 WEBHOOK HIT MASUK")
+    
     bot = req.app.state.bot
     body = await req.body()
 
