@@ -3,12 +3,13 @@ import hashlib
 import json
 import os
 import logging
-
-print("🔥 BAYARGG WEBHOOK FILE LOADED")
+import asyncio
 
 from fastapi import APIRouter, Request, Header
 from database import get_pool
 from config import GROUP_ID
+
+print("🔥 BAYARGG WEBHOOK FILE LOADED")
 
 router = APIRouter()
 
@@ -17,6 +18,9 @@ BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
 logging.basicConfig(level=logging.INFO)
 
 
+# =========================
+# UTILS
+# =========================
 def parse_reference(ref: str):
     try:
         user_id, code = ref.split("_", 1)
@@ -38,15 +42,42 @@ def verify_signature(body: bytes, signature: str):
     return hmac.compare_digest(expected, signature)
 
 
+# =========================
+# WEBHOOK
+# =========================
 @router.post("/webhook")
 async def webhook(req: Request, x_signature: str = Header(None)):
 
     logging.info("🔥 WEBHOOK HIT MASUK")
-    
-    bot = req.app.state.bot
-    body = await req.body()
 
+    bot = req.app.state.bot
+    dp = req.app.state.dp
+
+    if not bot or not dp:
+        logging.error("❌ BOT / DP NOT FOUND")
+        return {"ok": True}
+
+    body = await req.body()
     logging.info("📩 Webhook received")
+
+    # =========================
+    # 🤖 TELEGRAM UPDATE
+    # =========================
+    if not x_signature:
+        logging.info("🤖 TELEGRAM UPDATE")
+
+        try:
+            update = json.loads(body.decode())
+            await dp.feed_update(bot, update)
+        except Exception as e:
+            logging.exception(f"❌ TELEGRAM ERROR: {e}")
+
+        return {"ok": True}
+
+    # =========================
+    # 💰 BAYARGG WEBHOOK
+    # =========================
+    logging.info("💰 BAYARGG WEBHOOK")
 
     if not verify_signature(body, x_signature):
         logging.warning("❌ Invalid signature")
@@ -55,73 +86,94 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     try:
         data = json.loads(body.decode())
     except Exception as e:
-        logging.error(f"JSON error: {e}")
+        logging.error(f"❌ JSON error: {e}")
         return {"ok": True}
 
     payload = data.get("data") or data
 
+    # hanya proses PAID
     if payload.get("status") != "PAID":
+        logging.info("ℹ️ Not PAID, skip")
         return {"ok": True}
 
-    user_id, code = parse_reference(payload.get("reference"))
+    # =========================
+    # VALIDATE REFERENCE
+    # =========================
+    ref = payload.get("reference")
+
+    if not ref:
+        logging.warning("❌ No reference")
+        return {"ok": True}
+
+    user_id, code = parse_reference(ref)
 
     if not user_id or not code:
-        logging.warning("❌ Invalid reference")
+        logging.warning("❌ Invalid reference format")
         return {"ok": True}
 
+    # =========================
+    # DATABASE
+    # =========================
     pool = await get_pool()
 
-    updated = await pool.fetchval("""
-        UPDATE payments
-        SET status='paid'
-        WHERE user_id=$1 AND code=$2 AND status='pending'
-        RETURNING id
-    """, user_id, code)
+    try:
+        updated = await pool.fetchval("""
+            UPDATE payments
+            SET status='paid'
+            WHERE user_id=$1 AND code=$2 AND status='pending'
+            RETURNING id
+        """, user_id, code)
 
-    if not updated:
-        logging.info("⚠️ Already processed")
+        if not updated:
+            logging.info("⚠️ Already processed / not found")
+            return {"ok": True}
+
+        file = await pool.fetchrow("""
+            SELECT seller_id, price, media_json
+            FROM files
+            WHERE code=$1
+        """, code)
+
+        if not file:
+            logging.error(f"❌ FILE NOT FOUND: {code}")
+            return {"ok": True}
+
+        seller_id = file["seller_id"]
+        price = int(file["price"])
+        media_json = file["media_json"]
+
+        fee = int(price * 0.10)
+        seller_income = price - fee
+
+        logging.info(f"💰 SELLER: {seller_id} | INCOME: {seller_income}")
+
+        # balance
+        await pool.execute("""
+            INSERT INTO users (telegram_id, balance)
+            VALUES ($1, $2)
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET balance = users.balance + $2
+        """, seller_id, seller_income)
+
+        # transaksi
+        await pool.execute("""
+            INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
+            VALUES($1,$2,$3,$4,$5,'paid')
+            ON CONFLICT DO NOTHING
+        """, user_id, seller_id, code, price, fee)
+
+        # akses user
+        await pool.execute("""
+            INSERT INTO user_access(user_id, code, paid)
+            VALUES($1,$2,true)
+            ON CONFLICT DO NOTHING
+        """, user_id, code)
+
+    except Exception as e:
+        logging.exception(f"❌ DB ERROR: {e}")
         return {"ok": True}
 
-    file = await pool.fetchrow("""
-        SELECT seller_id, price, media_json
-        FROM files
-        WHERE code=$1
-    """, code)
-
-    if not file:
-        logging.error(f"❌ FILE NOT FOUND: {code}")
-        return {"ok": True}
-
-    seller_id = file["seller_id"]
-    price = int(file["price"])
-    media_json = file["media_json"]
-
-    fee = int(price * 0.10)
-    seller_income = price - fee
-
-    logging.info(f"SELLER: {seller_id} | INCOME: {seller_income}")
-
-    # ✅ UPSERT BALANCE (AMAN)
-    await pool.execute("""
-        INSERT INTO users (telegram_id, balance)
-        VALUES ($1, $2)
-        ON CONFLICT (telegram_id)
-        DO UPDATE SET balance = users.balance + $2
-    """, seller_id, seller_income)
-
-    await pool.execute("""
-        INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
-        VALUES($1,$2,$3,$4,$5,'paid')
-        ON CONFLICT DO NOTHING
-    """, user_id, seller_id, code, price, fee)
-
-    await pool.execute("""
-        INSERT INTO user_access(user_id, code, paid)
-        VALUES($1,$2,true)
-        ON CONFLICT DO NOTHING
-    """, user_id, code)
-
-    logging.info(f"💰 PAID SUCCESS: {user_id} | {code}")
+    logging.info(f"✅ PAYMENT SUCCESS: {user_id} | {code}")
 
     # =========================
     # SEND FILE
@@ -130,9 +182,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         if isinstance(media_json, str):
             media_list = json.loads(media_json)
         else:
-            media_list = media_json
-
-        logging.info(f"MEDIA: {media_list}")
+            media_list = media_json or []
 
         await bot.send_message(
             user_id,
@@ -143,15 +193,21 @@ async def webhook(req: Request, x_signature: str = Header(None)):
             file_id = item.get("file_id")
             media_type = item.get("type")
 
-            if media_type == "document":
-                await bot.send_document(user_id, file_id)
-            elif media_type == "video":
-                await bot.send_video(user_id, file_id)
-            elif media_type == "photo":
-                await bot.send_photo(user_id, file_id)
+            try:
+                if media_type == "document":
+                    await bot.send_document(user_id, file_id)
+                elif media_type == "video":
+                    await bot.send_video(user_id, file_id)
+                elif media_type == "photo":
+                    await bot.send_photo(user_id, file_id)
+
+                await asyncio.sleep(0.4)  # 🔥 anti flood
+
+            except Exception as e:
+                logging.error(f"❌ SEND ITEM ERROR: {e}")
 
     except Exception as e:
-        logging.exception(f"SEND FILE ERROR: {e}")
+        logging.exception(f"❌ SEND FILE ERROR: {e}")
 
     # =========================
     # GROUP LOG
@@ -163,6 +219,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
                 f"💰 SALE\n📦 {code}\n💸 Rp {price:,}\n👤 {user_id}"
             )
     except Exception as e:
-        logging.error(f"GROUP ERROR: {e}")
+        logging.error(f"❌ GROUP ERROR: {e}")
 
     return {"ok": True}
