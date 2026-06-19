@@ -4,6 +4,8 @@ import json
 import os
 import logging
 
+print("🔥 BAYARGG WEBHOOK FILE LOADED")
+
 from fastapi import APIRouter, Request, Header
 from database import get_pool
 from config import GROUP_ID
