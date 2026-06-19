@@ -22,7 +22,7 @@ def rupiah(amount):
 
 
 # =========================
-# START COMMAND (FAST)
+# START
 # =========================
 @router.message(CommandStart())
 async def start_cmd(message: Message, state: FSMContext):
@@ -34,13 +34,11 @@ async def start_cmd(message: Message, state: FSMContext):
 
     loading = await message.answer("⚡ Loading...")
 
-    asyncio.create_task(
-        process_start(message, loading, user_id, username)
-    )
+    await process_start(message, loading, user_id, username)
 
 
 # =========================
-# PROCESS START (BACKGROUND)
+# PROCESS START
 # =========================
 async def process_start(message, loading, user_id, username):
 
@@ -57,7 +55,7 @@ async def process_start(message, loading, user_id, username):
 
         pool = await get_pool()
 
-        # INSERT USER (light)
+        # INSERT USER
         await pool.execute(
             """
             INSERT INTO users (telegram_id, username)
@@ -70,7 +68,7 @@ async def process_start(message, loading, user_id, username):
 
         await render_home_fast(bot, loading, user_id)
 
-    except Exception:
+    except Exception as e:
         try:
             await loading.edit_text("❌ SYSTEM ERROR")
         except:
@@ -78,7 +76,7 @@ async def process_start(message, loading, user_id, username):
 
 
 # =========================
-# RENDER HOME (FAST)
+# HOME
 # =========================
 async def render_home_fast(bot, message, user_id):
 
@@ -89,7 +87,7 @@ async def render_home_fast(bot, message, user_id):
         user_id
     )
 
-    balance = user["balance"] if user else 0
+    balance = user["balance"] or 0 if user else 0
 
     text = (
         "EARNFILEBOX\n\n"
@@ -107,7 +105,7 @@ async def render_home_fast(bot, message, user_id):
 
 
 # =========================
-# HOME BUTTON
+# CALLBACK HOME
 # =========================
 @router.callback_query(F.data == "home")
 async def back_home(call: CallbackQuery, state: FSMContext):
