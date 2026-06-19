@@ -62,17 +62,14 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     body = await req.body()
 
     # =========================
-    # 🤖 TELEGRAM UPDATE
+    # TELEGRAM UPDATE
     # =========================
     if not x_signature:
         logging.info("🤖 TELEGRAM UPDATE")
 
         try:
             data = json.loads(body.decode())
-
-            # FIX IMPORTANT
             update = Update.model_validate(data)
-
             await dp.feed_update(bot, update)
 
         except Exception as e:
@@ -81,7 +78,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         return {"ok": True}
 
     # =========================
-    # 💰 BAYARGG WEBHOOK
+    # BAYARGG WEBHOOK
     # =========================
     logging.info("💰 BAYARGG WEBHOOK")
 
@@ -117,6 +114,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, user_id, code)
 
         if not updated:
+            logging.warning("❌ PAYMENT NOT FOUND / NOT PENDING")
             return {"ok": True}
 
         file = await pool.fetchrow("""
@@ -126,6 +124,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, code)
 
         if not file:
+            logging.warning("❌ FILE NOT FOUND IN DB")
             return {"ok": True}
 
         seller_id = file["seller_id"]
