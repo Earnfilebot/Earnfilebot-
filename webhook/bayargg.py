@@ -6,6 +6,8 @@ import logging
 import asyncio
 
 from fastapi import APIRouter, Request, Header
+from aiogram.types import Update
+
 from database import get_pool
 from config import GROUP_ID
 
@@ -67,8 +69,11 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         logging.info("🤖 TELEGRAM UPDATE")
 
         try:
-            update = json.loads(body.decode())
+            data = json.loads(body.decode())
+
+            update = Update.model_validate(data)
             await dp.feed_update(bot, update)
+
         except Exception as e:
             logging.exception(f"❌ TELEGRAM ERROR: {e}")
 
@@ -91,29 +96,17 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     payload = data.get("data") or data
 
-    # hanya proses PAID
     if payload.get("status") != "PAID":
         logging.info("ℹ️ Not PAID, skip")
         return {"ok": True}
 
-    # =========================
-    # VALIDATE REFERENCE
-    # =========================
     ref = payload.get("reference")
-
-    if not ref:
-        logging.warning("❌ No reference")
-        return {"ok": True}
-
     user_id, code = parse_reference(ref)
 
     if not user_id or not code:
-        logging.warning("❌ Invalid reference format")
+        logging.warning("❌ Invalid reference")
         return {"ok": True}
 
-    # =========================
-    # DATABASE
-    # =========================
     pool = await get_pool()
 
     try:
@@ -147,7 +140,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
         logging.info(f"💰 SELLER: {seller_id} | INCOME: {seller_income}")
 
-        # balance
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
             VALUES ($1, $2)
@@ -155,14 +147,12 @@ async def webhook(req: Request, x_signature: str = Header(None)):
             DO UPDATE SET balance = users.balance + $2
         """, seller_id, seller_income)
 
-        # transaksi
         await pool.execute("""
             INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
             VALUES($1,$2,$3,$4,$5,'paid')
             ON CONFLICT DO NOTHING
         """, user_id, seller_id, code, price, fee)
 
-        # akses user
         await pool.execute("""
             INSERT INTO user_access(user_id, code, paid)
             VALUES($1,$2,true)
@@ -201,7 +191,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
                 elif media_type == "photo":
                     await bot.send_photo(user_id, file_id)
 
-                await asyncio.sleep(0.4)  # 🔥 anti flood
+                await asyncio.sleep(0.4)
 
             except Exception as e:
                 logging.error(f"❌ SEND ITEM ERROR: {e}")
