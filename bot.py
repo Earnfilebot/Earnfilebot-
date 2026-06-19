@@ -62,14 +62,14 @@ dp.include_router(admin_router)
 # =========================
 # WEBHOOK ROUTER
 # =========================
-from webhook import bayargg
+from webhook import bayargg as webhook_handler
 
 # =========================
 # FASTAPI APP
 # =========================
 app = FastAPI()
 
-app.include_router(bayargg.router)
+app.include_router(webhook_handler.router)
 app.state.bot = bot
 
 
