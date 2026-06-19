@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 import logging
+from contextlib import asynccontextmanager
 
 from bot import bot, dp
 from webhook.bayargg import router as bayargg_router
@@ -12,46 +13,37 @@ app = FastAPI()
 # =========================
 app.include_router(bayargg_router)
 
-# =========================
-# LIFESPAN (FIXED WAY)
-# =========================
-from contextlib import asynccontextmanager
 
+# =========================
+# LIFESPAN
+# =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    # STARTUP
+    logging.info("🚀 STARTING APP...")
+
     await get_pool()
 
     app.state.bot = bot
-    app.state.dp = dp   # 🔥 PENTING BANGET
+    app.state.dp = dp
 
-    logging.info("DATABASE CONNECTED")
-    logging.info("BOT STARTED (WEBHOOK MODE ONLY)")
+    logging.info("✅ DATABASE CONNECTED")
+    logging.info("🤖 BOT READY (WEBHOOK MODE)")
 
     yield
 
-    # SHUTDOWN
     await close_db()
     await bot.session.close()
-    logging.info("BOT STOPPED")
+
+    logging.info("🛑 BOT STOPPED")
 
 
 app.router.lifespan_context = lifespan
 
 
 # =========================
-# DEBUG ROUTES (OPTIONAL)
+# HEALTH CHECK
 # =========================
-@app.on_event("startup")
-async def debug_routes():
-    for r in app.routes:
-        print("ROUTE:", r.path)
-
-
-# =========================
-# RUN
-# =========================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/")
+async def root():
+    return {"status": "ok", "bot": "running"}
