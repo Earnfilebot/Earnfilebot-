@@ -4,6 +4,7 @@ import json
 import os
 import logging
 import asyncio
+from datetime import datetime
 
 from fastapi import APIRouter, Request, Header
 from aiogram.types import Update
@@ -11,7 +12,7 @@ from aiogram.types import Update
 from database import get_pool
 from config import GROUP_ID
 
-print("🔥 BAYARGG WEBHOOK FILE LOADED")
+print("🔥 BAYARGG WEBHOOK PRODUCTION READY LOADED")
 
 router = APIRouter()
 
@@ -24,10 +25,12 @@ logging.basicConfig(level=logging.INFO)
 # UTILS
 # =========================
 def parse_reference(ref: str):
+    if not ref:
+        return None, None
     try:
         user_id, code = ref.split("_", 1)
         return int(user_id), code
-    except:
+    except Exception:
         return None, None
 
 
@@ -44,13 +47,20 @@ def verify_signature(body: bytes, signature: str):
     return hmac.compare_digest(expected, signature)
 
 
+def is_paid_status(status: str):
+    if not status:
+        return False
+    return status.upper() in ["PAID", "SUCCESS", "SETTLED"]
+
+
 # =========================
 # WEBHOOK
 # =========================
 @router.post("/webhook")
 async def webhook(req: Request, x_signature: str = Header(None)):
 
-    logging.info("🔥 WEBHOOK HIT MASUK")
+    start_time = datetime.utcnow()
+    logging.info("🔥 WEBHOOK HIT")
 
     bot = getattr(req.app.state, "bot", None)
     dp = getattr(req.app.state, "dp", None)
@@ -62,16 +72,23 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     body = await req.body()
 
     # =========================
-    # TELEGRAM UPDATE
+    # PARSE JSON SAFELY
     # =========================
-    if not x_signature:
+    try:
+        data = json.loads(body.decode())
+    except Exception as e:
+        logging.error(f"❌ INVALID JSON: {e}")
+        return {"ok": True}
+
+    # =========================
+    # TELEGRAM UPDATE HANDLER
+    # =========================
+    if "update_id" in data and not x_signature:
         logging.info("🤖 TELEGRAM UPDATE")
 
         try:
-            data = json.loads(body.decode())
             update = Update.model_validate(data)
             await dp.feed_update(bot, update)
-
         except Exception as e:
             logging.exception(f"❌ TELEGRAM ERROR: {e}")
 
@@ -83,48 +100,49 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     logging.info("💰 BAYARGG WEBHOOK")
 
     if not verify_signature(body, x_signature):
-        logging.warning("❌ Invalid signature")
-        return {"ok": True}
-
-    try:
-        data = json.loads(body.decode())
-    except Exception as e:
-        logging.error(f"❌ JSON error: {e}")
+        logging.warning("❌ INVALID SIGNATURE")
         return {"ok": True}
 
     payload = data.get("data") or data
 
-    logging.info(f"PAYLOAD={payload}")
-    logging.info(f"REFERENCE={payload.get('reference')}")
-    logging.info(f"STATUS={payload.get('status')}")
+    logging.info(f"PAYLOAD: {payload}")
 
-    if payload.get("status") != "PAID":
+    status = payload.get("status")
+    ref = payload.get("reference")
+
+    logging.info(f"STATUS: {status}")
+    logging.info(f"REFERENCE: {ref}")
+
+    if not is_paid_status(status):
+        logging.info("⛔ STATUS NOT PAID")
         return {"ok": True}
 
-    ref = payload.get("reference")
     user_id, code = parse_reference(ref)
 
     logging.info(f"USER_ID={user_id} CODE={code}")
 
     if not user_id or not code:
+        logging.warning("❌ INVALID REFERENCE FORMAT")
         return {"ok": True}
 
     pool = await get_pool()
 
     try:
         # =========================
-        # UPDATE PAYMENT
+        # ANTI DUPLICATE PAYMENT
         # =========================
-        updated = await pool.fetchval("""
+        payment_id = await pool.fetchval("""
             UPDATE payments
             SET status='paid'
             WHERE user_id=$1 AND code=$2 AND status='pending'
             RETURNING id
         """, user_id, code)
 
-        if not updated:
-            logging.warning("❌ PAYMENT NOT FOUND / NOT PENDING")
+        if not payment_id:
+            logging.warning("❌ PAYMENT ALREADY PROCESSED / NOT FOUND")
             return {"ok": True}
+
+        logging.info(f"✅ PAYMENT UPDATED ID={payment_id}")
 
         # =========================
         # GET FILE
@@ -136,7 +154,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, code)
 
         if not file:
-            logging.warning("❌ FILE NOT FOUND IN DB")
+            logging.warning("❌ FILE NOT FOUND")
             return {"ok": True}
 
         seller_id = file["seller_id"]
@@ -147,7 +165,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         seller_income = price - fee
 
         # =========================
-        # UPDATE SELLER BALANCE (FIXED)
+        # UPDATE SELLER BALANCE
         # =========================
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
@@ -166,7 +184,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, user_id, seller_id, code, price, fee)
 
         # =========================
-        # ACCESS USER
+        # ACCESS GRANT
         # =========================
         await pool.execute("""
             INSERT INTO user_access(user_id, code, paid)
@@ -179,26 +197,29 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         return {"ok": True}
 
     # =========================
-    # SEND FILE
+    # SEND FILE TO USER
     # =========================
     try:
         media_list = json.loads(media_json) if isinstance(media_json, str) else (media_json or [])
 
         await bot.send_message(
             user_id,
-            f"✅ PAYMENT SUCCESS\n📦 {code}\n📁 {len(media_list)} file"
+            f"✅ PAYMENT SUCCESS\n📦 {code}\n📁 {len(media_list)} FILE"
         )
 
         for item in media_list:
             try:
-                if item["type"] == "document":
-                    await bot.send_document(user_id, item["file_id"])
-                elif item["type"] == "video":
-                    await bot.send_video(user_id, item["file_id"])
-                elif item["type"] == "photo":
-                    await bot.send_photo(user_id, item["file_id"])
+                t = item.get("type")
+                fid = item.get("file_id")
 
-                await asyncio.sleep(0.3)
+                if t == "document":
+                    await bot.send_document(user_id, fid)
+                elif t == "video":
+                    await bot.send_video(user_id, fid)
+                elif t == "photo":
+                    await bot.send_photo(user_id, fid)
+
+                await asyncio.sleep(0.2)
 
             except Exception as e:
                 logging.error(f"SEND ERROR: {e}")
@@ -217,5 +238,11 @@ async def webhook(req: Request, x_signature: str = Header(None)):
             )
     except Exception as e:
         logging.error(f"GROUP ERROR: {e}")
+
+    # =========================
+    # PERFORMANCE LOG
+    # =========================
+    duration = (datetime.utcnow() - start_time).total_seconds()
+    logging.info(f"⚡ WEBHOOK DONE in {duration:.2f}s")
 
     return {"ok": True}
