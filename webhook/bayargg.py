@@ -52,26 +52,23 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     logging.info("🔥 WEBHOOK HIT MASUK")
 
-    bot = req.app.state.bot
-    dp = req.app.state.dp
-
-    if not bot or not dp:
-        logging.error("❌ BOT / DP NOT FOUND")
-        return {"ok": True}
+    bot = getattr(req.app.state, "bot", None)
+    dp = getattr(req.app.state, "dp", None)
 
     body = await req.body()
-    logging.info("📩 Webhook received")
 
     # =========================
-    # 🤖 TELEGRAM UPDATE
+    # 🔵 TELEGRAM UPDATE
     # =========================
+    # Telegram tidak punya signature
     if not x_signature:
         logging.info("🤖 TELEGRAM UPDATE")
 
         try:
             data = json.loads(body.decode())
 
-            update = Update.model_validate(data)
+            update = Update(**data)  # ✅ lebih aman dari model_validate
+
             await dp.feed_update(bot, update)
 
         except Exception as e:
@@ -97,14 +94,12 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     payload = data.get("data") or data
 
     if payload.get("status") != "PAID":
-        logging.info("ℹ️ Not PAID, skip")
         return {"ok": True}
 
     ref = payload.get("reference")
     user_id, code = parse_reference(ref)
 
     if not user_id or not code:
-        logging.warning("❌ Invalid reference")
         return {"ok": True}
 
     pool = await get_pool()
@@ -118,7 +113,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, user_id, code)
 
         if not updated:
-            logging.info("⚠️ Already processed / not found")
             return {"ok": True}
 
         file = await pool.fetchrow("""
@@ -128,7 +122,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, code)
 
         if not file:
-            logging.error(f"❌ FILE NOT FOUND: {code}")
             return {"ok": True}
 
         seller_id = file["seller_id"]
@@ -137,8 +130,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
         fee = int(price * 0.10)
         seller_income = price - fee
-
-        logging.info(f"💰 SELLER: {seller_id} | INCOME: {seller_income}")
 
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
@@ -163,16 +154,11 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         logging.exception(f"❌ DB ERROR: {e}")
         return {"ok": True}
 
-    logging.info(f"✅ PAYMENT SUCCESS: {user_id} | {code}")
-
     # =========================
     # SEND FILE
     # =========================
     try:
-        if isinstance(media_json, str):
-            media_list = json.loads(media_json)
-        else:
-            media_list = media_json or []
+        media_list = json.loads(media_json) if isinstance(media_json, str) else media_json or []
 
         await bot.send_message(
             user_id,
@@ -180,24 +166,21 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         )
 
         for item in media_list:
-            file_id = item.get("file_id")
-            media_type = item.get("type")
-
             try:
-                if media_type == "document":
-                    await bot.send_document(user_id, file_id)
-                elif media_type == "video":
-                    await bot.send_video(user_id, file_id)
-                elif media_type == "photo":
-                    await bot.send_photo(user_id, file_id)
+                if item["type"] == "document":
+                    await bot.send_document(user_id, item["file_id"])
+                elif item["type"] == "video":
+                    await bot.send_video(user_id, item["file_id"])
+                elif item["type"] == "photo":
+                    await bot.send_photo(user_id, item["file_id"])
 
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.3)
 
             except Exception as e:
-                logging.error(f"❌ SEND ITEM ERROR: {e}")
+                logging.error(f"SEND ERROR: {e}")
 
     except Exception as e:
-        logging.exception(f"❌ SEND FILE ERROR: {e}")
+        logging.exception(f"FILE SEND ERROR: {e}")
 
     # =========================
     # GROUP LOG
@@ -209,6 +192,6 @@ async def webhook(req: Request, x_signature: str = Header(None)):
                 f"💰 SALE\n📦 {code}\n💸 Rp {price:,}\n👤 {user_id}"
             )
     except Exception as e:
-        logging.error(f"❌ GROUP ERROR: {e}")
+        logging.error(f"GROUP ERROR: {e}")
 
     return {"ok": True}
