@@ -1,15 +1,9 @@
-import asyncio
 import logging
-from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
-from fastapi import FastAPI
-import uvicorn
-
 from config import BOT_TOKEN
-from database import get_pool, close_db
 
 # =========================
 # LOGGING
@@ -33,7 +27,7 @@ bot = Bot(
 dp = Dispatcher()
 
 # =========================
-# ROUTERS
+# ROUTERS (AIogram ONLY)
 # =========================
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
@@ -58,59 +52,3 @@ dp.include_router(withdraw_router)
 dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
-
-# =========================
-# WEBHOOK ROUTER
-# =========================
-from webhook import bayargg as webhook_handler
-
-# =========================
-# FASTAPI APP
-# =========================
-app = FastAPI()
-
-app.include_router(webhook_handler.router)
-app.state.bot = bot
-
-
-# =========================
-# DEBUG ROUTES (INI PENTING)
-# =========================
-@app.on_event("startup")
-async def debug_routes():
-    for r in app.routes:
-        print("ROUTE:", r.path)
-
-
-# =========================
-# STARTUP / SHUTDOWN
-# =========================
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await get_pool()
-    logging.info("DATABASE CONNECTED")
-
-    # ❌ PENTING: HAPUS DELETE WEBHOOK + POLLING
-    # await bot.delete_webhook(drop_pending_updates=True)
-
-    logging.info("BOT STARTED (WEBHOOK MODE ONLY)")
-
-    yield
-
-    await close_db()
-    await bot.session.close()
-    logging.info("BOT STOPPED")
-
-
-app.router.lifespan_context = lifespan
-
-
-# =========================
-# ENTRY POINT
-# =========================
-if __name__ == "__main__":
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000
-    )
