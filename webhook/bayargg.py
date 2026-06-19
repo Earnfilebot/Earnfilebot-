@@ -55,19 +55,23 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     bot = getattr(req.app.state, "bot", None)
     dp = getattr(req.app.state, "dp", None)
 
+    if not bot or not dp:
+        logging.error("❌ BOT / DP NOT READY")
+        return {"ok": True}
+
     body = await req.body()
 
     # =========================
-    # 🔵 TELEGRAM UPDATE
+    # 🤖 TELEGRAM UPDATE
     # =========================
-    # Telegram tidak punya signature
     if not x_signature:
         logging.info("🤖 TELEGRAM UPDATE")
 
         try:
             data = json.loads(body.decode())
 
-            update = Update(**data)  # ✅ lebih aman dari model_validate
+            # FIX IMPORTANT
+            update = Update.model_validate(data)
 
             await dp.feed_update(bot, update)
 
@@ -158,7 +162,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     # SEND FILE
     # =========================
     try:
-        media_list = json.loads(media_json) if isinstance(media_json, str) else media_json or []
+        media_list = json.loads(media_json) if isinstance(media_json, str) else (media_json or [])
 
         await bot.send_message(
             user_id,
