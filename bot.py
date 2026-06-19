@@ -65,47 +65,45 @@ dp.include_router(admin_router)
 from webhook import bayargg as webhook_handler
 
 # =========================
-# POLLING TASK
+# FASTAPI APP
 # =========================
-async def start_polling():
-    await dp.start_polling(
-        bot,
-        allowed_updates=dp.resolve_used_update_types()
-    )
+app = FastAPI()
+
+app.include_router(webhook_handler.router)
+app.state.bot = bot
+
 
 # =========================
-# FASTAPI LIFESPAN (FIX MODERN)
+# DEBUG ROUTES (INI PENTING)
+# =========================
+@app.on_event("startup")
+async def debug_routes():
+    for r in app.routes:
+        print("ROUTE:", r.path)
+
+
+# =========================
+# STARTUP / SHUTDOWN
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # =========================
-    # STARTUP
-    # =========================
     await get_pool()
     logging.info("DATABASE CONNECTED")
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    # ❌ PENTING: HAPUS DELETE WEBHOOK + POLLING
+    # await bot.delete_webhook(drop_pending_updates=True)
 
-    polling_task = asyncio.create_task(start_polling())
-    logging.info("BOT STARTED")
+    logging.info("BOT STARTED (WEBHOOK MODE ONLY)")
 
-    yield  # server running
+    yield
 
-    # =========================
-    # SHUTDOWN
-    # =========================
-    polling_task.cancel()
     await close_db()
     await bot.session.close()
     logging.info("BOT STOPPED")
 
-# =========================
-# FASTAPI APP
-# =========================
-app = FastAPI(lifespan=lifespan)
 
-app.include_router(webhook_handler.router)
-app.state.bot = bot
+app.router.lifespan_context = lifespan
+
 
 # =========================
 # ENTRY POINT
