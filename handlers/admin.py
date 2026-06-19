@@ -1,9 +1,10 @@
 import asyncio
-import json
 
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
@@ -20,6 +21,13 @@ def is_admin(user_id: int):
 
 
 # =========================
+# FSM BROADCAST
+# =========================
+class BroadcastState(StatesGroup):
+    message = State()
+
+
+# =========================
 # ADMIN MENU
 # =========================
 def admin_menu():
@@ -29,9 +37,10 @@ def admin_menu():
     kb.button(text="💰 Payments", callback_data="adm_payments")
     kb.button(text="📦 Files", callback_data="adm_files")
     kb.button(text="📊 Stats", callback_data="adm_stats")
+    kb.button(text="💸 Refund", callback_data="adm_refund")
     kb.button(text="📢 Broadcast", callback_data="adm_broadcast")
 
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 2)
     return kb.as_markup()
 
 
@@ -43,11 +52,11 @@ async def admin_panel(message: Message):
     if not is_admin(message.from_user.id):
         return await message.answer("❌ Akses ditolak")
 
-    await message.answer("🛠 ADMIN PANEL", reply_markup=admin_menu())
+    await message.answer("🛠 ADMIN PANEL MARKETPLACE", reply_markup=admin_menu())
 
 
 # =========================
-# USERS LIST
+# USERS
 # =========================
 @router.callback_query(F.data == "adm_users")
 async def adm_users(call: CallbackQuery):
@@ -55,18 +64,23 @@ async def adm_users(call: CallbackQuery):
         return await call.answer("No access", show_alert=True)
 
     pool = await get_pool()
-    users = await pool.fetch("SELECT telegram_id, balance FROM users LIMIT 20")
+    users = await pool.fetch("""
+        SELECT telegram_id, balance
+        FROM users
+        ORDER BY balance DESC
+        LIMIT 20
+    """)
 
-    text = "👤 USERS (TOP 20)\n\n"
+    text = "👤 USERS TOP BALANCE\n\n"
     for u in users:
-        text += f"ID: {u['telegram_id']} | Balance: {u['balance']}\n"
+        text += f"{u['telegram_id']} | Rp{u['balance']}\n"
 
     await call.message.edit_text(text, reply_markup=admin_menu())
     await call.answer()
 
 
 # =========================
-# PAYMENTS
+# PAYMENTS / TRANSACTIONS
 # =========================
 @router.callback_query(F.data == "adm_payments")
 async def adm_payments(call: CallbackQuery):
@@ -75,15 +89,15 @@ async def adm_payments(call: CallbackQuery):
 
     pool = await get_pool()
     data = await pool.fetch("""
-        SELECT user_id, code, status, amount
+        SELECT user_id, code, amount, status, created_at
         FROM payments
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT 15
     """)
 
-    text = "💰 LAST PAYMENTS\n\n"
+    text = "💰 TRANSACTIONS\n\n"
     for p in data:
-        text += f"{p['user_id']} | {p['code']} | {p['status']} | {p['amount']}\n"
+        text += f"{p['user_id']} | {p['code']} | {p['status']} | Rp{p['amount']}\n"
 
     await call.message.edit_text(text, reply_markup=admin_menu())
     await call.answer()
@@ -102,7 +116,7 @@ async def adm_files(call: CallbackQuery):
         SELECT code, price, seller_id
         FROM files
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT 15
     """)
 
     text = "📦 FILES\n\n"
@@ -114,7 +128,7 @@ async def adm_files(call: CallbackQuery):
 
 
 # =========================
-# STATS
+# STATS SALES
 # =========================
 @router.callback_query(F.data == "adm_stats")
 async def adm_stats(call: CallbackQuery):
@@ -126,12 +140,14 @@ async def adm_stats(call: CallbackQuery):
     users = await pool.fetchval("SELECT COUNT(*) FROM users")
     payments = await pool.fetchval("SELECT COUNT(*) FROM payments")
     paid = await pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='paid'")
+    revenue = await pool.fetchval("SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'")
 
     text = (
-        "📊 STATS\n\n"
+        "📊 SALES STATISTICS\n\n"
         f"👤 Users: {users}\n"
-        f"💰 Payments: {payments}\n"
+        f"💰 Total Payments: {payments}\n"
         f"✅ Paid: {paid}\n"
+        f"💸 Revenue: Rp{revenue}\n"
     )
 
     await call.message.edit_text(text, reply_markup=admin_menu())
@@ -139,12 +155,68 @@ async def adm_stats(call: CallbackQuery):
 
 
 # =========================
-# BROADCAST (simple version)
+# REFUND SYSTEM (SIMPLE)
 # =========================
-@router.callback_query(F.data == "adm_broadcast")
-async def adm_broadcast(call: CallbackQuery):
+@router.callback_query(F.data == "adm_refund")
+async def adm_refund(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("No access", show_alert=True)
 
-    await call.message.answer("📢 Kirim pesan broadcast kamu sekarang")
+    pool = await get_pool()
+
+    # ambil 10 transaksi terakhir paid
+    data = await pool.fetch("""
+        SELECT user_id, code, amount
+        FROM payments
+        WHERE status='paid'
+        ORDER BY id DESC
+        LIMIT 10
+    """)
+
+    text = "💸 REFUND LIST (contoh)\n\n"
+    text += "Gunakan manual refund via SQL:\n\n"
+
+    for p in data:
+        text += f"- {p['user_id']} | {p['code']} | Rp{p['amount']}\n"
+
+    text += "\nSQL:\nUPDATE payments SET status='refunded' WHERE code='XXX';"
+
+    await call.message.edit_text(text, reply_markup=admin_menu())
     await call.answer()
+
+
+# =========================
+# BROADCAST STEP 1
+# =========================
+@router.callback_query(F.data == "adm_broadcast")
+async def adm_broadcast(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("No access", show_alert=True)
+
+    await state.set_state(BroadcastState.message)
+    await call.message.answer("📢 Kirim pesan broadcast sekarang:")
+    await call.answer()
+
+
+# =========================
+# BROADCAST STEP 2
+# =========================
+@router.message(BroadcastState.message)
+async def send_broadcast(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    pool = await get_pool()
+    users = await pool.fetch("SELECT telegram_id FROM users")
+
+    count = 0
+    for u in users:
+        try:
+            await message.bot.send_message(u["telegram_id"], message.text)
+            count += 1
+            await asyncio.sleep(0.05)
+        except:
+            pass
+
+    await message.answer(f"✅ Broadcast terkirim ke {count} user")
+    await state.clear()
