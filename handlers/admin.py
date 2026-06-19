@@ -14,7 +14,7 @@ router = Router()
 # =========================
 # ADMIN CONFIG
 # =========================
-ADMIN_IDS = [123456789]  # GANTI ID KAMU
+ADMIN_IDS = [6847035364]  # GANTI ID KAMU
 
 def is_admin(user_id: int):
     return user_id in ADMIN_IDS
