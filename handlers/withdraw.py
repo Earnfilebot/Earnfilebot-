@@ -6,7 +6,7 @@ from datetime import datetime, time
 import pytz
 
 from database import fetchrow, fetch
-# kalau ada FSM nanti bisa ditambah lagi
+from aiogram.fsm.context import FSMContext
 # from states import WithdrawState
 
 router = Router()
