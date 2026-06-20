@@ -89,7 +89,7 @@ async def adm_users(call: CallbackQuery):
 
 
 # =========================
-# PAYMENTS / TRANSACTIONS
+# PAYMENTS
 # =========================
 @router.callback_query(F.data == "adm_payments")
 async def adm_payments(call: CallbackQuery):
@@ -151,8 +151,9 @@ async def adm_files(call: CallbackQuery):
     await call.message.edit_text(text, reply_markup=admin_menu())
     await call.answer()
 
+
 # =========================
-# STATS SALES
+# STATS
 # =========================
 @router.callback_query(F.data == "adm_stats")
 async def adm_stats(call: CallbackQuery):
@@ -179,7 +180,7 @@ async def adm_stats(call: CallbackQuery):
 
 
 # =========================
-# REFUND SYSTEM (SIMPLE)
+# REFUND
 # =========================
 @router.callback_query(F.data == "adm_refund")
 async def adm_refund(call: CallbackQuery):
@@ -188,7 +189,6 @@ async def adm_refund(call: CallbackQuery):
 
     pool = await get_pool()
 
-    # ambil 10 transaksi terakhir paid
     data = await pool.fetch("""
         SELECT user_id, code, amount
         FROM payments
@@ -197,9 +197,7 @@ async def adm_refund(call: CallbackQuery):
         LIMIT 10
     """)
 
-    text = "💸 REFUND LIST (contoh)\n\n"
-    text += "Gunakan manual refund via SQL:\n\n"
-
+    text = "💸 REFUND LIST\n\n"
     for p in data:
         text += f"- {p['user_id']} | {p['code']} | Rp{p['amount']}\n"
 
@@ -245,6 +243,10 @@ async def send_broadcast(message: Message, state: FSMContext):
     await message.answer(f"✅ Broadcast terkirim ke {count} user")
     await state.clear()
 
+
+# =========================
+# WITHDRAW LIST
+# =========================
 @router.callback_query(F.data == "adm_withdraw")
 async def adm_withdraw(call: CallbackQuery):
     if not is_admin(call.from_user.id):
@@ -267,36 +269,30 @@ async def adm_withdraw(call: CallbackQuery):
         )
 
     text = "🏧 WITHDRAW REQUEST\n\n"
-
     kb = InlineKeyboardBuilder()
 
     for w in data:
-        text += f"""
-ID: {w['id']}
-User: {w['user_id']}
-Amount: Rp{w['amount']}
-Method: {w['method']}
-Account: {w['account']}
-Status: {w['status']}
-────────────
-"""
+        text += (
+            f"ID: {w['id']}\n"
+            f"User: {w['user_id']}\n"
+            f"Amount: Rp{w['amount']}\n"
+            f"Method: {w['method']}\n"
+            f"Account: {w['account']}\n"
+            f"Status: {w['status']}\n"
+            "────────────\n"
+        )
 
-        kb.button(
-            text=f"✅ {w['id']}",
-            callback_data=f"wd_ok_{w['id']}"
-        )
-        kb.button(
-            text=f"❌ {w['id']}",
-            callback_data=f"wd_no_{w['id']}"
-        )
+        kb.button(text=f"✅ {w['id']}", callback_data=f"wd_ok_{w['id']}")
+        kb.button(text=f"❌ {w['id']}", callback_data=f"wd_no_{w['id']}")
 
     kb.adjust(2)
 
     await call.message.edit_text(text, reply_markup=kb.as_markup())
     await call.answer()
 
+
 # =========================
-# APPROVE WITHDRAW
+# APPROVE WITHDRAW (FIXED)
 # =========================
 @router.callback_query(F.data.startswith("wd_ok_"))
 async def wd_ok(call: CallbackQuery):
@@ -304,7 +300,6 @@ async def wd_ok(call: CallbackQuery):
         return await call.answer("No access", show_alert=True)
 
     wid = int(call.data.split("_")[2])
-
     pool = await get_pool()
 
     data = await pool.fetchrow("""
@@ -330,13 +325,15 @@ async def wd_ok(call: CallbackQuery):
             data["user_id"],
             f"✅ Withdraw Rp{data['amount']:,} telah disetujui"
         )
-    except Exception:
+    except:
         pass
 
     await call.answer("✅ Approved")
     await call.message.delete()
+
+
 # =========================
-# REJECT WITHDRAW + REFUND
+# REJECT WITHDRAW + REFUND (FIXED)
 # =========================
 @router.callback_query(F.data.startswith("wd_no_"))
 async def wd_no(call: CallbackQuery):
@@ -344,7 +341,6 @@ async def wd_no(call: CallbackQuery):
         return await call.answer("No access", show_alert=True)
 
     wid = int(call.data.split("_")[2])
-
     pool = await get_pool()
 
     data = await pool.fetchrow("""
@@ -359,7 +355,6 @@ async def wd_no(call: CallbackQuery):
     if data["status"] != "pending":
         return await call.answer("Sudah diproses")
 
-    # refund saldo user
     await pool.execute("""
         UPDATE users
         SET balance = balance + $1
@@ -375,8 +370,7 @@ async def wd_no(call: CallbackQuery):
     try:
         await call.bot.send_message(
             data["user_id"],
-            f"❌ Withdraw Rp{data['amount']:,} ditolak.\n"
-            f"💰 Saldo telah dikembalikan ke akun Anda."
+            f"❌ Withdraw Rp{data['amount']:,} ditolak.\n💰 Saldo dikembalikan."
         )
     except:
         pass
