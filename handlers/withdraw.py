@@ -1,14 +1,13 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.fsm.context import FSMContext
 
 from datetime import datetime, time
 import pytz
 
-from states import WithdrawState
-from database import fetchrow, fetch, execute, transaction
-from config import GROUP_ID
+from database import fetchrow, fetch
+# kalau ada FSM nanti bisa ditambah lagi
+# from states import WithdrawState
 
 router = Router()
 
@@ -43,6 +42,10 @@ def withdraw_menu_kb():
     )
 
     kb.row(
+        InlineKeyboardButton(text="📜 History", callback_data="wd_history")
+    )
+
+    kb.row(
         InlineKeyboardButton(text="🔙 Kembali", callback_data="back_menu")
     )
 
@@ -50,21 +53,20 @@ def withdraw_menu_kb():
 
 
 # =========================
-# DASHBOARD WITHDRAW
+# DASHBOARD
 # =========================
 @router.callback_query(F.data == "withdraw")
 async def withdraw_dashboard(call: CallbackQuery):
     user_id = call.from_user.id
 
-    # Ambil saldo utama
+    # saldo user
     user = await fetchrow(
         "SELECT balance FROM users WHERE telegram_id=$1",
         user_id
     )
-
     balance = user["balance"] if user else 0
 
-    # Ambil data withdraw
+    # data withdraw
     data = await fetch(
         """
         SELECT status, SUM(amount) as total
@@ -93,140 +95,144 @@ async def withdraw_dashboard(call: CallbackQuery):
     text = (
         "💰 <b>WITHDRAW DASHBOARD</b>\n\n"
         f"💳 Saldo Saat Ini: Rp {balance:,}\n"
-        f"⏳ Saldo Pending: Rp {pending:,}\n"
-        f"⚙️ Saldo Process: Rp {process:,}\n"
-        f"❌ Saldo Failed: Rp {failed:,}\n"
-        f"✅ Total Success: Rp {success:,}\n\n"
-        "🕒 Jam Withdraw: 09:00 - 19:00 WIB"
+        f"⏳ Pending: Rp {pending:,}\n"
+        f"⚙️ Process: Rp {process:,}\n"
+        f"❌ Failed: Rp {failed:,}\n"
+        f"✅ Success: Rp {success:,}\n\n"
+        "🕒 Jam Operasional: 09:00 - 19:00 WIB\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔒 <b>Keamanan & Transparansi</b>\n"
+        "• Sistem otomatis & real-time\n"
+        "• Semua transaksi tercatat\n"
+        "• Data rekening aman\n\n"
+        "⚡ <b>Proses Cepat</b>\n"
+        "• Maksimal 1x24 jam\n"
+        "• Biasanya hanya beberapa jam\n\n"
+        "💸 <b>Sistem Saldo</b>\n"
+        "• Saldo langsung terpotong\n"
+        "• Reject = saldo kembali 100%\n\n"
+        "📌 <b>Tips</b>\n"
+        "• Gunakan rekening valid\n"
+        "• Nama harus sesuai rekening\n"
+        "━━━━━━━━━━━━━━━━━━━━"
     )
 
     await call.message.edit_text(
         text,
-        reply_markup=withdraw_menu_kb()
+        reply_markup=withdraw_menu_kb(),
+        parse_mode="HTML"
     )
-
-    await call.answer()
 
 
 # =========================
-# WD CLOSED ALERT
+# WITHDRAW CLOSED
 # =========================
 @router.callback_query(F.data == "wd_closed")
 async def wd_closed(call: CallbackQuery):
-    await call.answer(
-        "⏰ Withdraw buka jam 09:00 - 19:00 WIB",
-        show_alert=True
+    await call.answer("Withdraw hanya buka jam 09:00 - 19:00 WIB", show_alert=True)
+
+
+# =========================
+# HISTORY (simple)
+# =========================
+@router.callback_query(F.data == "wd_history")
+async def wd_history(call: CallbackQuery):
+    user_id = call.from_user.id
+
+    rows = await fetch(
+        """
+        SELECT amount, status, created_at
+        FROM withdraw_requests
+        WHERE user_id=$1
+        ORDER BY created_at DESC
+        LIMIT 10
+        """,
+        user_id
     )
 
-
-# =========================
-# START WITHDRAW
-# =========================
-@router.callback_query(F.data == "wd_start")
-async def withdraw_start(call: CallbackQuery, state: FSMContext):
-
-    if not is_withdraw_open():
-        return await call.answer(
-            "⏰ Withdraw hanya buka jam 09:00 - 19:00 WIB",
-            show_alert=True
-        )
-
-    await state.set_state(WithdrawState.amount)
+    if not rows:
+        text = "📜 Belum ada history withdraw"
+    else:
+        text = "📜 <b>History Withdraw</b>\n\n"
+        for r in rows:
+            text += f"Rp{r['amount']:,} | {r['status']} | {r['created_at']}\n"
 
     await call.message.edit_text(
-        "💸 <b>WITHDRAW</b>\n\n"
-        "Masukkan jumlah withdraw\n"
-        "Contoh: 50000"
+        text,
+        reply_markup=withdraw_menu_kb(),
+        parse_mode="HTML"
     )
 
-    await call.answer()
+@router.callback_query(F.data == "wd_setting")
+async def withdraw_setting(call: CallbackQuery):
+    user_id = call.from_user.id
 
+    data = await fetchrow(
+        "SELECT bank_name, account_number, account_name FROM withdraw_accounts WHERE user_id=$1",
+        user_id
+    )
 
-# =========================
-# INPUT NOMINAL
-# =========================
-@router.message(WithdrawState.amount)
-async def process_withdraw(message: Message, state: FSMContext):
-
-    # Proteksi jam
-    if not is_withdraw_open():
-        await state.clear()
-        return await message.reply(
-            "⏰ Withdraw sudah tutup\nBuka jam 09:00 - 19:00 WIB"
+    if data:
+        text = (
+            "⚙️ <b>SETTING PENARIKAN</b>\n\n"
+            f"🏦 Bank/E-Wallet: {data['bank_name']}\n"
+            f"💳 Nomor: {data['account_number']}\n"
+            f"👤 Nama: {data['account_name']}\n\n"
+            "Silakan update jika ada perubahan"
+        )
+    else:
+        text = (
+            "⚙️ <b>SETTING PENARIKAN</b>\n\n"
+            "❌ Kamu belum menambahkan rekening\n\n"
+            "Tambahkan dulu sebelum withdraw"
         )
 
-    # Validasi angka
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text="✏️ Edit / Tambah", callback_data="wd_set_input")
+    )
+    kb.row(
+        InlineKeyboardButton(text="🔙 Kembali", callback_data="withdraw")
+    )
+
+    await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await call.answer()
+
+@router.callback_query(F.data == "wd_set_input")
+async def set_account_start(call: CallbackQuery, state: FSMContext):
+    await state.set_state("WAIT_ACCOUNT")
+
+    await call.message.edit_text(
+        "Masukkan data rekening:\n\nFormat:\nBank - Nomor - Nama\n\nContoh:\nBCA - 123456789 - Andi"
+    )
+    await call.answer()
+
+@router.message()
+async def save_account(message: Message, state: FSMContext):
+    current = await state.get_state()
+
+    if current != "WAIT_ACCOUNT":
+        return
+
     try:
-        amount = int(message.text)
+        bank, number, name = message.text.split(" - ")
     except:
-        return await message.reply("❌ Masukkan angka yang valid")
+        await message.answer("❌ Format salah!\nGunakan:\nBank - Nomor - Nama")
+        return
 
-    if amount < 10000:
-        return await message.reply("❌ Minimal withdraw Rp 10.000")
-
-    user_id = message.from_user.id
-
-    # Ambil saldo
-    user = await fetchrow(
-        "SELECT balance FROM users WHERE telegram_id=$1",
-        user_id
+    await execute(
+        """
+        INSERT INTO withdraw_accounts (user_id, bank_name, account_number, account_name)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+            bank_name=$2,
+            account_number=$3,
+            account_name=$4
+        """,
+        message.from_user.id, bank, number, name
     )
-
-    if not user:
-        return await message.reply("❌ User tidak ditemukan")
-
-    if user["balance"] < amount:
-        return await message.reply("❌ Saldo tidak cukup")
-
-    # Cek pending
-    pending = await fetchrow(
-        "SELECT id FROM withdraw_requests WHERE user_id=$1 AND status='pending'",
-        user_id
-    )
-
-    if pending:
-        return await message.reply("❌ Masih ada withdraw pending")
-
-    # TRANSACTION
-    try:
-        await transaction([
-            (
-                "UPDATE users SET balance = balance - $1 WHERE telegram_id=$2",
-                amount, user_id
-            ),
-            (
-                "INSERT INTO withdraw_requests(user_id, amount, status) VALUES($1,$2,'pending')",
-                user_id, amount
-            )
-        ])
-    except Exception as e:
-        return await message.reply("❌ Terjadi kesalahan")
 
     await state.clear()
 
-    # RESPON USER
-    await message.answer(
-        "✅ <b>Withdraw berhasil diajukan</b>\n\n"
-        f"💸 Jumlah: Rp {amount:,}\n"
-        "⏳ Status: Pending"
-    )
-
-    # NOTIF ADMIN
-    try:
-        await message.bot.send_message(
-            GROUP_ID,
-            "💸 <b>REQUEST WITHDRAW</b>\n\n"
-            f"👤 User: <code>{user_id}</code>\n"
-            f"💰 Jumlah: Rp {amount:,}\n"
-            "📌 Status: Pending"
-        )
-    except:
-        pass
-
-
-# =========================
-# SETTING (SIMPLE PLACEHOLDER)
-# =========================
-@router.callback_query(F.data == "wd_setting")
-async def wd_setting(call: CallbackQuery):
-    await call.answer("⚙️ Fitur setting belum dibuat", show_alert=True)
+    await message.answer("✅ Rekening berhasil disimpan")
