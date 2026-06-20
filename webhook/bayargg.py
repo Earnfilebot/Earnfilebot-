@@ -12,29 +12,28 @@ from aiogram.types import Update
 from database import get_pool
 from config import GROUP_ID
 
+print("🔥 BAYARGG WEBHOOK PRODUCTION READY LOADED")
+
 router = APIRouter()
-logging.basicConfig(level=logging.INFO)
 
 BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
 
+logging.basicConfig(level=logging.INFO)
 
 # =========================
 # UTILS
 # =========================
 def parse_reference(ref: str):
+    if not ref:
+        return None, None
     try:
         user_id, code = ref.split("_", 1)
         return int(user_id), code
-    except:
+    except Exception:
         return None, None
 
-
 def verify_signature(body: bytes, signature: str):
-    if not signature:
-        return False
-
-    if not BAYARGG_SECRET:
-        logging.error("❌ SECRET NOT SET")
+    if not signature or not BAYARGG_SECRET:
         return False
 
     expected = hmac.new(
@@ -45,50 +44,34 @@ def verify_signature(body: bytes, signature: str):
 
     return hmac.compare_digest(expected, signature)
 
-
 def is_paid_status(status: str):
-    return status and status.upper() in ["PAID", "SUCCESS", "SETTLED"]
-
-
-# =========================
-# TELEGRAM WEBHOOK
-# =========================
-@router.post("/webhook/telegram")
-async def telegram_webhook(req: Request):
-    logging.info("🤖 TELEGRAM HIT")
-
-    bot = req.app.state.bot
-    dp = req.app.state.dp
-
-    body = await req.json()
-
-    try:
-        update = Update.model_validate(body)
-        await dp.feed_update(bot, update)
-    except Exception as e:
-        logging.exception(f"❌ TELEGRAM ERROR: {e}")
-
-    return {"ok": True}
-
+    if not status:
+        return False
+    return status.upper() in ["PAID", "SUCCESS", "SETTLED"]
 
 # =========================
-# BAYARGG WEBHOOK
+# WEBHOOK
 # =========================
-@router.post("/webhook/bayargg")
-async def bayargg_webhook(
+@router.post("/webhook")
+async def webhook(
     req: Request,
     x_signature: str = Header(None, alias="X-Signature")
 ):
     start_time = datetime.utcnow()
-    logging.info("💰 BAYARGG HIT")
+    logging.info("🔥 WEBHOOK HIT")
 
-    bot = req.app.state.bot
+    bot = getattr(req.app.state, "bot", None)
+    dp = getattr(req.app.state, "dp", None)
+
+    if not bot or not dp:
+        logging.error("❌ BOT / DP NOT READY")
+        return {"ok": True}
 
     body = await req.body()
 
-    # DEBUG (penting banget kalau ada error)
-    logging.info(f"BODY: {body.decode()}")
-
+    # =========================
+    # PARSE JSON SAFELY
+    # =========================
     try:
         data = json.loads(body.decode())
     except Exception as e:
@@ -96,8 +79,24 @@ async def bayargg_webhook(
         return {"ok": True}
 
     # =========================
-    # VERIFY SIGNATURE
+    # TELEGRAM UPDATE
     # =========================
+    if "update_id" in data and not x_signature:
+        logging.info("🤖 TELEGRAM UPDATE")
+
+        try:
+            update = Update.model_validate(data)
+            await dp.feed_update(bot, update)
+        except Exception as e:
+            logging.exception(f"❌ TELEGRAM ERROR: {e}")
+
+        return {"ok": True}
+
+    # =========================
+    # BAYARGG WEBHOOK
+    # =========================
+    logging.info("💰 BAYARGG WEBHOOK")
+
     if not verify_signature(body, x_signature):
         logging.warning("❌ INVALID SIGNATURE")
         return {"ok": True}
@@ -110,13 +109,13 @@ async def bayargg_webhook(
     logging.info(f"STATUS={status} REF={ref}")
 
     if not is_paid_status(status):
-        logging.info("⛔ NOT PAID")
+        logging.info("⛔ STATUS NOT PAID")
         return {"ok": True}
 
     user_id, code = parse_reference(ref)
 
     if not user_id or not code:
-        logging.warning("❌ INVALID REF")
+        logging.warning("❌ INVALID REFERENCE FORMAT")
         return {"ok": True}
 
     pool = await get_pool()
@@ -133,9 +132,14 @@ async def bayargg_webhook(
         """, user_id, code)
 
         if not payment_id:
-            logging.warning("❌ ALREADY PROCESSED")
+            logging.warning("❌ PAYMENT ALREADY PROCESSED")
             return {"ok": True}
 
+        logging.info(f"✅ PAYMENT ID={payment_id}")
+
+        # =========================
+        # GET FILE
+        # =========================
         file = await pool.fetchrow("""
             SELECT seller_id, price, media_json
             FROM files
@@ -154,7 +158,7 @@ async def bayargg_webhook(
         seller_income = price - fee
 
         # =========================
-        # UPDATE BALANCE
+        # UPDATE SELLER BALANCE
         # =========================
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
@@ -164,21 +168,67 @@ async def bayargg_webhook(
         """, seller_id, seller_income)
 
         # =========================
-        # SEND FILE
+        # NOTIFY SELLER
         # =========================
         try:
-            media_list = json.loads(media_json) if isinstance(media_json, str) else (media_json or [])
-
             await bot.send_message(
-                user_id,
-                f"""✅ PEMBAYARAN BERHASIL
+                seller_id,
+                f"""💰 PENJUALAN BERHASIL
 
-📦 {code}
-📁 {len(media_list)} file
+📦 Produk : {code}
+💸 Harga : Rp {price:,}
+📊 Fee : Rp {fee:,}
+✅ Kamu terima : Rp {seller_income:,}
 ━━━━━━━━━━━━━━"""
             )
+        except Exception as e:
+            logging.error(f"SELLER NOTIF ERROR: {e}")
 
-            for item in media_list:
+        # =========================
+        # TRANSACTION LOG
+        # =========================
+        await pool.execute("""
+            INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
+            VALUES($1,$2,$3,$4,$5,'paid')
+            ON CONFLICT DO NOTHING
+        """, user_id, seller_id, code, price, fee)
+
+        # =========================
+        # ACCESS GRANT
+        # =========================
+        await pool.execute("""
+            INSERT INTO user_access(user_id, code, paid)
+            VALUES($1,$2,true)
+            ON CONFLICT DO NOTHING
+        """, user_id, code)
+
+    except Exception as e:
+        logging.exception(f"❌ DB ERROR: {e}")
+        return {"ok": True}
+
+    # =========================
+    # SEND FILE
+    # =========================
+    try:
+        try:
+            media_list = json.loads(media_json) if isinstance(media_json, str) else (media_json or [])
+        except Exception:
+            media_list = []
+
+        await bot.send_message(
+            user_id,
+            f"""✅ PEMBAYARAN BERHASIL
+
+📦 Kode : {code}
+📁 Total File : {len(media_list)}
+🔐 Status : Akses diberikan
+
+━━━━━━━━━━━━━━
+📥 File akan dikirim otomatis..."""
+        )
+
+        for item in media_list:
+            try:
                 t = item.get("type")
                 fid = item.get("file_id")
 
@@ -189,24 +239,39 @@ async def bayargg_webhook(
                 elif t == "photo":
                     await bot.send_photo(user_id, fid)
 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.4)
 
-        except Exception as e:
-            logging.error(f"❌ SEND ERROR: {e}")
+            except Exception as e:
+                logging.error(f"SEND ERROR: {e}")
 
-        # =========================
-        # GROUP LOG
-        # =========================
+    except Exception as e:
+        logging.exception(f"FILE SEND ERROR: {e}")
+
+    # =========================
+    # GROUP LOG
+    # =========================
+    try:
         if GROUP_ID:
             await bot.send_message(
                 int(GROUP_ID),
-                f"💰 {code} | Rp {price:,} | {user_id}"
+                f"""💰 TRANSAKSI BERHASIL
+
+📦 Produk : {code}
+💸 Harga : Rp {price:,}
+👤 Buyer : {user_id}
+🏷 Seller : {seller_id}
+
+━━━━━━━━━━━━━━
+🔥 Media berhasil dikirim"""
             )
-
     except Exception as e:
-        logging.exception(f"❌ DB ERROR: {e}")
+        logging.error(f"GROUP ERROR: {e}")
 
+    # =========================
+    # DONE
+    # =========================
     duration = (datetime.utcnow() - start_time).total_seconds()
     logging.info(f"⚡ DONE {duration:.2f}s")
 
     return {"ok": True}
+
