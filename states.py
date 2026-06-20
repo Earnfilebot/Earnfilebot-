@@ -44,3 +44,7 @@ class PaymentState(StatesGroup):
 # =========================
 class WithdrawState(StatesGroup):
     amount = State()
+    account_name = State()
+    account_number = State()
+    bank_name = State()
+    confirm = State()
