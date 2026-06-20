@@ -371,10 +371,9 @@ async def finalize_save(message: Message, state: FSMContext):
             return await message.answer("❌ Tidak ada media yang diupload")
 
         # =========================
-        # FIX PRICE SAFETY
+        # PRICE VALIDATION
         # =========================
         is_paid = data.get("is_paid", False)
-
         price = data.get("price")
 
         if is_paid:
@@ -393,7 +392,7 @@ async def finalize_save(message: Message, state: FSMContext):
         pool = await get_pool()
 
         # =========================
-        # GENERATE CODE
+        # GENERATE UNIQUE CODE
         # =========================
         while True:
             code = "EFB-" + "".join(
@@ -412,7 +411,7 @@ async def finalize_save(message: Message, state: FSMContext):
                 break
 
         # =========================
-        # INSERT DB
+        # INSERT DATABASE
         # =========================
         await pool.execute(
             """
@@ -431,38 +430,38 @@ async def finalize_save(message: Message, state: FSMContext):
         await state.clear()
 
         # =========================
-        # RESPONSE USER
+        # UNIFIED TEXT (SAMA SEMUA)
         # =========================
         status = "💎 PREMIUM FILE" if is_paid else "🆓 FREE FILE"
 
-        text = (
-            "✅ FILE BERHASIL DISIMPAN\n\n"
+        base_text = (
+            f"📦 <b>FILE CREATED</b>\n\n"
             f"📦 Type : {status}\n"
             f"🗂 Media : {len(media)} file\n"
-            f"🔑 Code : `{code}`\n"
+            f"🔑 Code : <code>{code}</code>\n"
         )
 
         if is_paid:
-            text += f"💰 Price : Rp {price:,}\n"
+            base_text += f"💰 Price : Rp {price:,}\n"
 
-        text += "\n━━━━━━━━━━━━━━\n📥 Gunakan kode untuk akses file."
-
-        await message.answer(text, parse_mode="Markdown")
+        base_text += "\n━━━━━━━━━━━━━━\n📥 Tap kode untuk copy dan tempel ke bot"
 
         # =========================
-        # CHANNEL LOG (FIXED)
+        # RESPONSE USER
+        # =========================
+        await message.answer(
+            "✅ <b>FILE BERHASIL DISIMPAN</b>\n\n" + base_text,
+            parse_mode="HTML"
+        )
+
+        # =========================
+        # CHANNEL LOG (SAMA PERSIS)
         # =========================
         try:
             await message.bot.send_message(
                 CHANNEL_ID,
-                f"""📦 FILE CREATED
-
-🔑 Code: `{code}`
-👤 USER ID: {message.from_user.id}
-📁 MEDIA: {len(media)}
-💎 TYPE: {file_type}
-💰 PRICE: Rp {price}
-"""
+                base_text + f"\n\n👤 USER ID: <code>{message.from_user.id}</code>",
+                parse_mode="HTML"
             )
         except Exception as e:
             print("LOG ERROR:", e)
