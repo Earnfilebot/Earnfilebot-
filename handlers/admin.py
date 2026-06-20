@@ -41,7 +41,7 @@ def admin_menu():
     kb.button(text="🏧 Withdraw", callback_data="adm_withdraw")
     kb.button(text="📢 Broadcast", callback_data="adm_broadcast")
 
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
@@ -287,54 +287,91 @@ Status: {w['status']}
     await call.message.edit_text(text, reply_markup=kb.as_markup())
     await call.answer()
 
+# =========================
+# APPROVE WITHDRAW
+# =========================
 @router.callback_query(F.data.startswith("wd_ok_"))
 async def wd_ok(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("No access", show_alert=True)
+
     wid = int(call.data.split("_")[2])
-    pool = await get_pool()
 
-    await pool.execute("""
-        UPDATE withdraws SET status='approved' WHERE id=$1
-    """, wid)
-
-    await call.answer("✅ Approved")
-    await call.message.delete()
-
-
-@router.callback_query(F.data.startswith("wd_no_"))
-async def wd_no(call: CallbackQuery):
-    wid = int(call.data.split("_")[2])
-    pool = await get_pool()
-
-    await pool.execute("""
-        UPDATE withdraws SET status='rejected' WHERE id=$1
-    """, wid)
-
-    await call.answer("❌ Rejected")
-    await call.message.delete()
-
-@router.callback_query(F.data.startswith("wd_no_"))
-async def wd_no(call: CallbackQuery):
-    wid = int(call.data.split("_")[2])
     pool = await get_pool()
 
     data = await pool.fetchrow("""
-        SELECT user_id, amount FROM withdraws WHERE id=$1
+        SELECT user_id, amount, status
+        FROM withdraws
+        WHERE id=$1
     """, wid)
 
-    # refund saldo
-    await pool.execute("""
-        UPDATE users SET balance = balance + $1
-        WHERE telegram_id=$2
-    """, data['amount'], data['user_id'])
+    if not data:
+        return await call.answer("Withdraw tidak ditemukan")
+
+    if data["status"] != "pending":
+        return await call.answer("Sudah diproses")
 
     await pool.execute("""
-        UPDATE withdraws SET status='rejected' WHERE id=$1
+        UPDATE withdraws
+        SET status='approved'
+        WHERE id=$1
     """, wid)
 
-    await call.bot.send_message(
-        data['user_id'],
-        f"❌ Withdraw Rp{data['amount']} ditolak (saldo dikembalikan)"
-    )
+    try:
+        await call.bot.send_message(
+            data["user_id"],
+            f"✅ Withdraw Rp{data['amount']:,} telah disetujui"
+        )
+    except Exception:
+        pass
 
-    await call.answer("Rejected")
+    await call.answer("✅ Approved")
+    await call.message.delete()
+# =========================
+# REJECT WITHDRAW + REFUND
+# =========================
+@router.callback_query(F.data.startswith("wd_no_"))
+async def wd_no(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("No access", show_alert=True)
+
+    wid = int(call.data.split("_")[2])
+
+    pool = await get_pool()
+
+    data = await pool.fetchrow("""
+        SELECT user_id, amount, status
+        FROM withdraws
+        WHERE id=$1
+    """, wid)
+
+    if not data:
+        return await call.answer("Withdraw tidak ditemukan")
+
+    if data["status"] != "pending":
+        return await call.answer("Sudah diproses")
+
+    # refund saldo user
+    await pool.execute("""
+        UPDATE users
+        SET balance = balance + $1
+        WHERE telegram_id = $2
+    """, data["amount"], data["user_id"])
+
+    await pool.execute("""
+        UPDATE withdraws
+        SET status='rejected'
+        WHERE id=$1
+    """, wid)
+
+    try:
+        await call.bot.send_message(
+            data["user_id"],
+            f"❌ Withdraw Rp{data['amount']:,} ditolak.\n"
+            f"💰 Saldo telah dikembalikan ke akun Anda."
+        )
+    except:
+        pass
+
+    await call.answer("❌ Rejected")
     await call.message.delete()
