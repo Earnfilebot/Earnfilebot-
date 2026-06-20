@@ -50,10 +50,18 @@ def admin_menu():
 # =========================
 @router.message(Command("admin"))
 async def admin_panel(message: Message):
+    print("ADMIN HIT", message.from_user.id)
+
     if not is_admin(message.from_user.id):
+        print("NOT ADMIN")
         return await message.answer("❌ Akses ditolak")
 
-    await message.answer("🛠 ADMIN PANEL MARKETPLACE", reply_markup=admin_menu())
+    print("ADMIN OK")
+
+    await message.answer(
+        "🛠 ADMIN PANEL MARKETPLACE",
+        reply_markup=admin_menu()
+    )
 
 
 # =========================
