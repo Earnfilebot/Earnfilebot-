@@ -117,7 +117,7 @@ async def adm_files(call: CallbackQuery):
         files = await pool.fetch("""
             SELECT code, price, seller_id
             FROM files
-            ORDER BY id DESC
+            ORDER BY code DESC
             LIMIT 15
         """)
     except Exception as e:
