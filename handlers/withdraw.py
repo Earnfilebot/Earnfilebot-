@@ -6,6 +6,7 @@ from datetime import datetime, time
 import pytz
 
 from database import fetchrow, fetch
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from states import WithdrawState
 
