@@ -56,7 +56,7 @@ def is_paid_status(status: str):
 # =========================
 # WEBHOOK
 # =========================
-@router.post("/webhook")
+@router.post("/webhook/bayargg")
 async def webhook(
     req: Request,
     x_signature: str = Header(None, alias="X-Signature")
