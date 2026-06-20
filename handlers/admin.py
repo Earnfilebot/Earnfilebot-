@@ -112,20 +112,35 @@ async def adm_files(call: CallbackQuery):
         return await call.answer("No access", show_alert=True)
 
     pool = await get_pool()
-    files = await pool.fetch("""
-        SELECT code, price, seller_id
-        FROM files
-        ORDER BY id DESC
-        LIMIT 15
-    """)
+
+    try:
+        files = await pool.fetch("""
+            SELECT code, price, seller_id
+            FROM files
+            ORDER BY id DESC
+            LIMIT 15
+        """)
+    except Exception as e:
+        return await call.message.edit_text(f"❌ ERROR:\n{e}")
+
+    if not files:
+        return await call.message.edit_text(
+            "❌ Belum ada file",
+            reply_markup=admin_menu()
+        )
 
     text = "📦 FILES\n\n"
+
     for f in files:
-        text += f"{f['code']} | Rp{f['price']} | seller:{f['seller_id']}\n"
+        line = f"{f['code']} | Rp{f['price']} | seller:{f['seller_id']}\n"
+
+        if len(text) + len(line) > 4000:
+            break
+
+        text += line
 
     await call.message.edit_text(text, reply_markup=admin_menu())
     await call.answer()
-
 
 # =========================
 # STATS SALES
