@@ -69,6 +69,9 @@ async def webhook(
 
     body = await req.body()
 
+    logging.info(f"BODY = {body.decode(errors='ignore')}")
+    logging.info(f"X_SIGNATURE = {x_signature}")
+
     # =========================
     # PARSE JSON SAFELY
     # =========================
@@ -96,6 +99,7 @@ async def webhook(
     # BAYARGG WEBHOOK
     # =========================
     logging.info("💰 BAYARGG WEBHOOK")
+    logging.info("💰 BAYARGG WEBHOOK DETECTED")
 
     if not verify_signature(body, x_signature):
         logging.warning("❌ INVALID SIGNATURE")
