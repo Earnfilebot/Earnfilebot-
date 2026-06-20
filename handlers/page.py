@@ -22,8 +22,6 @@ PAGE_SIZE = 10
 CLICK_COOLDOWN = defaultdict(float)
 USER_LOCK = defaultdict(asyncio.Lock)
 
-PAGE_CACHE = {}
-
 
 # =========================
 # UTIL
@@ -46,34 +44,28 @@ def normalize_type(ftype):
 
 
 # =========================
-# BUTTON BUILDER (FIXED WINDOW PAGINATION)
+# BUTTON BUILDER (FIXED ROW STRUCTURE)
 # =========================
 def build_page_buttons(code: str, page: int, total: int):
 
-    buttons = []
+    row = []
 
     # Prev
-    buttons.append(
+    row.append(
         InlineKeyboardButton(
             text="⬅️ Prev",
             callback_data=f"page:{code}:{max(1, page-1)}"
         )
     )
 
-    # Window pagination (FIXED)
+    # Pagination window
     start = max(1, page - 2)
     end = min(total, page + 2)
 
     for i in range(start, end + 1):
+        emoji = "🟡" if i == page else ("🟢" if i < page else "🔴")
 
-        if i < page:
-            emoji = "🟢"
-        elif i == page:
-            emoji = "🟡"
-        else:
-            emoji = "🔴"
-
-        buttons.append(
+        row.append(
             InlineKeyboardButton(
                 text=f"{i}{emoji}",
                 callback_data=f"page:{code}:{i}"
@@ -81,14 +73,14 @@ def build_page_buttons(code: str, page: int, total: int):
         )
 
     # Next
-    buttons.append(
+    row.append(
         InlineKeyboardButton(
             text="Next ➡️",
             callback_data=f"page:{code}:{min(total, page+1)}"
         )
     )
 
-    return buttons
+    return row
 
 
 # =========================
@@ -97,30 +89,31 @@ def build_page_buttons(code: str, page: int, total: int):
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
 
+    user_id = call.from_user.id
+
     # =========================
     # SAFE PARSE
     # =========================
     try:
         _, code, page = call.data.split(":")
         page = int(page)
-    except Exception:
+    except:
         return await call.answer("❌ Invalid data", show_alert=True)
 
     # =========================
-    # ANTI SPAM COOLDOWN
+    # ANTI SPAM
     # =========================
     now = time.time()
-    if now - CLICK_COOLDOWN[call.from_user.id] < 0.5:
-        return await call.answer("⏳ Slow down", show_alert=False)
 
-    CLICK_COOLDOWN[call.from_user.id] = now
+    if now - CLICK_COOLDOWN[user_id] < 0.5:
+        return await call.answer("⏳ Slow down")
+
+    CLICK_COOLDOWN[user_id] = now
 
     # =========================
     # LOCK USER
     # =========================
-    async with USER_LOCK[call.from_user.id]:
-
-        await call.answer()  # jawab setelah validasi aman
+    async with USER_LOCK[user_id]:
 
         pool = await get_pool()
 
@@ -133,23 +126,17 @@ async def page_handler(call: CallbackQuery):
             return await call.answer("❌ File not found", show_alert=True)
 
         # =========================
-        # ACCESS CHECK (FIXED)
+        # ACCESS CHECK
         # =========================
-        try:
-            price = int(file.get("price") or 0)
-        except Exception:
-            price = 0
+        price = int(file.get("price") or 0)
 
         if price > 0:
             access = await pool.fetchval(
                 """
-                SELECT 1
-                FROM user_access
-                WHERE user_id=$1
-                AND code=$2
-                AND paid=true
+                SELECT 1 FROM user_access
+                WHERE user_id=$1 AND code=$2 AND paid=true
                 """,
-                call.from_user.id,
+                user_id,
                 code
             )
 
@@ -160,49 +147,33 @@ async def page_handler(call: CallbackQuery):
                 )
 
         # =========================
-        # MEDIA PARSE SAFE
+        # MEDIA PARSE
         # =========================
         media = file.get("media") or []
 
         if isinstance(media, str):
             try:
                 media = json.loads(media)
-            except Exception:
+            except:
                 media = []
 
-        if not isinstance(media, list) or not media:
-            return await call.message.answer("❌ File kosong")
+        if not media:
+            return await call.answer("❌ File kosong", show_alert=True)
 
         # =========================
-        # PAGE SAFE LIMIT
+        # PAGE CALC
         # =========================
         total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
-
         page = max(1, min(page, total_page))
 
         chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
 
-        if not chunk:
-            return await call.message.answer("❌ Page kosong")
-
         # =========================
-        # CAPTION
-        # =========================
-        caption = (
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫 𝗙𝗜𝗟𝗘\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔑 CODE : {code}\n"
-            f"📦 PAGE : {page}/{total_page}\n"
-            f"📊 TOTAL : {len(media)} FILE"
-        )
-
-        # =========================
-        # BUILD MEDIA GROUP (SAFE)
+        # BUILD MEDIA GROUP (ONLY IF MULTI)
         # =========================
         group = []
 
         for m in chunk:
-
             if not isinstance(m, dict):
                 continue
 
@@ -214,58 +185,64 @@ async def page_handler(call: CallbackQuery):
 
             if ftype == "photo":
                 group.append(InputMediaPhoto(media=fid))
-
             elif ftype == "video":
                 group.append(InputMediaVideo(media=fid))
-
             else:
                 group.append(InputMediaDocument(media=fid))
 
         if not group:
-            return await call.message.answer("❌ Tidak ada media valid")
+            return await call.answer("❌ Media kosong", show_alert=True)
 
         # =========================
-        # DELETE OLD MESSAGE SAFE
+        # CAPTION
         # =========================
-        try:
-            await call.message.delete()
-        except Exception:
-            pass
+        caption = (
+            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"🔑 CODE : {code}\n"
+            f"📦 PAGE : {page}/{total_page}\n"
+            f"📊 TOTAL : {len(media)} FILE"
+        )
 
         # =========================
-        # SEND MEDIA SAFE (FIX TELEGRAM LIMIT)
+        # KEYBOARD (FIXED)
         # =========================
-        if len(group) == 1:
-            only = group[0]
-
-            if isinstance(only, InputMediaPhoto):
-                await call.message.answer_photo(only.media)
-            elif isinstance(only, InputMediaVideo):
-                await call.message.answer_video(only.media)
-            else:
-                await call.message.answer_document(only.media)
-        else:
-            await call.message.answer_media_group(group)
-
-        # =========================
-        # BUTTON
-        # =========================
-        nav = build_page_buttons(code, page, total_page)
-
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                nav,
+                build_page_buttons(code, page, total_page),
                 [
-                    InlineKeyboardButton(
-                        text="📢 Channel Update",
-                        url="https://t.me/+F6-XB1gFA9VhMDc1"
-                    ),
-                    InlineKeyboardButton(
-                        text="🔔 Notifikasi Code",
-                        url="https://t.me/+VebkFndPTeFkMGU1"
-                    )
+                    InlineKeyboardButton("📢 Channel Update", url="https://t.me/+F6-XB1gFA9VhMDc1"),
+                    InlineKeyboardButton("🔔 Notifikasi Code", url="https://t.me/+VebkFndPTeFkMGU1")
                 ]
             ]
         )
 
-        await call.message.answer(caption, reply_markup=keyboard)
+        # =========================
+        # EDIT MESSAGE ONLY (NO SPAWN SPAM)
+        # =========================
+        try:
+            await call.message.edit_caption(
+                caption=caption,
+                reply_markup=keyboard
+            )
+        except:
+            try:
+                await call.message.edit_text(
+                    caption,
+                    reply_markup=keyboard
+                )
+            except:
+                await call.answer("❌ Gagal update message", show_alert=True)
+
+        # =========================
+        # MEDIA SAFE SEND (ONLY FIRST PAGE STYLE FIX)
+        # =========================
+        # NOTE: ini cuma kirim preview biar tidak spam chat
+        only = group[0]
+
+        if isinstance(only, InputMediaPhoto):
+            await call.message.answer_photo(only.media)
+        elif isinstance(only, InputMediaVideo):
+            await call.message.answer_video(only.media)
+        else:
+            await call.message.answer_document(only.media)
