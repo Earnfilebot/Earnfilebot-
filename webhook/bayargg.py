@@ -57,8 +57,10 @@ def is_paid_status(status: str):
 # WEBHOOK
 # =========================
 @router.post("/webhook")
-async def webhook(req: Request, x_signature: str = Header(None)):
-
+async def webhook(
+    req: Request,
+    x_signature: str = Header(None, alias="X-Signature")
+):
     start_time = datetime.utcnow()
     logging.info("🔥 WEBHOOK HIT")
 
@@ -81,7 +83,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         return {"ok": True}
 
     # =========================
-    # TELEGRAM UPDATE HANDLER
+    # TELEGRAM UPDATE
     # =========================
     if "update_id" in data and not x_signature:
         logging.info("🤖 TELEGRAM UPDATE")
@@ -105,21 +107,16 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     payload = data.get("data") or data
 
-    logging.info(f"PAYLOAD: {payload}")
-
     status = payload.get("status")
     ref = payload.get("reference")
 
-    logging.info(f"STATUS: {status}")
-    logging.info(f"REFERENCE: {ref}")
+    logging.info(f"STATUS={status} REF={ref}")
 
     if not is_paid_status(status):
         logging.info("⛔ STATUS NOT PAID")
         return {"ok": True}
 
     user_id, code = parse_reference(ref)
-
-    logging.info(f"USER_ID={user_id} CODE={code}")
 
     if not user_id or not code:
         logging.warning("❌ INVALID REFERENCE FORMAT")
@@ -129,7 +126,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
 
     try:
         # =========================
-        # ANTI DUPLICATE PAYMENT
+        # ANTI DUPLICATE
         # =========================
         payment_id = await pool.fetchval("""
             UPDATE payments
@@ -139,10 +136,10 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, user_id, code)
 
         if not payment_id:
-            logging.warning("❌ PAYMENT ALREADY PROCESSED / NOT FOUND")
+            logging.warning("❌ PAYMENT ALREADY PROCESSED")
             return {"ok": True}
 
-        logging.info(f"✅ PAYMENT UPDATED ID={payment_id}")
+        logging.info(f"✅ PAYMENT ID={payment_id}")
 
         # =========================
         # GET FILE
@@ -175,6 +172,23 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         """, seller_id, seller_income)
 
         # =========================
+        # NOTIFY SELLER
+        # =========================
+        try:
+            await bot.send_message(
+                seller_id,
+                f"""💰 PENJUALAN BERHASIL
+
+📦 Produk : {code}
+💸 Harga : Rp {price:,}
+📊 Fee : Rp {fee:,}
+✅ Kamu terima : Rp {seller_income:,}
+━━━━━━━━━━━━━━"""
+            )
+        except Exception as e:
+            logging.error(f"SELLER NOTIF ERROR: {e}")
+
+        # =========================
         # TRANSACTION LOG
         # =========================
         await pool.execute("""
@@ -197,14 +211,24 @@ async def webhook(req: Request, x_signature: str = Header(None)):
         return {"ok": True}
 
     # =========================
-    # SEND FILE TO USER
+    # SEND FILE
     # =========================
     try:
-        media_list = json.loads(media_json) if isinstance(media_json, str) else (media_json or [])
+        try:
+            media_list = json.loads(media_json) if isinstance(media_json, str) else (media_json or [])
+        except Exception:
+            media_list = []
 
         await bot.send_message(
             user_id,
-            f"✅ PAYMENT SUCCESS\n📦 {code}\n📁 {len(media_list)} FILE"
+            f"""✅ PEMBAYARAN BERHASIL
+
+📦 Kode : {code}
+📁 Total File : {len(media_list)}
+🔐 Status : Akses diberikan
+
+━━━━━━━━━━━━━━
+📥 File akan dikirim otomatis..."""
         )
 
         for item in media_list:
@@ -219,7 +243,7 @@ async def webhook(req: Request, x_signature: str = Header(None)):
                 elif t == "photo":
                     await bot.send_photo(user_id, fid)
 
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.4)
 
             except Exception as e:
                 logging.error(f"SEND ERROR: {e}")
@@ -233,16 +257,24 @@ async def webhook(req: Request, x_signature: str = Header(None)):
     try:
         if GROUP_ID:
             await bot.send_message(
-                GROUP_ID,
-                f"💰 SALE\n📦 {code}\n💸 Rp {price:,}\n👤 {user_id}"
+                int(GROUP_ID),
+                f"""💰 TRANSAKSI BERHASIL
+
+📦 Produk : {code}
+💸 Harga : Rp {price:,}
+👤 Buyer : {user_id}
+🏷 Seller : {seller_id}
+
+━━━━━━━━━━━━━━
+🔥 Media berhasil dikirim"""
             )
     except Exception as e:
         logging.error(f"GROUP ERROR: {e}")
 
     # =========================
-    # PERFORMANCE LOG
+    # DONE
     # =========================
     duration = (datetime.utcnow() - start_time).total_seconds()
-    logging.info(f"⚡ WEBHOOK DONE in {duration:.2f}s")
+    logging.info(f"⚡ DONE {duration:.2f}s")
 
     return {"ok": True}
