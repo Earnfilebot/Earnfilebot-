@@ -103,9 +103,7 @@ async def render_home_fast(bot, message, user_id):
             user_id
         )
 
-        balance = 0
-        if user and user["balance"]:
-            balance = user["balance"]
+        balance = user["balance"] if user and user["balance"] else 0
 
         text = (
             "EARNFILEBOX\n\n"
@@ -118,8 +116,9 @@ async def render_home_fast(bot, message, user_id):
 
         try:
             await message.edit_text(text, reply_markup=home_kb())
-        except Exception:
-            await message.answer(text, reply_markup=home_kb())
+        except Exception as e:
+            logging.warning(f"EDIT FAIL: {e}")
+            await bot.send_message(user_id, text, reply_markup=home_kb())
 
     except Exception as e:
         logging.exception(f"HOME ERROR: {e}")
