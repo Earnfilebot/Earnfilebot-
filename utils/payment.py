@@ -42,7 +42,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     # =========================
     # UNIQUE ID (WEBHOOK SAFE)
     # =========================
-    external_id = f"{user_id}_{code}"
+    external_id = f"{user_id}_{code}_{int(time.time())}"
 
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
