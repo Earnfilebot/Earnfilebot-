@@ -3,6 +3,7 @@ import asyncio
 import httpx
 
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
+from database import get_pool   # ✅ FIX WAJIB
 
 
 # =========================
@@ -27,22 +28,21 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
     # =========================
-    # ANTI SPAM (2-5 detik lock per user+code)
+    # ANTI SPAM
     # =========================
     key = f"{user_id}:{code}"
     now = time.time()
 
-    if key in _LAST_CALL:
-        if now - _LAST_CALL[key] < 3:
-            print("⛔ BLOCKED DUPLICATE REQUEST:", key)
-            return None
+    if key in _LAST_CALL and (now - _LAST_CALL[key] < 3):
+        print("⛔ BLOCKED DUPLICATE REQUEST:", key)
+        return None
 
     _LAST_CALL[key] = now
 
     # =========================
     # UNIQUE ID (WEBHOOK SAFE)
     # =========================
-    external_id = f"{user_id}_{code}_{int(now * 1000)}"
+    external_id = f"{user_id}_{code}"
 
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
@@ -63,14 +63,13 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     r = None
 
     # =========================
-    # RETRY SYSTEM (SAFE)
+    # RETRY SYSTEM
     # =========================
     for i in range(2):
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.post(url, json=payload, headers=headers)
 
-            # STOP kalau sudah HTTP OK
             if r.status_code == 200:
                 break
 
@@ -79,9 +78,6 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
             r = None
             await asyncio.sleep(1)
 
-    # =========================
-    # FINAL VALIDATION
-    # =========================
     if not r:
         print("❌ ALL REQUEST FAILED")
         return None
@@ -92,7 +88,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
     # =========================
-    # JSON PARSE
+    # PARSE JSON
     # =========================
     try:
         data = r.json()
@@ -106,7 +102,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
     # =========================
-    # FLEXIBLE SUCCESS CHECK
+    # SUCCESS CHECK
     # =========================
     if not (
         data.get("success")
@@ -117,6 +113,20 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         return None
 
     result = data.get("data") or data
+
+    # =========================
+    # INSERT PAYMENT (FIXED)
+    # =========================
+    try:
+        async with get_pool() as pool:
+            await pool.execute("""
+                INSERT INTO payments(user_id, code, status)
+                VALUES ($1,$2,'pending')
+                ON CONFLICT (user_id, code)
+                DO UPDATE SET status='pending'
+            """, user_id, code)
+    except Exception as e:
+        print("❌ DB INSERT ERROR:", repr(e))
 
     # =========================
     # PAYMENT URL FALLBACK
@@ -139,7 +149,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
 
 # =========================
-# WRAPPER (KEEP SIMPLE)
+# WRAPPER
 # =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
