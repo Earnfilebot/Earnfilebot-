@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
@@ -31,9 +33,9 @@ async def check_sub_callback(call: CallbackQuery):
             )
             return
 
-        await render_home_fast(call.bot, call.message, user_id)
-
         await call.answer("✅ Verifikasi berhasil")
+
+        await render_home_fast(call.bot, call.message, user_id)
 
     except Exception as e:
         logging.exception(f"CHECK SUB ERROR: {e}")
