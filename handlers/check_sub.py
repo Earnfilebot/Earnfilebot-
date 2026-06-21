@@ -12,32 +12,29 @@ router = Router()
 async def check_sub_callback(call: CallbackQuery):
 
     user_id = call.from_user.id
+    logging.info(f"CHECK SUB CLICKED: {user_id}")
 
-    if not await check_force_sub(
-        call.bot,
-        user_id
-    ):
+    try:
+        ok = await check_force_sub(call.bot, user_id)
+        logging.info(f"FORCE SUB RESULT: {ok}")
 
-        await call.answer(
-            "❌ Kamu belum join semua channel.",
-            show_alert=True
-        )
+        if not ok:
 
-        try:
+            await call.answer(
+                "❌ Kamu belum join semua channel.",
+                show_alert=True
+            )
+
             await call.message.edit_text(
-                "❌ Kamu belum join semua channel.\n\n"
-                "Silakan join dulu lalu klik CHECK lagi.",
+                "❌ Kamu belum join semua channel.\n\nSilakan join dulu lalu klik CHECK lagi.",
                 reply_markup=join_kb()
             )
-        except:
-            pass
+            return
 
-        return
+        await render_home_fast(call.bot, call.message, user_id)
 
-    await render_home_fast(
-        call.bot,
-        call.message,
-        user_id,
-    )
+        await call.answer("✅ Verifikasi berhasil")
 
-    await call.answer("✅ Verifikasi berhasil")
+    except Exception as e:
+        logging.exception(f"CHECK SUB ERROR: {e}")
+        await call.answer("❌ SYSTEM ERROR", show_alert=True)
