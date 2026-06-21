@@ -1,4 +1,5 @@
 import json
+
 from aiogram import Router, F
 from aiogram.types import (
     Message,
@@ -22,19 +23,20 @@ class GetFileState(StatesGroup):
 
 
 # =========================
-# UTIL SAFE JSON
+# UTIL
 # =========================
 def safe_json(data):
     if isinstance(data, str):
         try:
             return json.loads(data)
-        except:
+        except Exception:
             return []
+
     return data or []
 
 
 def get_first_media(media):
-    if isinstance(media, list) and len(media) > 0:
+    if isinstance(media, list) and media:
         return media[0]
     return None
 
@@ -69,58 +71,60 @@ async def receive_code(message: Message, state: FSMContext):
     pool = await get_pool()
 
     file = await pool.fetchrow(
-        "SELECT * FROM files WHERE code=$1",
+        """
+        SELECT *
+        FROM files
+        WHERE code=$1
+        """,
         code
     )
 
-    # =========================
-    # FILE NOT FOUND
-    # =========================
     if not file:
         await message.answer("❌ CODE TIDAK DITEMUKAN")
         await state.clear()
         return
 
     # =========================
-    # SAFE PRICE FIX (INI PENTING)
+    # PRICE
     # =========================
     try:
-        price = int(str(file.get("price") or 0))
-    except:
+        price = int(file["price"] or 0)
+    except (KeyError, TypeError, ValueError):
         price = 0
 
     # =========================
-    # MEDIA SAFE PARSE
+    # MEDIA
     # =========================
-    media = safe_json(file.get("media"))
+    media = safe_json(file["media"])
 
     if not isinstance(media, list):
         media = []
 
-    if len(media) == 0:
+    if not media:
         await message.answer("❌ FILE KOSONG")
         await state.clear()
         return
 
     first = get_first_media(media)
 
-    if not first or not first.get("file_id"):
+    if not first:
         await message.answer("❌ FILE INVALID")
         await state.clear()
         return
 
-    fid = first["file_id"]
+    fid = first.get("file_id")
+
+    if not fid:
+        await message.answer("❌ FILE INVALID")
+        await state.clear()
+        return
+
     ftype = (first.get("type") or "document").lower()
 
     # =========================
-    # FREE FILE CHECK (FIXED)
+    # FREE FILE
     # =========================
-    is_free = (price <= 0)
-
-    # =========================
-    # FREE FLOW
-    # =========================
-    if is_free:
+    if price <= 0:
 
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -141,43 +145,73 @@ async def receive_code(message: Message, state: FSMContext):
         )
 
         try:
+
             if ftype == "photo":
-                await message.answer_photo(fid, caption=caption, reply_markup=keyboard)
+                await message.answer_photo(
+                    photo=fid,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+
             elif ftype == "video":
-                await message.answer_video(fid, caption=caption, reply_markup=keyboard)
+                await message.answer_video(
+                    video=fid,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+
             else:
-                await message.answer_document(fid, caption=caption, reply_markup=keyboard)
+                await message.answer_document(
+                    document=fid,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
 
         except Exception as e:
-            await message.answer(f"❌ MEDIA ERROR: {e}")
+            await message.answer(
+                f"❌ MEDIA ERROR:\n{e}"
+            )
 
         await state.clear()
         return
 
     # =========================
-    # PAID FLOW
+    # PAID CHECK
     # =========================
     access = await pool.fetchval(
         """
-        SELECT 1 FROM user_access
-        WHERE user_id=$1 AND code=$2 AND paid=true
+        SELECT 1
+        FROM user_access
+        WHERE user_id=$1
+        AND code=$2
+        AND paid=true
         """,
-        user_id, code
+        user_id,
+        code
     )
 
     if not access:
 
         pending = await pool.fetchval(
             """
-            SELECT 1 FROM payments
-            WHERE user_id=$1 AND code=$2 AND status='pending'
+            SELECT 1
+            FROM payments
+            WHERE user_id=$1
+            AND code=$2
+            AND status='pending'
             """,
-            user_id, code
+            user_id,
+            code
         )
 
         if pending:
-            await message.answer("⏳ INVOICE MASIH AKTIF / BELUM LUNAS")
+
+            await message.answer(
+                "⏳ INVOICE MASIH AKTIF / BELUM LUNAS"
+            )
+
         else:
+
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -189,13 +223,16 @@ async def receive_code(message: Message, state: FSMContext):
                 ]
             )
 
-            await message.answer("🔒 FILE BERBAYAR", reply_markup=keyboard)
+            await message.answer(
+                "🔒 FILE BERBAYAR",
+                reply_markup=keyboard
+            )
 
         await state.clear()
         return
 
     # =========================
-    # PAID ACCESS GRANTED
+    # ACCESS GRANTED
     # =========================
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -212,18 +249,36 @@ async def receive_code(message: Message, state: FSMContext):
         "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
         f"🔑 CODE: {code}\n"
         f"📊 FILE: {len(media)}\n"
-        f"💰 TYPE: PAID"
+        "💰 TYPE: PAID"
     )
 
     try:
+
         if ftype == "photo":
-            await message.answer_photo(fid, caption=caption, reply_markup=keyboard)
+            await message.answer_photo(
+                photo=fid,
+                caption=caption,
+                reply_markup=keyboard
+            )
+
         elif ftype == "video":
-            await message.answer_video(fid, caption=caption, reply_markup=keyboard)
+            await message.answer_video(
+                video=fid,
+                caption=caption,
+                reply_markup=keyboard
+            )
+
         else:
-            await message.answer_document(fid, caption=caption, reply_markup=keyboard)
+            await message.answer_document(
+                document=fid,
+                caption=caption,
+                reply_markup=keyboard
+            )
 
     except Exception as e:
-        await message.answer(f"❌ MEDIA ERROR: {e}")
+
+        await message.answer(
+            f"❌ MEDIA ERROR:\n{e}"
+        )
 
     await state.clear()
