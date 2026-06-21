@@ -25,9 +25,12 @@ logging.basicConfig(level=logging.INFO)
 def parse_reference(ref: str):
     if not ref:
         return None, None
+
     try:
-        user_id, code = ref.split("_", 1)
-        return int(user_id), code
+        parts = ref.split("_")
+        user_id = int(parts[0])
+        code = parts[1]   # FIX: ambil hanya code
+        return user_id, code
     except Exception:
         return None, None
 
@@ -50,7 +53,7 @@ def is_paid_status(status: str):
 
 
 # =========================
-# SAFE SEND FUNCTION
+# SAFE SEND
 # =========================
 async def safe_send(bot, user_id, item):
     try:
@@ -62,10 +65,8 @@ async def safe_send(bot, user_id, item):
 
         if t == "document":
             await bot.send_document(user_id, fid)
-
         elif t == "video":
             await bot.send_video(user_id, fid)
-
         else:
             await bot.send_photo(user_id, fid)
 
@@ -108,15 +109,13 @@ async def webhook(
     # =========================
     if "update_id" in data and not x_signature:
         try:
-            logging.info(f"📥 UPDATE => {data}")
+            logging.info(f"📥 TELEGRAM UPDATE => {data}")
 
             update = Update.model_validate(data)
 
-            logging.info("⚡ FEED UPDATE START")
-
             await dp.feed_update(bot, update)
 
-            logging.info("✅ UPDATE PROCESSED")
+            logging.info("✅ TELEGRAM PROCESSED")
 
         except Exception as e:
             logging.exception(f"❌ TELEGRAM ERROR: {e}")
@@ -133,8 +132,19 @@ async def webhook(
         return {"ok": True}
 
     payload = data.get("data") or data
-    status = payload.get("status")
-    ref = payload.get("reference")
+
+    status = (
+        payload.get("status")
+        or data.get("status")
+    )
+
+    ref = (
+        payload.get("external_id")
+        or payload.get("reference")
+    )
+
+    logging.info(f"📦 STATUS: {status}")
+    logging.info(f"📦 REF: {ref}")
 
     if not is_paid_status(status):
         return {"ok": True}
@@ -142,6 +152,7 @@ async def webhook(
     user_id, code = parse_reference(ref)
 
     if not user_id or not code:
+        logging.warning("❌ INVALID REF PARSE")
         return {"ok": True}
 
     pool = await get_pool()
@@ -155,7 +166,7 @@ async def webhook(
         """, user_id, code)
 
         if not payment_id:
-            logging.warning("⚠️ payment_id not found (continue safe)")
+            logging.warning("⚠️ PAYMENT NOT FOUND / ALREADY PAID")
 
         file = await pool.fetchrow("""
             SELECT seller_id, price, media_json
@@ -170,7 +181,6 @@ async def webhook(
         seller_id = file["seller_id"]
         price = int(file["price"] or 0)
 
-        # SAFE PARSE MEDIA
         try:
             media_list = json.loads(file["media_json"]) if isinstance(file["media_json"], str) else (file["media_json"] or [])
         except Exception:
@@ -187,19 +197,19 @@ async def webhook(
         """, seller_id, seller_income)
 
         # =========================
-        # SEND NOTIF USER
+        # NOTIFY USER
         # =========================
         await bot.send_message(
             user_id,
             f"""✅ PEMBAYARAN BERHASIL
 
 📦 Kode : {code}
-📁 Total File : {len(media_list)}
+📁 File : {len(media_list)}
 🔐 Akses aktif"""
         )
 
         # =========================
-        # SEND MEDIA (SAFE LOOP)
+        # SEND FILE
         # =========================
         sent = 0
 
@@ -207,18 +217,13 @@ async def webhook(
             ok = await safe_send(bot, user_id, item)
             if ok:
                 sent += 1
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.3)
 
-        logging.info(f"📤 MEDIA SENT: {sent}/{len(media_list)}")
+        logging.info(f"📤 FILE SENT: {sent}/{len(media_list)}")
 
-    except Exception as e:
-        logging.exception(f"❌ DB ERROR: {e}")
-        return {"ok": True}
-
-    # =========================
-    # GROUP LOG
-    # =========================
-    try:
+        # =========================
+        # GROUP LOG
+        # =========================
         if GROUP_ID:
             await bot.send_message(
                 int(GROUP_ID),
@@ -229,8 +234,10 @@ async def webhook(
 👤 Buyer : {user_id}
 🏷 Seller : {seller_id}"""
             )
+
     except Exception as e:
-        logging.error(f"GROUP ERROR: {e}")
+        logging.exception(f"❌ DB ERROR: {e}")
+        return {"ok": True}
 
     logging.info(f"⚡ DONE {(datetime.utcnow() - start_time).total_seconds():.2f}s")
 
