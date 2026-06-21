@@ -70,12 +70,6 @@ async def webhook(
 
     body = await req.body()
 
-    logging.info(f"BODY = {body.decode(errors='ignore')}")
-    logging.info(f"X_SIGNATURE = {x_signature}")
-
-    # =========================
-    # PARSE JSON
-    # =========================
     try:
         data = json.loads(body.decode())
     except Exception as e:
@@ -86,8 +80,6 @@ async def webhook(
     # TELEGRAM UPDATE
     # =========================
     if "update_id" in data and not x_signature:
-        logging.info("🤖 TELEGRAM UPDATE")
-
         try:
             update = Update.model_validate(data)
             await dp.feed_update(bot, update)
@@ -106,7 +98,6 @@ async def webhook(
         return {"ok": True}
 
     payload = data.get("data") or data
-
     status = payload.get("status")
     ref = payload.get("reference")
 
@@ -119,14 +110,14 @@ async def webhook(
     user_id, code = parse_reference(ref)
 
     if not user_id or not code:
-        logging.warning("❌ INVALID REFERENCE FORMAT")
+        logging.warning("❌ INVALID REFERENCE")
         return {"ok": True}
 
     pool = await get_pool()
 
     try:
         # =========================
-        # PAYMENT UPDATE
+        # PAYMENT UPDATE (NO BLOCK FLOW)
         # =========================
         payment_id = await pool.fetchval("""
             UPDATE payments
@@ -136,10 +127,7 @@ async def webhook(
         """, user_id, code)
 
         if not payment_id:
-            logging.warning("❌ PAYMENT ALREADY PROCESSED / NOT FOUND")
-            return {"ok": True}
-
-        logging.info(f"✅ PAYMENT ID={payment_id}")
+            logging.warning("⚠️ payment_id tidak ditemukan, lanjut tetap proses")
 
         # =========================
         # GET FILE
@@ -166,7 +154,7 @@ async def webhook(
         seller_income = price - fee
 
         # =========================
-        # UPDATE BALANCE
+        # BALANCE UPDATE
         # =========================
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
@@ -192,7 +180,7 @@ async def webhook(
             logging.error(f"SELLER NOTIFY ERROR: {e}")
 
         # =========================
-        # TRANSACTION LOG
+        # TRANSACTION
         # =========================
         await pool.execute("""
             INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
@@ -216,7 +204,7 @@ async def webhook(
         return {"ok": True}
 
     # =========================
-    # SEND USER NOTIF
+    # SEND USER FILES
     # =========================
     try:
         await bot.send_message(
@@ -268,9 +256,6 @@ async def webhook(
     except Exception as e:
         logging.error(f"GROUP ERROR: {e}")
 
-    # =========================
-    # DONE
-    # =========================
     duration = (datetime.utcnow() - start_time).total_seconds()
     logging.info(f"⚡ DONE {duration:.2f}s")
 
