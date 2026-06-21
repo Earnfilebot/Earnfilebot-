@@ -108,10 +108,19 @@ async def webhook(
     # =========================
     if "update_id" in data and not x_signature:
         try:
+            logging.info(f"📥 UPDATE => {data}")
+
             update = Update.model_validate(data)
+
+            logging.info("⚡ FEED UPDATE START")
+
             await dp.feed_update(bot, update)
+
+            logging.info("✅ UPDATE PROCESSED")
+
         except Exception as e:
             logging.exception(f"❌ TELEGRAM ERROR: {e}")
+
         return {"ok": True}
 
     # =========================
