@@ -3,20 +3,14 @@ import asyncio
 import httpx
 
 from config import BAYARGG_API_KEY, BAYARGG_BASE_URL
-from database import get_pool   # ✅ FIX WAJIB
+from database import get_pool
 
 
-# =========================
-# SIMPLE ANTI SPAM CACHE
-# =========================
 _LAST_CALL = {}
 
 
 async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
-    # =========================
-    # NORMALIZE AMOUNT
-    # =========================
     try:
         amount = int(str(amount).replace(".", "").replace(",", ""))
     except Exception:
@@ -27,9 +21,6 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("❌ AMOUNT INVALID:", amount)
         return None
 
-    # =========================
-    # ANTI SPAM
-    # =========================
     key = f"{user_id}:{code}"
     now = time.time()
 
@@ -39,10 +30,9 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     _LAST_CALL[key] = now
 
-    # =========================
-    # UNIQUE ID (WEBHOOK SAFE)
-    # =========================
     external_id = f"{user_id}_{code}_{int(time.time())}"
+
+    print("➡️ CREATE INVOICE START", user_id, code, amount)
 
     url = f"{BAYARGG_BASE_URL}/create-payment.php"
 
@@ -62,9 +52,6 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
 
     r = None
 
-    # =========================
-    # RETRY SYSTEM
-    # =========================
     for i in range(2):
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -87,50 +74,43 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         print("❌ RESPONSE:", r.text)
         return None
 
-    # =========================
-    # PARSE JSON
-    # =========================
     try:
         data = r.json()
     except Exception as e:
         print("❌ INVALID JSON:", repr(e))
-        print("RAW:", r.text)
         return None
+
+    print("➡️ BAYARGG RESPONSE:", data)
 
     if not isinstance(data, dict):
-        print("❌ RESPONSE NOT DICT")
         return None
 
-    # =========================
-    # SUCCESS CHECK
-    # =========================
-    if not (
-        data.get("success")
-        or data.get("status") == "success"
-        or data.get("ok") is True
-    ):
+    if not (data.get("success") or data.get("status") == "success" or data.get("ok") is True):
         print("❌ BAYARGG ERROR:", data)
         return None
 
     result = data.get("data") or data
 
     # =========================
-    # INSERT PAYMENT (FIXED)
+    # FIXED DB INSERT
     # =========================
     try:
-        async with get_pool() as pool:
-            await pool.execute("""
-                INSERT INTO payments(user_id, code, status)
-                VALUES ($1,$2,'pending')
-                ON CONFLICT (user_id, code)
-                DO UPDATE SET status='pending'
-            """, user_id, code)
+        pool = await get_pool()
+
+        await pool.execute(
+            """
+            INSERT INTO payments(user_id, code, status)
+            VALUES ($1,$2,'pending')
+            ON CONFLICT (user_id, code)
+            DO UPDATE SET status='pending'
+            """,
+            user_id,
+            code
+        )
+
     except Exception as e:
         print("❌ DB INSERT ERROR:", repr(e))
 
-    # =========================
-    # PAYMENT URL FALLBACK
-    # =========================
     payment_url = (
         result.get("payment_url")
         or result.get("checkout_url")
@@ -148,8 +128,5 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
     }
 
 
-# =========================
-# WRAPPER
-# =========================
 async def create_invoice(amount: int, code: str, user_id: int):
     return await create_bayargg_invoice(amount, code, user_id)
