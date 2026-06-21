@@ -50,6 +50,33 @@ def is_paid_status(status: str):
 
 
 # =========================
+# SAFE SEND FUNCTION
+# =========================
+async def safe_send(bot, user_id, item):
+    try:
+        t = item.get("type")
+        fid = item.get("file_id")
+
+        if not fid:
+            return False
+
+        if t == "document":
+            await bot.send_document(user_id, fid)
+
+        elif t == "video":
+            await bot.send_video(user_id, fid)
+
+        else:
+            await bot.send_photo(user_id, fid)
+
+        return True
+
+    except Exception as e:
+        logging.error(f"❌ SEND FAIL: {repr(e)}")
+        return False
+
+
+# =========================
 # WEBHOOK
 # =========================
 @router.post("/webhook")
@@ -85,7 +112,6 @@ async def webhook(
             await dp.feed_update(bot, update)
         except Exception as e:
             logging.exception(f"❌ TELEGRAM ERROR: {e}")
-
         return {"ok": True}
 
     # =========================
@@ -101,24 +127,17 @@ async def webhook(
     status = payload.get("status")
     ref = payload.get("reference")
 
-    logging.info(f"STATUS={status} REF={ref}")
-
     if not is_paid_status(status):
-        logging.info("⛔ STATUS NOT PAID")
         return {"ok": True}
 
     user_id, code = parse_reference(ref)
 
     if not user_id or not code:
-        logging.warning("❌ INVALID REFERENCE")
         return {"ok": True}
 
     pool = await get_pool()
 
     try:
-        # =========================
-        # PAYMENT UPDATE (NO BLOCK FLOW)
-        # =========================
         payment_id = await pool.fetchval("""
             UPDATE payments
             SET status='paid'
@@ -127,11 +146,8 @@ async def webhook(
         """, user_id, code)
 
         if not payment_id:
-            logging.warning("⚠️ payment_id tidak ditemukan, lanjut tetap proses")
+            logging.warning("⚠️ payment_id not found (continue safe)")
 
-        # =========================
-        # GET FILE
-        # =========================
         file = await pool.fetchrow("""
             SELECT seller_id, price, media_json
             FROM files
@@ -145,6 +161,7 @@ async def webhook(
         seller_id = file["seller_id"]
         price = int(file["price"] or 0)
 
+        # SAFE PARSE MEDIA
         try:
             media_list = json.loads(file["media_json"]) if isinstance(file["media_json"], str) else (file["media_json"] or [])
         except Exception:
@@ -153,91 +170,41 @@ async def webhook(
         fee = int(price * 0.10)
         seller_income = price - fee
 
-        # =========================
-        # BALANCE UPDATE
-        # =========================
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
-            VALUES ($1, $2)
+            VALUES ($1,$2)
             ON CONFLICT (telegram_id)
             DO UPDATE SET balance = users.balance + EXCLUDED.balance
         """, seller_id, seller_income)
 
         # =========================
-        # SELLER NOTIFY
+        # SEND NOTIF USER
         # =========================
-        try:
-            await bot.send_message(
-                seller_id,
-                f"""💰 PENJUALAN BERHASIL
-
-📦 Produk : {code}
-💸 Harga : Rp {price:,}
-📊 Fee : Rp {fee:,}
-💰 Diterima : Rp {seller_income:,}"""
-            )
-        except Exception as e:
-            logging.error(f"SELLER NOTIFY ERROR: {e}")
-
-        # =========================
-        # TRANSACTION
-        # =========================
-        await pool.execute("""
-            INSERT INTO transactions(user_id, seller_id, code, amount, fee, status)
-            VALUES($1,$2,$3,$4,$5,'paid')
-            ON CONFLICT DO NOTHING
-        """, user_id, seller_id, code, price, fee)
-
-        # =========================
-        # ACCESS GRANT
-        # =========================
-        await pool.execute("""
-            INSERT INTO user_access(user_id, code, paid)
-            VALUES($1,$2,true)
-            ON CONFLICT DO NOTHING
-        """, user_id, code)
-
-        logging.info("✅ ACCESS GRANTED")
-
-    except Exception as e:
-        logging.exception(f"❌ DB ERROR: {e}")
-        return {"ok": True}
-
-    # =========================
-    # SEND USER FILES
-    # =========================
-    try:
         await bot.send_message(
             user_id,
             f"""✅ PEMBAYARAN BERHASIL
 
 📦 Kode : {code}
 📁 Total File : {len(media_list)}
-🔐 Akses diberikan"""
+🔐 Akses aktif"""
         )
 
+        # =========================
+        # SEND MEDIA (SAFE LOOP)
+        # =========================
+        sent = 0
+
         for item in media_list:
-            try:
-                t = item.get("type")
-                fid = item.get("file_id")
+            ok = await safe_send(bot, user_id, item)
+            if ok:
+                sent += 1
+            await asyncio.sleep(0.4)
 
-                if not fid:
-                    continue
-
-                if t == "document":
-                    await bot.send_document(user_id, fid)
-                elif t == "video":
-                    await bot.send_video(user_id, fid)
-                else:
-                    await bot.send_photo(user_id, fid)
-
-                await asyncio.sleep(0.3)
-
-            except Exception as e:
-                logging.error(f"SEND FILE ERROR: {e}")
+        logging.info(f"📤 MEDIA SENT: {sent}/{len(media_list)}")
 
     except Exception as e:
-        logging.exception(f"FILE SEND ERROR: {e}")
+        logging.exception(f"❌ DB ERROR: {e}")
+        return {"ok": True}
 
     # =========================
     # GROUP LOG
@@ -256,7 +223,6 @@ async def webhook(
     except Exception as e:
         logging.error(f"GROUP ERROR: {e}")
 
-    duration = (datetime.utcnow() - start_time).total_seconds()
-    logging.info(f"⚡ DONE {duration:.2f}s")
+    logging.info(f"⚡ DONE {(datetime.utcnow() - start_time).total_seconds():.2f}s")
 
     return {"ok": True}
