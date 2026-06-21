@@ -4,7 +4,14 @@ import asyncio
 from config import DATABASE_URL
 
 _pool = None
-_lock = asyncio.Lock()
+_lock = None
+
+
+def _get_lock():
+    global _lock
+    if _lock is None:
+        _lock = asyncio.Lock()
+    return _lock
 
 
 # ========================
@@ -13,8 +20,8 @@ _lock = asyncio.Lock()
 async def get_pool():
     global _pool
 
-    async with _lock:
-        if _pool is None or _pool._closed:
+    async with _get_lock():
+        if _pool is None:
             logging.info("🔌 Connecting to database...")
 
             _pool = await asyncpg.create_pool(
@@ -32,8 +39,9 @@ async def get_pool():
 async def close_db():
     global _pool
 
-    if _pool and not _pool._closed:
+    if _pool is not None:
         await _pool.close()
+        _pool = None
         logging.info("🔌 Database closed")
 
 
@@ -97,16 +105,9 @@ async def fetchval(query, *args, retry=1):
 
 
 # ========================
-# TRANSACTION (SUPER IMPORTANT)
+# TRANSACTION
 # ========================
 async def transaction(queries: list):
-    """
-    queries = [
-        ("QUERY SQL", arg1, arg2),
-        ("QUERY SQL", arg1)
-    ]
-    """
-
     pool = await get_pool()
 
     async with pool.acquire() as conn:
