@@ -15,7 +15,6 @@ from config import GROUP_ID
 router = APIRouter()
 
 BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
-
 logging.basicConfig(level=logging.INFO)
 
 
@@ -27,10 +26,8 @@ def parse_reference(ref: str):
         return None, None
 
     try:
-        parts = ref.split("_")
-        user_id = int(parts[0])
-        code = parts[1]   # FIX: ambil hanya code
-        return user_id, code
+        user_id, code = ref.split("_", 1)
+        return int(user_id), code
     except Exception:
         return None, None
 
@@ -133,20 +130,21 @@ async def webhook(
 
     payload = data.get("data") or data
 
-    status = (
-        payload.get("status")
-        or data.get("status")
-    )
-
-    ref = (
-        payload.get("external_id")
-        or payload.get("reference")
-    )
+    status = payload.get("status") or data.get("status")
+    ref = payload.get("external_id") or payload.get("reference")
 
     logging.info(f"📦 STATUS: {status}")
     logging.info(f"📦 REF: {ref}")
 
+    # =========================
+    # VALIDATION
+    # =========================
+    if not status:
+        logging.warning("❌ NO STATUS FROM BAYARGG")
+        return {"ok": True}
+
     if not is_paid_status(status):
+        logging.info(f"⏳ NOT PAID STATUS: {status}")
         return {"ok": True}
 
     user_id, code = parse_reference(ref)
@@ -212,7 +210,6 @@ async def webhook(
         # SEND FILE
         # =========================
         sent = 0
-
         for item in media_list:
             ok = await safe_send(bot, user_id, item)
             if ok:
