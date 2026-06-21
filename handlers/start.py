@@ -104,13 +104,19 @@ async def process_start(message, loading, user_id, username):
 # =========================
 async def render_home_fast(bot, message, user_id):
 
+    logging.info("➡️ ENTER render_home_fast")
+
     try:
         pool = await get_pool()
+
+        logging.info("➡️ BEFORE DB QUERY")
 
         user = await pool.fetchrow(
             "SELECT balance FROM users WHERE telegram_id = $1",
             user_id
         )
+
+        logging.info(f"➡️ DB RESULT: {user}")
 
         balance = 0
         if user and user.get("balance"):
@@ -126,11 +132,16 @@ async def render_home_fast(bot, message, user_id):
         )
 
         try:
+            logging.info("➡️ TRY EDIT MESSAGE")
+
             await message.edit_text(text, reply_markup=home_kb())
-        except TelegramBadRequest:
-            await bot.send_message(user_id, text, reply_markup=home_kb())
+
+            logging.info("✅ EDIT SUCCESS")
+
         except Exception as e:
             logging.warning(f"EDIT FAIL: {e}")
+            logging.info("➡️ FALLBACK SEND_MESSAGE")
+
             await bot.send_message(user_id, text, reply_markup=home_kb())
 
     except Exception as e:
