@@ -33,16 +33,7 @@ def clean_file_id(fid):
 def normalize_type(ftype):
     if not ftype:
         return "document"
-
-    ftype = ftype.lower()
-
-    if ftype == "photo":
-        return "photo"
-
-    if ftype == "video":
-        return "video"
-
-    return "document"
+    return ftype.lower()
 
 
 # =========================
@@ -63,13 +54,7 @@ def build_page_buttons(code: str, page: int, total: int):
     end = min(total, page + 2)
 
     for i in range(start, end + 1):
-
-        if i == page:
-            emoji = "🟡"
-        elif i < page:
-            emoji = "🟢"
-        else:
-            emoji = "🔴"
+        emoji = "🟡" if i == page else ("🟢" if i < page else "🔴")
 
         row.append(
             InlineKeyboardButton(
@@ -89,25 +74,26 @@ def build_page_buttons(code: str, page: int, total: int):
 
 
 # =========================
-# PAGE HANDLER
+# HANDLER
 # =========================
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
 
     user_id = call.from_user.id
 
+    # =========================
+    # PARSE SAFE
+    # =========================
     try:
         _, code, page = call.data.split(":")
         page = int(page)
-
     except Exception:
-        return await call.answer(
-            "❌ Invalid data",
-            show_alert=True
-        )
+        return await call.answer("❌ Invalid data", show_alert=True)
 
+    # =========================
+    # COOLDOWN
+    # =========================
     now = time.time()
-
     if now - CLICK_COOLDOWN[user_id] < 0.5:
         return await call.answer("⏳ Slow down")
 
@@ -117,44 +103,40 @@ async def page_handler(call: CallbackQuery):
 
         pool = await get_pool()
 
+        # =========================
+        # GET FILE
+        # =========================
         file = await pool.fetchrow(
-            """
-            SELECT *
-            FROM files
-            WHERE code = $1
-            """,
+            "SELECT * FROM files WHERE code=$1",
             code
         )
 
         if not file:
-            return await call.answer(
-                "❌ File tidak ditemukan",
-                show_alert=True
-            )
+            return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
+        # =========================
+        # ACCESS CHECK
+        # =========================
         price = int(file.get("price") or 0)
 
         if price > 0:
-
             access = await pool.fetchval(
                 """
                 SELECT 1
                 FROM user_access
-                WHERE user_id = $1
-                AND code = $2
-                AND paid = true
+                WHERE user_id=$1 AND code=$2 AND paid=true
                 """,
                 user_id,
                 code
             )
 
             if not access:
-                return await call.answer(
-                    "🔒 Anda belum membeli file ini",
-                    show_alert=True
-                )
+                return await call.answer("🔒 Belum membeli file ini", show_alert=True)
 
-        media = file.get("media") or []
+        # =========================
+        # MEDIA PARSE
+        # =========================
+        media = file.get("media_json") or file.get("media") or []
 
         if isinstance(media, str):
             try:
@@ -163,21 +145,19 @@ async def page_handler(call: CallbackQuery):
                 media = []
 
         if not media:
-            return await call.answer(
-                "❌ File kosong",
-                show_alert=True
-            )
+            return await call.answer("❌ File kosong", show_alert=True)
 
-        total_page = max(
-            1,
-            (len(media) + PAGE_SIZE - 1) // PAGE_SIZE
-        )
+        # =========================
+        # PAGE CALC
+        # =========================
+        total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(1, min(page, total_page))
 
-        page = max(
-            1,
-            min(page, total_page)
-        )
+        chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
 
+        # =========================
+        # CAPTION
+        # =========================
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
             "━━━━━━━━━━━━━━━\n\n"
@@ -188,11 +168,7 @@ async def page_handler(call: CallbackQuery):
 
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                build_page_buttons(
-                    code,
-                    page,
-                    total_page
-                ),
+                build_page_buttons(code, page, total_page),
                 [
                     InlineKeyboardButton(
                         text="📢 Channel Update",
@@ -206,27 +182,21 @@ async def page_handler(call: CallbackQuery):
             ]
         )
 
-        updated = False
-
+        # =========================
+        # EDIT MESSAGE SAFE
+        # =========================
         try:
             await call.message.edit_caption(
                 caption=caption,
                 reply_markup=keyboard
             )
-            updated = True
-
         except TelegramBadRequest:
-            pass
-
-        if not updated:
             try:
                 await call.message.edit_text(
                     text=caption,
                     reply_markup=keyboard
                 )
-                updated = True
-
             except TelegramBadRequest:
-                pass
+                return await call.answer("❌ Gagal update message", show_alert=True)
 
         await call.answer()
