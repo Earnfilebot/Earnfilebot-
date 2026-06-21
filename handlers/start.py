@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart
@@ -32,7 +33,11 @@ async def start_cmd(message: Message, state: FSMContext):
     user_id = message.from_user.id
     username = message.from_user.username or "unknown"
 
-    loading = await message.answer("⚡ Loading...")
+    try:
+        loading = await message.answer("⚡ Loading...")
+    except Exception as e:
+        logging.exception(f"FAILED SEND LOADING: {e}")
+        return
 
     try:
         await process_start(message, loading, user_id, username)
@@ -40,8 +45,8 @@ async def start_cmd(message: Message, state: FSMContext):
         logging.exception(f"START ERROR: {e}")
         try:
             await loading.edit_text("❌ SYSTEM ERROR START")
-        except:
-            pass
+        except Exception as e2:
+            logging.warning(f"FAILED EDIT ERROR MSG: {e2}")
 
 
 # =========================
@@ -52,12 +57,15 @@ async def process_start(message, loading, user_id, username):
     bot = message.bot
 
     try:
+        logging.info(f"START PROCESS | USER: {user_id}")
+
         # FORCE SUB CHECK
         try:
             sub = await check_force_sub(bot, user_id)
+            logging.info(f"FORCE SUB RESULT: {sub}")
         except Exception as e:
             logging.exception(f"FORCE SUB ERROR: {e}")
-            sub = True
+            sub = True  # fallback biar tidak block user
 
         if not sub:
             try:
@@ -66,7 +74,7 @@ async def process_start(message, loading, user_id, username):
                     reply_markup=join_kb()
                 )
             except Exception as e:
-                logging.exception(f"EDIT JOIN ERROR: {e}")
+                logging.warning(f"EDIT JOIN FAIL: {e}")
             return
 
         pool = await get_pool()
@@ -87,8 +95,9 @@ async def process_start(message, loading, user_id, username):
         logging.exception(f"PROCESS START ERROR: {e}")
         try:
             await loading.edit_text("❌ SYSTEM ERROR")
-        except:
-            pass
+        except Exception as e2:
+            logging.warning(f"FAILED EDIT ERROR: {e2}")
+
 
 # =========================
 # HOME
@@ -103,7 +112,9 @@ async def render_home_fast(bot, message, user_id):
             user_id
         )
 
-        balance = user["balance"] if user and user["balance"] else 0
+        balance = 0
+        if user and user.get("balance"):
+            balance = user["balance"]
 
         text = (
             "EARNFILEBOX\n\n"
@@ -116,12 +127,16 @@ async def render_home_fast(bot, message, user_id):
 
         try:
             await message.edit_text(text, reply_markup=home_kb())
+        except TelegramBadRequest:
+            await bot.send_message(user_id, text, reply_markup=home_kb())
         except Exception as e:
             logging.warning(f"EDIT FAIL: {e}")
             await bot.send_message(user_id, text, reply_markup=home_kb())
 
     except Exception as e:
         logging.exception(f"HOME ERROR: {e}")
+
+
 # =========================
 # CALLBACK HOME
 # =========================
@@ -132,11 +147,21 @@ async def back_home(call: CallbackQuery, state: FSMContext):
 
     user_id = call.from_user.id
 
-    if not await check_force_sub(call.bot, user_id):
-        await call.message.answer(
-            "❌ JOIN REQUIRED",
-            reply_markup=join_kb()
-        )
+    try:
+        ok = await check_force_sub(call.bot, user_id)
+    except Exception as e:
+        logging.exception(f"FORCE SUB CALLBACK ERROR: {e}")
+        ok = True
+
+    if not ok:
+        try:
+            await call.message.answer(
+                "❌ JOIN REQUIRED",
+                reply_markup=join_kb()
+            )
+        except Exception as e:
+            logging.warning(f"JOIN MSG FAIL: {e}")
+
         return await call.answer()
 
     await render_home_fast(call.bot, call.message, user_id)
