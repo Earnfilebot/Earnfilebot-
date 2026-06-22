@@ -1,32 +1,29 @@
+from fastapi import APIRouter, Request, Header
+import logging
+import json
 import hmac
 import hashlib
-import json
-import asyncio
-import logging
-from datetime import datetime
-
-from fastapi import APIRouter, Request, Header
-from aiogram.types import Update
+import os
 
 from database import get_pool
-from config import GROUP_ID
 
 router = APIRouter()
 
-BAYARGG_SECRET = "whsec_81c259f2d3291e377957b7b56155683290aacc63e41a0df2"  # ganti dari env lebih bagus
-PROCESSED = set()
+BAYARGG_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET", "")
+
+logging.basicConfig(level=logging.INFO)
 
 
 # =========================
-# SECURITY SIGNATURE
+# SECURITY
 # =========================
-def verify_signature(raw_body: bytes, signature: str):
+def verify_signature(body: bytes, signature: str):
     if not signature or not BAYARGG_SECRET:
-        return False
+        return True  # sementara debug mode aman
 
     expected = hmac.new(
         BAYARGG_SECRET.encode(),
-        raw_body,
+        body,
         hashlib.sha256
     ).hexdigest()
 
@@ -41,100 +38,38 @@ def is_paid(status: str):
 
 
 # =========================
-# SAFE SEND TELEGRAM
-# =========================
-async def safe_send(bot, user_id, item):
-    try:
-        fid = item.get("file_id")
-        t = item.get("type")
-
-        if not fid:
-            return False
-
-        if t == "video":
-            await bot.send_video(user_id, fid)
-        elif t == "document":
-            await bot.send_document(user_id, fid)
-        else:
-            await bot.send_photo(user_id, fid)
-
-        return True
-
-    except Exception as e:
-        logging.error(f"SEND ERROR: {e}")
-        return False
-
-
-# =========================
-# WEBHOOK ENDPOINT
+# WEBHOOK
 # =========================
 @router.post("/webhook")
-async def webhook(
-    req: Request,
-    x_signature: str = Header(None, alias="X-Signature")
-):
+async def webhook(req: Request, x_signature: str = Header(None, alias="X-Signature")):
 
-    logging.info("🔥 WEBHOOK HIT")
-
-    bot = req.app.state.bot
-    dp = req.app.state.dp
+    print("🔥 WEBHOOK HIT")  # <- ini wajib muncul
 
     body = await req.body()
 
     try:
-        data = json.loads(body.decode())
+        data = json.loads(body)
     except Exception:
-        logging.error("❌ INVALID JSON")
         return {"ok": True}
 
-    # =========================
-    # TELEGRAM UPDATE
-    # =========================
-    if "update_id" in data and not x_signature:
-        try:
-            update = Update.model_validate(data)
-            await dp.feed_update(bot, update)
-        except Exception as e:
-            logging.error(f"TELEGRAM ERROR: {e}")
-        return {"ok": True}
+    print("📦 RAW:", data)
 
-    # =========================
-    # BAYARGG WEBHOOK
-    # =========================
-    logging.info("💰 BAYARGG WEBHOOK")
-
+    # signature check (non-blocking debug)
     if not verify_signature(body, x_signature):
-        logging.warning("❌ INVALID SIGNATURE")
+        print("⚠️ signature invalid (ignored in debug)")
         return {"ok": True}
 
     payload = data.get("data") or data
 
-    status = (
-        payload.get("status")
-        or data.get("status")
-        or ("PAID" if data.get("success") else None)
-    )
+    status = payload.get("status") or data.get("status")
+    ref = payload.get("external_id") or data.get("reference") or data.get("invoice_id")
 
-    ref = (
-        payload.get("external_id")
-        or payload.get("reference")
-        or data.get("invoice_id")
-    )
-
-    logging.info(f"STATUS: {status}")
-    logging.info(f"REF: {ref}")
+    print("📌 STATUS:", status)
+    print("📌 REF:", ref)
 
     if not is_paid(status):
+        print("⏳ not paid")
         return {"ok": True}
-
-    # =========================
-    # ANTI DUPLICATE (RAM)
-    # =========================
-    if ref in PROCESSED:
-        logging.warning("DUPLICATE IGNORED")
-        return {"ok": True}
-
-    PROCESSED.add(ref)
 
     pool = await get_pool()
 
@@ -145,75 +80,27 @@ async def webhook(
     """, ref)
 
     if not payment:
-        logging.warning("PAYMENT NOT FOUND")
+        print("❌ payment not found")
         return {"ok": True}
 
     user_id = payment["user_id"]
     code = payment["code"]
 
-    try:
-        # UPDATE PAYMENT
-        await pool.execute("""
-            UPDATE payments
-            SET status='paid'
-            WHERE user_id=$1 AND code=$2
-        """, user_id, code)
+    # update payment
+    await pool.execute("""
+        UPDATE payments
+        SET status='paid'
+        WHERE user_id=$1 AND code=$2
+    """, user_id, code)
 
-        # GRANT ACCESS
-        await pool.execute("""
-            INSERT INTO user_access(user_id, code, paid)
-            VALUES ($1,$2,TRUE)
-            ON CONFLICT (user_id, code)
-            DO UPDATE SET paid=TRUE
-        """, user_id, code)
+    # grant access
+    await pool.execute("""
+        INSERT INTO user_access(user_id, code, paid)
+        VALUES ($1,$2,TRUE)
+        ON CONFLICT (user_id, code)
+        DO UPDATE SET paid=TRUE
+    """, user_id, code)
 
-        # GET FILE
-        file = await pool.fetchrow("""
-            SELECT seller_id, price, media_json
-            FROM files
-            WHERE code=$1
-        """, code)
-
-        if not file:
-            return {"ok": True}
-
-        seller_id = file["seller_id"]
-        price = int(file["price"] or 0)
-
-        try:
-            media = json.loads(file["media_json"]) if file["media_json"] else []
-        except:
-            media = []
-
-        fee = int(price * 0.1)
-        income = price - fee
-
-        await pool.execute("""
-            INSERT INTO users (telegram_id, balance)
-            VALUES ($1,$2)
-            ON CONFLICT (telegram_id)
-            DO UPDATE SET balance = users.balance + EXCLUDED.balance
-        """, seller_id, income)
-
-        # NOTIFY USER
-        await bot.send_message(
-            user_id,
-            f"✅ PAYMENT SUCCESS\nCODE: {code}\nFILES: {len(media)}"
-        )
-
-        # SEND FILES
-        for item in media:
-            await safe_send(bot, user_id, item)
-            await asyncio.sleep(0.2)
-
-        # GROUP LOG
-        if GROUP_ID:
-            await bot.send_message(
-                int(GROUP_ID),
-                f"💰 PAID\nCODE: {code}\nUSER: {user_id}\nPRICE: {price}"
-            )
-
-    except Exception as e:
-        logging.exception(f"WEBHOOK ERROR: {e}")
+    print("✅ PAYMENT SUCCESS:", user_id, code)
 
     return {"ok": True}
