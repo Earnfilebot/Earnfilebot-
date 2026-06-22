@@ -13,7 +13,7 @@ from config import GROUP_ID
 
 router = APIRouter()
 
-BAYARGG_SECRET = "ISI_SECRET_KAMU"  # ganti dari env lebih bagus
+BAYARGG_SECRET = "whsec_81c259f2d3291e377957b7b56155683290aacc63e41a0df2"  # ganti dari env lebih bagus
 PROCESSED = set()
 
 
