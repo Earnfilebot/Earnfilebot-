@@ -76,23 +76,20 @@ def build_page_buttons(code: str, page: int, total: int):
 # =========================
 # HANDLER
 # =========================
+from aiogram.types import InputMediaPhoto, InputMediaVideo, InputMediaDocument
+
+
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
 
     user_id = call.from_user.id
 
-    # =========================
-    # PARSE SAFE
-    # =========================
     try:
         _, code, page = call.data.split(":")
         page = int(page)
     except Exception:
         return await call.answer("❌ Invalid data", show_alert=True)
 
-    # =========================
-    # COOLDOWN
-    # =========================
     now = time.time()
     if now - CLICK_COOLDOWN[user_id] < 0.5:
         return await call.answer("⏳ Slow down")
@@ -111,9 +108,6 @@ async def page_handler(call: CallbackQuery):
         if not file:
             return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
-        # =========================
-        # ACCESS CHECK
-        # =========================
         price = int(file.get("price") or 0)
 
         if price > 0:
@@ -130,9 +124,6 @@ async def page_handler(call: CallbackQuery):
             if not access:
                 return await call.answer("🔒 Belum membeli file ini", show_alert=True)
 
-        # =========================
-        # MEDIA PARSE
-        # =========================
         media = file.get("media_json") or file.get("media") or []
 
         if isinstance(media, str):
@@ -144,41 +135,17 @@ async def page_handler(call: CallbackQuery):
         if not media:
             return await call.answer("❌ File kosong", show_alert=True)
 
-        # =========================
-        # PAGE CALC
-        # =========================
         total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
         page = max(1, min(page, total_page))
 
         chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
 
-        # =========================
-        # SEND MEDIA (INI YANG KURANG SEBELUMNYA)
-        # =========================
-        for item in chunk:
+        # ambil 1 media untuk ditampilkan
+        item = chunk[0]
 
-            fid = clean_file_id(item.get("file_id"))
-            ftype = normalize_type(item.get("type"))
+        fid = clean_file_id(item.get("file_id"))
+        ftype = normalize_type(item.get("type"))
 
-            if not fid:
-                continue
-
-            try:
-                if ftype == "photo":
-                    await call.message.answer_photo(photo=fid)
-
-                elif ftype == "video":
-                    await call.message.answer_video(video=fid)
-
-                else:
-                    await call.message.answer_document(document=fid)
-
-            except Exception as e:
-                print("SEND ERROR:", e)
-
-        # =========================
-        # CAPTION
-        # =========================
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
             "━━━━━━━━━━━━━━━\n\n"
@@ -203,18 +170,26 @@ async def page_handler(call: CallbackQuery):
             ]
         )
 
-        # =========================
-        # UPDATE MESSAGE
-        # =========================
         try:
-            await call.message.edit_caption(
-                caption=caption,
-                reply_markup=keyboard
-            )
+            if ftype == "photo":
+                await call.message.edit_media(
+                    InputMediaPhoto(media=fid, caption=caption),
+                    reply_markup=keyboard
+                )
+
+            elif ftype == "video":
+                await call.message.edit_media(
+                    InputMediaVideo(media=fid, caption=caption),
+                    reply_markup=keyboard
+                )
+
+            else:
+                await call.message.edit_media(
+                    InputMediaDocument(media=fid, caption=caption),
+                    reply_markup=keyboard
+                )
+
         except TelegramBadRequest:
-            await call.message.edit_text(
-                text=caption,
-                reply_markup=keyboard
-            )
+            return await call.answer("❌ Gagal update media", show_alert=True)
 
         await call.answer()
