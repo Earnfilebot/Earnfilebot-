@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 import logging
 
 from bot import bot, dp
-from webhook.bayargg import router as bayargg_router
 from database import get_pool, close_db
+from webhook.bayargg import router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -13,25 +13,30 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI):
     logging.info("🚀 START APP")
 
-    await get_pool()
+    try:
+        await get_pool()
+    except Exception as e:
+        logging.error(f"DB ERROR: {e}")
 
     app.state.bot = bot
     app.state.dp = dp
 
-    logging.info("🤖 BOT READY")
+    logging.info("🤖 READY")
 
     yield
 
     await close_db()
     await bot.session.close()
 
-    logging.info("🛑 STOP")
-
 
 app = FastAPI(lifespan=lifespan)
 
-# webhook wajib di-load
-app.include_router(bayargg_router)
+app.include_router(router)
+
+
+@app.get("/")
+async def root():
+    return {"ok": True}
 
 
 @app.get("/health")
