@@ -13,31 +13,29 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI):
     logging.info("🚀 STARTING APP")
 
-    try:
-        await get_pool()
-        app.state.bot = bot
-        app.state.dp = dp
-        logging.info("✅ BOT READY")
+    await get_pool()
 
-    except Exception as e:
-        logging.exception(f"❌ STARTUP ERROR: {e}")
+    app.state.bot = bot
+    app.state.dp = dp
+
+    logging.info("✅ BOT READY")
 
     yield
 
-    logging.info("🛑 STOPPING APP")
     await close_db()
     await bot.session.close()
+
+    logging.info("🛑 STOPPED")
 
 
 app = FastAPI(lifespan=lifespan)
 
-app.include_router(bayargg_router)
-
+# 🔥 WAJIB: include router DI SINI
+app.include_router(bayargg_router, prefix="")
 
 @app.get("/")
 async def root():
     return {"status": "ok"}
-
 
 @app.get("/health")
 async def health():
