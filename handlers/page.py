@@ -4,12 +4,15 @@ import time
 from collections import defaultdict
 
 from aiogram import Router, F
+
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    InputMediaPhoto,
+    InputMediaVideo,
+    InputMediaDocument
 )
-from aiogram.exceptions import TelegramBadRequest
 
 from database import get_pool
 
@@ -76,9 +79,6 @@ def build_page_buttons(code: str, page: int, total: int):
 # =========================
 # HANDLER
 # =========================
-from aiogram.types import InputMediaPhoto, InputMediaVideo, InputMediaDocument
-
-
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
 
@@ -91,6 +91,7 @@ async def page_handler(call: CallbackQuery):
         return await call.answer("❌ Invalid data", show_alert=True)
 
     now = time.time()
+
     if now - CLICK_COOLDOWN[user_id] < 0.5:
         return await call.answer("⏳ Slow down")
 
@@ -111,11 +112,14 @@ async def page_handler(call: CallbackQuery):
         price = int(file.get("price") or 0)
 
         if price > 0:
+
             access = await pool.fetchval(
                 """
                 SELECT 1
                 FROM user_access
-                WHERE user_id=$1 AND code=$2 AND paid=true
+                WHERE user_id=$1
+                AND code=$2
+                AND paid=true
                 """,
                 user_id,
                 code
@@ -139,12 +143,6 @@ async def page_handler(call: CallbackQuery):
         page = max(1, min(page, total_page))
 
         chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
-
-        # ambil 1 media untuk ditampilkan
-        item = chunk[0]
-
-        fid = clean_file_id(item.get("file_id"))
-        ftype = normalize_type(item.get("type"))
 
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
@@ -170,26 +168,39 @@ async def page_handler(call: CallbackQuery):
             ]
         )
 
-        try:
+        album = []
+
+        for index, item in enumerate(chunk):
+
+            fid = clean_file_id(item.get("file_id"))
+            ftype = normalize_type(item.get("type"))
+
+            if not fid:
+                continue
+
+            cap = caption if index == 0 else None
+
             if ftype == "photo":
-                await call.message.edit_media(
-                    InputMediaPhoto(media=fid, caption=caption),
-                    reply_markup=keyboard
-                )
+                album.append(InputMediaPhoto(media=fid, caption=cap))
 
             elif ftype == "video":
-                await call.message.edit_media(
-                    InputMediaVideo(media=fid, caption=caption),
-                    reply_markup=keyboard
-                )
+                album.append(InputMediaVideo(media=fid, caption=cap))
 
             else:
-                await call.message.edit_media(
-                    InputMediaDocument(media=fid, caption=caption),
-                    reply_markup=keyboard
-                )
+                album.append(InputMediaDocument(media=fid, caption=cap))
 
-        except TelegramBadRequest:
-            return await call.answer("❌ Gagal update media", show_alert=True)
+        if not album:
+            return await call.answer("❌ Tidak ada media valid", show_alert=True)
+
+        try:
+            await call.message.answer_media_group(media=album)
+
+            await call.message.answer(
+                f"📦 PAGE {page}/{total_page}",
+                reply_markup=keyboard
+            )
+
+        except Exception as e:
+            return await call.answer(f"❌ {e}", show_alert=True)
 
         await call.answer()
