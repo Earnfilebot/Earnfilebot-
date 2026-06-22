@@ -35,6 +35,9 @@ app = FastAPI(lifespan=lifespan)
 
 app.include_router(bayargg_router)
 
+@app.get("/health")
+async def health():
+    return {"ok": True}
 
 @app.get("/")
 async def root():
