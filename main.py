@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+print("STARTED")
 
+from fastapi import FastAPI
 app = FastAPI()
 
-@app.get("/health")
-async def health():
+@app.get("/")
+def root():
     return {"ok": True}
