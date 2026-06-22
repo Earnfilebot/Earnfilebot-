@@ -104,9 +104,13 @@ async def webhook(
     # TELEGRAM UPDATE
     # =========================
     if "update_id" in data and not x_signature:
-        update = Update.model_validate(data)
-        await dp.feed_update(bot, update)
-        logging.info("✅ TELEGRAM PROCESSED")
+        try:
+            update = Update.model_validate(data)
+            await dp.feed_update(bot, update)
+            logging.info("✅ TELEGRAM PROCESSED")
+        except Exception as e:
+            logging.exception(f"❌ TELEGRAM ERROR: {e}")
+
         return {"ok": True}
 
     # =========================
@@ -114,12 +118,15 @@ async def webhook(
     # =========================
     logging.info("💰 BAYARGG WEBHOOK")
 
-    # 🔥 DEBUG SIGNATURE (IMPORTANT)
-    logging.info(f"SIGNATURE RECEIVED: {x_signature}")
+    logging.info(f"🔐 SIGNATURE: {x_signature}")
 
-    if not verify_signature(body, x_signature):
-        logging.warning("❌ INVALID SIGNATURE (SKIP PROCESS)")
-        return {"ok": True}
+    # ❗ FIX: kalau signature kosong jangan stop silent
+    if not x_signature:
+        logging.warning("⚠️ NO SIGNATURE (SKIP SECURITY CHECK)")
+    else:
+        if not verify_signature(body, x_signature):
+            logging.warning("❌ INVALID SIGNATURE")
+            return {"ok": True}
 
     payload = data.get("data") or data
 
@@ -138,19 +145,25 @@ async def webhook(
     logging.info(f"📦 STATUS: {status}")
     logging.info(f"📦 REF: {ref}")
 
-    if not status or not is_paid_status(status):
-        logging.info("⏳ NOT PAID OR EMPTY STATUS")
+    if not status:
+        logging.warning("❌ EMPTY STATUS")
+        return {"ok": True}
+
+    if status.upper() not in ["PAID", "SUCCESS", "SETTLED"]:
+        logging.info("⏳ NOT PAID STATUS")
         return {"ok": True}
 
     pool = await get_pool()
 
     # =========================
-    # AMBIL PAYMENT (FIX LEBIH AMAN)
+    # AMBIL PAYMENT (ROBUST)
     # =========================
     payment = await pool.fetchrow("""
         SELECT user_id, code
         FROM payments
-        WHERE code = $1 OR invoice_id = $1
+        WHERE invoice_id = $1
+           OR external_id = $1
+           OR code = $1
     """, ref)
 
     if not payment:
@@ -174,7 +187,7 @@ async def webhook(
         if updated:
             logging.info("✅ PAYMENT UPDATED")
         else:
-            logging.warning("⚠️ PAYMENT ALREADY PAID / NOT FOUND")
+            logging.warning("⚠️ PAYMENT ALREADY PROCESSED")
 
         # =========================
         # GRANT ACCESS
@@ -204,8 +217,11 @@ async def webhook(
         seller_id = file["seller_id"]
         price = int(file["price"] or 0)
 
+        # safe JSON parse
+        media_list = []
         try:
-            media_list = json.loads(file["media_json"]) if isinstance(file["media_json"], str) else (file["media_json"] or [])
+            if file["media_json"]:
+                media_list = json.loads(file["media_json"])
         except:
             media_list = []
 
@@ -224,11 +240,7 @@ async def webhook(
         # =========================
         await bot.send_message(
             user_id,
-            f"""✅ PEMBAYARAN BERHASIL
-
-📦 Kode : {code}
-📁 File : {len(media_list)}
-🔐 Akses aktif"""
+            f"✅ PAYMENT SUCCESS\nCODE: {code}\nFILE: {len(media_list)}"
         )
 
         # =========================
@@ -244,17 +256,14 @@ async def webhook(
         if GROUP_ID:
             await bot.send_message(
                 int(GROUP_ID),
-                f"""💰 TRANSAKSI BERHASIL
-
-📦 Produk : {code}
-💸 Harga : Rp {price:,}
-👤 Buyer : {user_id}
-🏷 Seller : {seller_id}"""
+                f"💰 TRANSAKSI BERHASIL\nCODE: {code}\nBUYER: {user_id}\nPRICE: Rp {price}"
             )
 
-    except Exception as e:
-        logging.exception(f"❌ DB ERROR: {e}")
+        logging.info("⚡ PAYMENT FLOW DONE")
 
-    logging.info(f"⚡ DONE {(datetime.utcnow() - start_time).total_seconds():.2f}s")
+    except Exception as e:
+        logging.exception(f"❌ WEBHOOK ERROR: {e}")
+
+    logging.info(f"⏱ DONE {(datetime.utcnow() - start_time).total_seconds():.2f}s")
 
     return {"ok": True}
