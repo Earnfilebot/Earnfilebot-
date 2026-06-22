@@ -126,15 +126,12 @@ async def webhook(
         logging.warning("❌ INVALID SIGNATURE")
         return {"ok": True}
 
-    # =========================
-    # PARSE PAYLOAD (FIX UNIVERSAL)
-    # =========================
     payload = data.get("data") or data
 
     status = (
         payload.get("status")
         or data.get("status")
-        or ("PAID" if data.get("success") else None)
+        or ("PAID" if data.get("success") is True else None)
     )
 
     ref = (
@@ -157,27 +154,33 @@ async def webhook(
         logging.info(f"⏳ NOT PAID STATUS: {status}")
         return {"ok": True}
 
-    user_id, code = parse_reference(ref)
+    pool = await get_pool()
 
-    if not user_id or not code:
-        logging.warning("❌ INVALID REF PARSE")
+    # =========================
+    # AMBIL PAYMENT
+    # =========================
+    payment = await pool.fetchrow("""
+        SELECT user_id, code
+        FROM payments
+        WHERE code = $1
+    """, ref)
+
+    if not payment:
+        logging.warning("❌ PAYMENT NOT FOUND IN DB")
         return {"ok": True}
 
-    pool = await get_pool()
+    user_id = payment["user_id"]
+    code = payment["code"]
 
     try:
         # =========================
         # UPDATE PAYMENT
         # =========================
-        payment_id = await pool.fetchval("""
+        await pool.fetchval("""
             UPDATE payments
             SET status='paid'
             WHERE user_id=$1 AND code=$2 AND status='pending'
-            RETURNING id
         """, user_id, code)
-
-        if not payment_id:
-            logging.warning("⚠️ PAYMENT NOT FOUND / ALREADY PAID")
 
         # =========================
         # GRANT ACCESS
@@ -209,7 +212,7 @@ async def webhook(
 
         try:
             media_list = json.loads(file["media_json"]) if isinstance(file["media_json"], str) else (file["media_json"] or [])
-        except Exception:
+        except:
             media_list = []
 
         fee = int(price * 0.10)
@@ -262,7 +265,6 @@ async def webhook(
 
     except Exception as e:
         logging.exception(f"❌ DB ERROR: {e}")
-        return {"ok": True}
 
     logging.info(f"⚡ DONE {(datetime.utcnow() - start_time).total_seconds():.2f}s")
 
