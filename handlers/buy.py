@@ -128,71 +128,126 @@ async def buy_handler(call: CallbackQuery):
 
 
 # =========================
-# CHECK PAYMENT (FIXED)
+# CHECK PAYMENT
 # =========================
 @router.callback_query(F.data.startswith("check_payment:"))
 async def check_payment(call: CallbackQuery):
 
-    await call.answer("🔍 Mengecek pembayaran...")
-
     code = call.data.split(":")[1]
     user_id = call.from_user.id
 
-    pool = await get_pool()
+    await call.answer("🔍 Mengecek pembayaran...")
 
     try:
-        payment = await pool.fetchrow(
-            "SELECT status FROM payments WHERE user_id=$1 AND code=$2",
-            user_id, code
-        )
+        pool = await get_pool()
+
+        payment = await pool.fetchrow("""
+            SELECT status
+            FROM payments
+            WHERE user_id=$1 AND code=$2
+        """, user_id, code)
 
         if not payment:
-            return await call.answer("❌ Payment tidak ditemukan", show_alert=True)
+            return await call.answer(
+                "❌ Payment tidak ditemukan",
+                show_alert=True
+            )
 
-        if payment["status"] != "paid":
-            return await call.answer("⏳ Belum dibayar", show_alert=True)
+        status = payment["status"]
+
+        if status == "pending":
+            return await call.answer(
+                "⏳ Menunggu pembayaran",
+                show_alert=True
+            )
+
+        if status != "paid":
+            return await call.answer(
+                f"❌ Status: {status}",
+                show_alert=True
+            )
 
         # =========================
-        # GET FILE AFTER PAID
+        # PAYMENT SUCCESS
         # =========================
-        file = await pool.fetchrow(
-            "SELECT media_json FROM files WHERE code=$1",
-            code
-        )
+        file = await pool.fetchrow("""
+            SELECT media_json
+            FROM files
+            WHERE code=$1
+        """, code)
 
-        media_list = []
+        if not file:
+            return await call.answer(
+                "❌ File tidak ditemukan",
+                show_alert=True
+            )
+
         try:
-            import json
-            media_list = json.loads(file["media_json"]) if file else []
-        except:
+            media_list = json.loads(file["media_json"] or "[]")
+        except Exception:
             media_list = []
 
-        await call.message.edit_text("✅ PAYMENT SUCCESS\n\n📂 Mengirim file...")
+        if not media_list:
+            return await call.answer(
+                "❌ File kosong",
+                show_alert=True
+            )
+
+        try:
+            await call.message.delete()
+        except:
+            pass
+
+        await call.message.answer(
+            "✅ PEMBAYARAN BERHASIL\n\n📂 Mengirim file..."
+        )
 
         sent = 0
-        for item in media_list:
-            try:
-                t = item.get("type")
-                fid = item.get("file_id")
 
-                if t == "video":
-                    await call.bot.send_video(user_id, fid)
-                elif t == "document":
-                    await call.bot.send_document(user_id, fid)
+        for item in media_list:
+
+            try:
+                file_type = item.get("type")
+                file_id = item.get("file_id")
+
+                if not file_id:
+                    continue
+
+                if file_type == "video":
+                    await call.bot.send_video(
+                        chat_id=user_id,
+                        video=file_id
+                    )
+
+                elif file_type == "document":
+                    await call.bot.send_document(
+                        chat_id=user_id,
+                        document=file_id
+                    )
+
                 else:
-                    await call.bot.send_photo(user_id, fid)
+                    await call.bot.send_photo(
+                        chat_id=user_id,
+                        photo=file_id
+                    )
 
                 sent += 1
                 await asyncio.sleep(0.3)
 
-            except:
-                continue
+            except Exception as e:
+                logging.error(f"SEND FILE ERROR: {e}")
 
-        await call.message.answer(f"✅ Selesai! {sent} file dikirim")
+        await call.message.answer(
+            f"✅ Selesai!\n\n📦 {sent} file berhasil dikirim"
+        )
 
     except Exception as e:
         logging.exception(f"CHECK PAYMENT ERROR: {e}")
-        await call.answer("❌ SYSTEM ERROR", show_alert=True)
+
+        await call.answer(
+            "❌ SYSTEM ERROR",
+            show_alert=True
+        )
 
 
 # =========================
