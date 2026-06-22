@@ -8,6 +8,7 @@ from database import get_pool, close_db
 
 
 logging.basicConfig(level=logging.INFO)
+logging.info("ROUTES LOADED")
 
 
 @asynccontextmanager
