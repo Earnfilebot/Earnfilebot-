@@ -103,9 +103,6 @@ async def page_handler(call: CallbackQuery):
 
         pool = await get_pool()
 
-        # =========================
-        # GET FILE
-        # =========================
         file = await pool.fetchrow(
             "SELECT * FROM files WHERE code=$1",
             code
@@ -156,6 +153,30 @@ async def page_handler(call: CallbackQuery):
         chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
 
         # =========================
+        # SEND MEDIA (INI YANG KURANG SEBELUMNYA)
+        # =========================
+        for item in chunk:
+
+            fid = clean_file_id(item.get("file_id"))
+            ftype = normalize_type(item.get("type"))
+
+            if not fid:
+                continue
+
+            try:
+                if ftype == "photo":
+                    await call.message.answer_photo(photo=fid)
+
+                elif ftype == "video":
+                    await call.message.answer_video(video=fid)
+
+                else:
+                    await call.message.answer_document(document=fid)
+
+            except Exception as e:
+                print("SEND ERROR:", e)
+
+        # =========================
         # CAPTION
         # =========================
         caption = (
@@ -183,7 +204,7 @@ async def page_handler(call: CallbackQuery):
         )
 
         # =========================
-        # EDIT MESSAGE SAFE
+        # UPDATE MESSAGE
         # =========================
         try:
             await call.message.edit_caption(
@@ -191,12 +212,9 @@ async def page_handler(call: CallbackQuery):
                 reply_markup=keyboard
             )
         except TelegramBadRequest:
-            try:
-                await call.message.edit_text(
-                    text=caption,
-                    reply_markup=keyboard
-                )
-            except TelegramBadRequest:
-                return await call.answer("❌ Gagal update message", show_alert=True)
+            await call.message.edit_text(
+                text=caption,
+                reply_markup=keyboard
+            )
 
         await call.answer()
