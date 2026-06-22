@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from bot import bot, dp
+import webhook.bayargg
 from webhook.bayargg import router as bayargg_router
 from database import get_pool, close_db
 
