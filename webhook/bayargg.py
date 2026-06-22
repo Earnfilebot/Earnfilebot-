@@ -104,17 +104,9 @@ async def webhook(
     # TELEGRAM UPDATE
     # =========================
     if "update_id" in data and not x_signature:
-        try:
-            logging.info(f"📥 TELEGRAM UPDATE => {data}")
-
-            update = Update.model_validate(data)
-            await dp.feed_update(bot, update)
-
-            logging.info("✅ TELEGRAM PROCESSED")
-
-        except Exception as e:
-            logging.exception(f"❌ TELEGRAM ERROR: {e}")
-
+        update = Update.model_validate(data)
+        await dp.feed_update(bot, update)
+        logging.info("✅ TELEGRAM PROCESSED")
         return {"ok": True}
 
     # =========================
@@ -122,8 +114,11 @@ async def webhook(
     # =========================
     logging.info("💰 BAYARGG WEBHOOK")
 
+    # 🔥 DEBUG SIGNATURE (IMPORTANT)
+    logging.info(f"SIGNATURE RECEIVED: {x_signature}")
+
     if not verify_signature(body, x_signature):
-        logging.warning("❌ INVALID SIGNATURE")
+        logging.warning("❌ INVALID SIGNATURE (SKIP PROCESS)")
         return {"ok": True}
 
     payload = data.get("data") or data
@@ -143,26 +138,19 @@ async def webhook(
     logging.info(f"📦 STATUS: {status}")
     logging.info(f"📦 REF: {ref}")
 
-    # =========================
-    # VALIDATION
-    # =========================
-    if not status:
-        logging.warning("❌ NO STATUS FROM BAYARGG")
-        return {"ok": True}
-
-    if not is_paid_status(status):
-        logging.info(f"⏳ NOT PAID STATUS: {status}")
+    if not status or not is_paid_status(status):
+        logging.info("⏳ NOT PAID OR EMPTY STATUS")
         return {"ok": True}
 
     pool = await get_pool()
 
     # =========================
-    # AMBIL PAYMENT
+    # AMBIL PAYMENT (FIX LEBIH AMAN)
     # =========================
     payment = await pool.fetchrow("""
         SELECT user_id, code
         FROM payments
-        WHERE code = $1
+        WHERE code = $1 OR invoice_id = $1
     """, ref)
 
     if not payment:
@@ -176,11 +164,17 @@ async def webhook(
         # =========================
         # UPDATE PAYMENT
         # =========================
-        await pool.fetchval("""
+        updated = await pool.fetchval("""
             UPDATE payments
             SET status='paid'
             WHERE user_id=$1 AND code=$2 AND status='pending'
+            RETURNING id
         """, user_id, code)
+
+        if updated:
+            logging.info("✅ PAYMENT UPDATED")
+        else:
+            logging.warning("⚠️ PAYMENT ALREADY PAID / NOT FOUND")
 
         # =========================
         # GRANT ACCESS
@@ -240,14 +234,9 @@ async def webhook(
         # =========================
         # SEND FILE
         # =========================
-        sent = 0
         for item in media_list:
-            ok = await safe_send(bot, user_id, item)
-            if ok:
-                sent += 1
-            await asyncio.sleep(0.3)
-
-        logging.info(f"📤 FILE SENT: {sent}/{len(media_list)}")
+            await safe_send(bot, user_id, item)
+            await asyncio.sleep(0.2)
 
         # =========================
         # GROUP LOG
