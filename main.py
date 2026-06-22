@@ -1,42 +1,16 @@
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-import logging
+app = FastAPI()
 
-from bot import bot, dp
-from webhook.bayargg import router as bayargg_router
-from database import get_pool, close_db
+app.include_router(bayargg_router)
 
-logging.basicConfig(level=logging.INFO)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+@app.on_event("startup")
+async def startup():
     logging.info("🚀 STARTING APP")
-
     await get_pool()
-
     app.state.bot = bot
     app.state.dp = dp
-
     logging.info("✅ BOT READY")
 
-    yield
-
+@app.on_event("shutdown")
+async def shutdown():
     await close_db()
     await bot.session.close()
-
-    logging.info("🛑 STOPPED")
-
-
-app = FastAPI(lifespan=lifespan)
-
-# 🔥 WAJIB: include router DI SINI
-app.include_router(bayargg_router, prefix="")
-
-@app.get("/")
-async def root():
-    return {"status": "ok"}
-
-@app.get("/health")
-async def health():
-    return {"ok": True}
