@@ -92,10 +92,22 @@ async def page_handler(call: CallbackQuery):
 
     now = time.time()
 
+    # =========================
+    # FAST SPAM PROTECTION (0.5s)
+    # =========================
     if now - CLICK_COOLDOWN[user_id] < 0.5:
         return await call.answer("⏳ Slow down")
 
+    # =========================
+    # HARD COOLDOWN (10s SPAM PAGE)
+    # =========================
+    last_click = CLICK_COOLDOWN.get(f"{user_id}_hard", 0)
+
+    if now - last_click < 10:
+        return await call.answer("⏳ Tunggu 10 detik sebelum klik lagi", show_alert=True)
+
     CLICK_COOLDOWN[user_id] = now
+    CLICK_COOLDOWN[f"{user_id}_hard"] = now
 
     async with USER_LOCK[user_id]:
 
@@ -140,7 +152,15 @@ async def page_handler(call: CallbackQuery):
             return await call.answer("❌ File kosong", show_alert=True)
 
         total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
-        page = max(1, min(page, total_page))
+
+        # =========================
+        # LIMIT CHECK (PAGE BOUNDARY)
+        # =========================
+        if page < 1:
+            page = 1
+
+        if page > total_page:
+            return await call.answer("📦 MEDIA SUDAH HABIS", show_alert=True)
 
         chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
 
