@@ -26,9 +26,11 @@ def parse_reference(ref: str):
         return None, None
 
     try:
-        user_id, code = ref.split("_", 1)
-        return int(user_id), code
-    except Exception:
+        parts = ref.split("_")
+        user_id = int(parts[0])
+        code = parts[1]
+        return user_id, code
+    except:
         return None, None
 
 
