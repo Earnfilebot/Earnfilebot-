@@ -76,9 +76,6 @@ async def safe_send(bot, user_id, item):
         return False
 
 
-# =========================
-# WEBHOOK
-# =========================
 @router.post("/webhook")
 async def webhook(
     req: Request,
@@ -111,7 +108,6 @@ async def webhook(
             logging.info(f"📥 TELEGRAM UPDATE => {data}")
 
             update = Update.model_validate(data)
-
             await dp.feed_update(bot, update)
 
             logging.info("✅ TELEGRAM PROCESSED")
@@ -158,6 +154,9 @@ async def webhook(
     pool = await get_pool()
 
     try:
+        # =========================
+        # UPDATE PAYMENT
+        # =========================
         payment_id = await pool.fetchval("""
             UPDATE payments
             SET status='paid'
@@ -168,6 +167,21 @@ async def webhook(
         if not payment_id:
             logging.warning("⚠️ PAYMENT NOT FOUND / ALREADY PAID")
 
+        # =========================
+        # GRANT ACCESS (FIX IMPORTANT)
+        # =========================
+        await pool.execute("""
+            INSERT INTO user_access(user_id, code, paid)
+            VALUES ($1,$2,TRUE)
+            ON CONFLICT (user_id, code)
+            DO UPDATE SET paid=TRUE
+        """, user_id, code)
+
+        logging.info(f"✅ ACCESS GRANTED {user_id} -> {code}")
+
+        # =========================
+        # GET FILE
+        # =========================
         file = await pool.fetchrow("""
             SELECT seller_id, price, media_json
             FROM files
@@ -189,6 +203,7 @@ async def webhook(
         fee = int(price * 0.10)
         seller_income = price - fee
 
+        # update seller balance
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
             VALUES ($1,$2)
