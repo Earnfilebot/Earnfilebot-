@@ -126,10 +126,22 @@ async def webhook(
         logging.warning("❌ INVALID SIGNATURE")
         return {"ok": True}
 
+    # =========================
+    # PARSE PAYLOAD (FIX UNIVERSAL)
+    # =========================
     payload = data.get("data") or data
 
-    status = payload.get("status") or data.get("status")
-    ref = payload.get("external_id") or payload.get("reference")
+    status = (
+        payload.get("status")
+        or data.get("status")
+        or ("PAID" if data.get("success") else None)
+    )
+
+    ref = (
+        payload.get("external_id")
+        or payload.get("reference")
+        or data.get("invoice_id")
+    )
 
     logging.info(f"📦 STATUS: {status}")
     logging.info(f"📦 REF: {ref}")
@@ -168,7 +180,7 @@ async def webhook(
             logging.warning("⚠️ PAYMENT NOT FOUND / ALREADY PAID")
 
         # =========================
-        # GRANT ACCESS (FIX IMPORTANT)
+        # GRANT ACCESS
         # =========================
         await pool.execute("""
             INSERT INTO user_access(user_id, code, paid)
@@ -203,7 +215,6 @@ async def webhook(
         fee = int(price * 0.10)
         seller_income = price - fee
 
-        # update seller balance
         await pool.execute("""
             INSERT INTO users (telegram_id, balance)
             VALUES ($1,$2)
