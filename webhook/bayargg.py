@@ -77,6 +77,8 @@ async def webhook(req: Request, x_signature: str = Header(None, alias="X-Signatu
 
     body = await req.body()
 
+    logging.info(body.decode())
+
     # parse JSON
     try:
         data = json.loads(body.decode())
