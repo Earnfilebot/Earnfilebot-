@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import json
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InputMediaDocument
 
 from utils.force_sub import check_force_sub
 from keyboards.menu import home_kb
@@ -15,38 +17,69 @@ from database import get_pool
 router = Router()
 
 
-def rupiah(amount):
-    try:
-        return f"{int(amount):,}".replace(",", ".")
-    except:
-        return "0"
-
-
 # =========================
-# START
+# START (NORMAL + DEEP LINK)
 # =========================
 @router.message(CommandStart())
 async def start_cmd(message: Message, state: FSMContext):
 
     await state.clear()
 
+    args = message.text.split(maxsplit=1)
+
+    # =========================
+    # HANDLE DEEP LINK FILE
+    # =========================
+    if len(args) > 1:
+
+        payload = args[1]
+
+        if payload.startswith("getFile_"):
+            code = payload.replace("getFile_", "")
+
+            pool = await get_pool()
+
+            data = await pool.fetchrow(
+                "SELECT media FROM files WHERE code=$1",
+                code
+            )
+
+            if not data:
+                return await message.answer("❌ File tidak ditemukan")
+
+            media = json.loads(data["media"])
+
+            # kirim media group
+            group = [
+                InputMediaDocument(media=item["file_id"])
+                for item in media
+            ]
+
+            try:
+                await message.answer_media_group(group)
+            except Exception:
+                for item in media:
+                    await message.bot.send_document(
+                        chat_id=message.chat.id,
+                        document=item["file_id"]
+                    )
+
+            return
+
+
+    # =========================
+    # NORMAL START
+    # =========================
     user_id = message.from_user.id
     username = message.from_user.username or "unknown"
 
-    try:
-        loading = await message.answer("⚡ Loading...")
-    except Exception as e:
-        logging.exception(f"FAILED SEND LOADING: {e}")
-        return
+    loading = await message.answer("⚡ Loading...")
 
     try:
         await process_start(message, loading, user_id, username)
     except Exception as e:
         logging.exception(f"START ERROR: {e}")
-        try:
-            await loading.edit_text("❌ SYSTEM ERROR START")
-        except Exception as e2:
-            logging.warning(f"FAILED EDIT ERROR MSG: {e2}")
+        await loading.edit_text("❌ SYSTEM ERROR START")
 
 
 # =========================
@@ -57,90 +90,60 @@ async def process_start(message, loading, user_id, username):
     bot = message.bot
 
     try:
-        logging.info(f"START PROCESS | USER: {user_id}")
+        sub = await check_force_sub(bot, user_id)
+    except Exception:
+        sub = True
 
-        # FORCE SUB CHECK
-        try:
-            sub = await check_force_sub(bot, user_id)
-            logging.info(f"FORCE SUB RESULT: {sub}")
-        except Exception as e:
-            logging.exception(f"FORCE SUB ERROR: {e}")
-            sub = True  # fallback biar tidak block user
-
-        if not sub:
-            try:
-                await loading.edit_text(
-                    "❌ JOIN REQUIRED\n\nSilakan join semua channel",
-                    reply_markup=join_kb()
-                )
-            except Exception as e:
-                logging.warning(f"EDIT JOIN FAIL: {e}")
-            return
-
-        pool = await get_pool()
-
-        await pool.execute(
-            """
-            INSERT INTO users (telegram_id, username)
-            VALUES ($1, $2)
-            ON CONFLICT (telegram_id) DO NOTHING
-            """,
-            user_id,
-            username
+    if not sub:
+        return await loading.edit_text(
+            "❌ JOIN REQUIRED\n\nSilakan join semua channel",
+            reply_markup=join_kb()
         )
 
-        await render_home_fast(bot, loading, user_id)
+    pool = await get_pool()
 
-    except Exception as e:
-        logging.exception(f"PROCESS START ERROR: {e}")
-        try:
-            await loading.edit_text("❌ SYSTEM ERROR")
-        except Exception as e2:
-            logging.warning(f"FAILED EDIT ERROR: {e2}")
+    await pool.execute(
+        """
+        INSERT INTO users (telegram_id, username)
+        VALUES ($1, $2)
+        ON CONFLICT (telegram_id) DO NOTHING
+        """,
+        user_id,
+        username
+    )
+
+    await render_home_fast(bot, loading, user_id)
 
 
 # =========================
-# HOME
+# HOME UI
 # =========================
 async def render_home_fast(bot, message, user_id):
 
-    logging.info("➡️ ENTER render_home_fast")
+    text = (
+        "<b>📂 DECODER FILE BOT</b>\n\n"
+        "Selamat datang di Decoder File Bot.\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 ID : <code>{user_id}</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "Silakan pilih menu di bawah."
+    )
 
     try:
-
-        text = (
-            "<b>📂 DECODER FILE BOT</b>\n\n"
-            "Selamat datang di Decoder File Bot.\n"
-            "Bot ini digunakan untuk membuka, membaca, dan mendekode file yang didukung.\n\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🆔 ID : <code>{user_id}</code>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "Silakan pilih menu di bawah."
+        await message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=home_kb()
+        )
+    except Exception:
+        await bot.send_message(
+            user_id,
+            text,
+            parse_mode="HTML",
+            reply_markup=home_kb()
         )
 
-        try:
-            logging.info("➡️ TRY EDIT MESSAGE")
 
-            await message.edit_text(
-                text,
-                parse_mode="HTML",
-                reply_markup=home_kb()
-            )
-
-            logging.info("✅ EDIT SUCCESS")
-
-        except Exception as e:
-            logging.warning(f"EDIT FAIL: {e}")
-
-            await bot.send_message(
-                user_id,
-                text,
-                parse_mode="HTML",
-                reply_markup=home_kb()
-            )
-
-    except Exception as e:
-        logging.exception(f"HOME ERROR: {e}")
 # =========================
 # CALLBACK HOME
 # =========================
@@ -153,21 +156,15 @@ async def back_home(call: CallbackQuery, state: FSMContext):
 
     try:
         ok = await check_force_sub(call.bot, user_id)
-    except Exception as e:
-        logging.exception(f"FORCE SUB CALLBACK ERROR: {e}")
+    except Exception:
         ok = True
 
     if not ok:
-        try:
-            await call.message.answer(
-                "❌ JOIN REQUIRED",
-                reply_markup=join_kb()
-            )
-        except Exception as e:
-            logging.warning(f"JOIN MSG FAIL: {e}")
-
+        await call.message.answer(
+            "❌ JOIN REQUIRED",
+            reply_markup=join_kb()
+        )
         return await call.answer()
 
     await render_home_fast(call.bot, call.message, user_id)
-
     await call.answer()
