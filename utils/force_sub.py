@@ -5,7 +5,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 CHANNELS = [
     -1004395938795,
-    -1004304319968
+    -1003712587847
 ]
 
 
