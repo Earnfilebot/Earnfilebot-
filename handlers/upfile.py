@@ -65,6 +65,7 @@ async def safe_update(bot, chat_id, message_id, text, user_id, reply_markup=None
 class UploadState(StatesGroup):
     upload = State()
     wait_folder = State()
+    wait_expiry = State()
 
 
 # =========================
@@ -225,9 +226,6 @@ async def handle_share(call: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
 
-    if data.get("saving"):
-        return await call.answer("Processing...", show_alert=True)
-
     share_media = call.data == "share_yes"
 
     await state.update_data(
@@ -254,12 +252,6 @@ async def input_folder(message: Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # anti double submit
-    if data.get("saving"):
-        return
-
-    await state.update_data(saving=True)
-
     text = message.text or ""
 
     if text.lower() == "/skip":
@@ -269,13 +261,35 @@ async def input_folder(message: Message, state: FSMContext):
 
     await state.update_data(folder_name=folder_name)
 
-    await message.answer("⏳ Saving file...")
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏳ 1 Jam", callback_data="exp:3600")
+    kb.button(text="⏳ 24 Jam", callback_data="exp:86400")
+    kb.button(text="♾ Permanent", callback_data="exp:0")
+    kb.adjust(1)
 
-    try:
-        await finalize_save(message, state)
-    except Exception as e:
-        await state.update_data(saving=False)
-        await message.answer(f"❌ ERROR: {e}")
+    await message.answer(
+        "🕒 PILIH AUTO DELETE TIME",
+        reply_markup=kb.as_markup()
+    )
+
+    await state.set_state(UploadState.wait_expiry)
+
+
+# =========================
+# EXPIRY SELECT
+# =========================
+@router.callback_query(F.data.startswith("exp:"))
+async def set_expiry(call: CallbackQuery, state: FSMContext):
+
+    await call.answer()
+
+    expiry = int(call.data.split(":")[1])
+
+    await state.update_data(expiry=expiry)
+
+    await call.message.edit_text("⏳ Saving file...")
+
+    await finalize_save(call.message, state)
 
 
 # =========================
@@ -286,15 +300,18 @@ async def finalize_save(message: Message, state: FSMContext):
     async with get_lock(message.from_user.id):
 
         data = await state.get_data()
+
         media = data.get("media", [])
         share_media = data.get("share_media", True)
-        folder_name = data.get("folder_name")
-
-        if not folder_name:
-            folder_name = "Folder " + "".join(random.choices(string.ascii_uppercase, k=6))
+        folder_name = data.get("folder_name", "Folder AUTO")
+        expiry = data.get("expiry", 0)
 
         if not media:
             return await message.answer("❌ No media found")
+
+        expires_at = None
+        if expiry > 0:
+            expires_at = int(time.time()) + expiry
 
         pool = await get_pool()
 
@@ -313,26 +330,28 @@ async def finalize_save(message: Message, state: FSMContext):
 
         await pool.execute(
             """
-            INSERT INTO files (code, media, share_media, owner_id, media_count)
-            VALUES ($1,$2,$3,$4,$5)
+            INSERT INTO files (code, media, share_media, owner_id, media_count, expires_at)
+            VALUES ($1,$2,$3,$4,$5,$6)
             """,
             code,
             json.dumps(media),
             share_media,
             message.from_user.id,
-            len(media)
+            len(media),
+            expires_at
         )
 
         await state.clear()
 
-        share_status = "PUBLIC" if share_media else "PRIVATE"
+        status = "PUBLIC" if share_media else "PRIVATE"
 
         text = (
             "✅ <b>FILE SAVED SUCCESSFULLY</b>\n\n"
             f"📝 Folder Name: {folder_name}\n"
             f"📋 Files: {len(media)}\n"
             f"🔑 Code: <code>{code}</code>\n"
-            f"📤 Share Mode: {share_status}\n"
+            f"📤 Share Mode: {status}\n"
+            f"🕒 Auto Delete: {expiry}s\n"
             f"🔗 Link: {share_link}"
         )
 
