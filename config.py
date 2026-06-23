@@ -8,7 +8,7 @@ load_dotenv()
 # BOT
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
+BOT_USERNAME = "DecoderFileBot"
 # =========================
 # DATABASE
 # =========================
