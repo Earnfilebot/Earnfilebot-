@@ -37,6 +37,9 @@ def get_lock(user_id: int):
 # SAFE EDIT
 # =========================
 async def safe_update(bot, chat_id, message_id, text, user_id, reply_markup=None):
+    if not message_id:
+        return
+
     now = time.time()
     last = _last_update.get(user_id, 0)
 
@@ -61,6 +64,7 @@ async def safe_update(bot, chat_id, message_id, text, user_id, reply_markup=None
 # =========================
 class UploadState(StatesGroup):
     upload = State()
+    wait_folder = State()
 
 
 # =========================
@@ -108,6 +112,7 @@ async def receive_media(message: Message, state: FSMContext):
     async with get_lock(message.from_user.id):
 
         data = await state.get_data()
+
         if not data.get("upload_mode"):
             return
 
@@ -118,18 +123,15 @@ async def receive_media(message: Message, state: FSMContext):
 
         if message.document:
             fid = message.document.file_id
-            ftype = "document"
         elif message.video:
             fid = message.video.file_id
-            ftype = "video"
         else:
             fid = message.photo[-1].file_id
-            ftype = "photo"
 
         if any(x["file_id"] == fid for x in media):
             return
 
-        media.append({"file_id": fid, "type": ftype})
+        media.append({"file_id": fid})
         await state.update_data(media=media)
 
         try:
@@ -146,8 +148,7 @@ async def receive_media(message: Message, state: FSMContext):
             "📦 <b>UPLOAD MANAGER</b>\n\n"
             f"📁 Total Files: <b>{total}</b>\n"
             f"📊 Progress: [{bar}]\n"
-            f"📈 Capacity: {total}/{MAX_MEDIA}\n\n"
-            "📤 Sending media..."
+            f"{total}/{MAX_MEDIA}"
         )
 
         kb = InlineKeyboardBuilder()
@@ -188,7 +189,7 @@ async def cancel(call: CallbackQuery, state: FSMContext):
 
 
 # =========================
-# SAVE BUTTON → SHARE MODE
+# SAVE → SHARE MODE
 # =========================
 @router.callback_query(F.data == "save_upfile")
 async def choose_share(call: CallbackQuery, state: FSMContext):
@@ -196,6 +197,9 @@ async def choose_share(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
     data = await state.get_data()
+
+    if data.get("saving"):
+        return await call.answer("Processing...", show_alert=True)
 
     if not data.get("media"):
         return await call.answer("No media", show_alert=True)
@@ -212,7 +216,7 @@ async def choose_share(call: CallbackQuery, state: FSMContext):
 
 
 # =========================
-# SHARE HANDLER
+# SHARE HANDLER → FOLDER NAME
 # =========================
 @router.callback_query(F.data.startswith("share_"))
 async def handle_share(call: CallbackQuery, state: FSMContext):
@@ -228,16 +232,50 @@ async def handle_share(call: CallbackQuery, state: FSMContext):
 
     await state.update_data(
         share_media=share_media,
-        saving=True
+        saving=False
     )
 
-    await call.message.edit_text("⏳ SAVING FILE...")
+    await state.set_state(UploadState.wait_folder)
+
+    await call.message.edit_text(
+        "📝 ENTER FOLDER NAME\n\n"
+        "Example:\n"
+        "<code>My Anime Pack</code>\n\n"
+        "Or send /skip for auto name",
+        parse_mode="HTML"
+    )
+
+
+# =========================
+# INPUT FOLDER
+# =========================
+@router.message(UploadState.wait_folder)
+async def input_folder(message: Message, state: FSMContext):
+
+    data = await state.get_data()
+
+    # anti double submit
+    if data.get("saving"):
+        return
+
+    await state.update_data(saving=True)
+
+    text = message.text or ""
+
+    if text.lower() == "/skip":
+        folder_name = "Folder " + "".join(random.choices(string.ascii_uppercase, k=6))
+    else:
+        folder_name = text[:50]
+
+    await state.update_data(folder_name=folder_name)
+
+    await message.answer("⏳ Saving file...")
 
     try:
-        await finalize_save(call.message, state)
+        await finalize_save(message, state)
     except Exception as e:
         await state.update_data(saving=False)
-        await call.message.answer(f"❌ ERROR: {e}")
+        await message.answer(f"❌ ERROR: {e}")
 
 
 # =========================
@@ -250,17 +288,18 @@ async def finalize_save(message: Message, state: FSMContext):
         data = await state.get_data()
         media = data.get("media", [])
         share_media = data.get("share_media", True)
+        folder_name = data.get("folder_name")
+
+        if not folder_name:
+            folder_name = "Folder " + "".join(random.choices(string.ascii_uppercase, k=6))
 
         if not media:
             return await message.answer("❌ No media found")
 
         pool = await get_pool()
 
-        # generate code
         while True:
-            code = "EFB-" + "".join(
-                random.choices(string.ascii_uppercase + string.digits, k=10)
-            )
+            code = "EFB-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=10))
 
             exists = await pool.fetchval(
                 "SELECT 1 FROM files WHERE code=$1",
@@ -270,7 +309,6 @@ async def finalize_save(message: Message, state: FSMContext):
             if not exists:
                 break
 
-        # share link
         share_link = f"https://t.me/{BOT_USERNAME}?start=getFile_{code}"
 
         await pool.execute(
@@ -291,7 +329,7 @@ async def finalize_save(message: Message, state: FSMContext):
 
         text = (
             "✅ <b>FILE SAVED SUCCESSFULLY</b>\n\n"
-            f"📝 Folder Name: Upload {len(media)}\n"
+            f"📝 Folder Name: {folder_name}\n"
             f"📋 Files: {len(media)}\n"
             f"🔑 Code: <code>{code}</code>\n"
             f"📤 Share Mode: {share_status}\n"
