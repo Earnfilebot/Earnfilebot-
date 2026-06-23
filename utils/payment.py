@@ -34,7 +34,7 @@ async def create_bayargg_invoice(amount: int, code: str, user_id: int):
         "description": f"Purchase file {code}",
         "payment_method": "qris",
         "external_id": external_id,
-        "payment_url": "https://t.me/Earnfilebot"
+        "payment_url": "https://earnfilebot-production.up.railway.app"
     }
 
     headers = {
