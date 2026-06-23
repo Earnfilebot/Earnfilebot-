@@ -8,14 +8,14 @@ def join_kb():
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📢 Channel 1",
-                    url="https://t.me/+JL4ELKQCyckwMjFl"
+                    text="📢Channel Code",
+                    url="https://t.me/+mp7HeZPteus0ZDQ9"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📢 Channel 2",
-                    url="https://t.me/+TiCdabQsYW43Mjk1"
+                    text="📢Channel Update",
+                    url="https://t.me/+JL4ELKQCyckwMjFl"
                 )
             ],
             [
