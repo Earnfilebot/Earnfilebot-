@@ -107,47 +107,40 @@ async def render_home_fast(bot, message, user_id):
     logging.info("➡️ ENTER render_home_fast")
 
     try:
-        pool = await get_pool()
-
-        logging.info("➡️ BEFORE DB QUERY")
-
-        user = await pool.fetchrow(
-            "SELECT balance FROM users WHERE telegram_id = $1",
-            user_id
-        )
-
-        logging.info(f"➡️ DB RESULT: {user}")
-
-        balance = 0
-        if user and user.get("balance"):
-            balance = user["balance"]
 
         text = (
-            "EARNFILEBOX\n\n"
-            "HOME DASHBOARD\n"
+            "<b>📂 DECODER FILE BOT</b>\n\n"
+            "Selamat datang di Decoder File Bot.\n"
+            "Bot ini digunakan untuk membuka, membaca, dan mendekode file yang didukung.\n\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            f"ID : {user_id}\n"
-            f"BALANCE : Rp{rupiah(balance)}\n"
-            "━━━━━━━━━━━━━━━━━━"
+            f"🆔 ID : <code>{user_id}</code>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "Silakan pilih menu di bawah."
         )
 
         try:
             logging.info("➡️ TRY EDIT MESSAGE")
 
-            await message.edit_text(text, reply_markup=home_kb())
+            await message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=home_kb()
+            )
 
             logging.info("✅ EDIT SUCCESS")
 
         except Exception as e:
             logging.warning(f"EDIT FAIL: {e}")
-            logging.info("➡️ FALLBACK SEND_MESSAGE")
 
-            await bot.send_message(user_id, text, reply_markup=home_kb())
+            await bot.send_message(
+                user_id,
+                text,
+                parse_mode="HTML",
+                reply_markup=home_kb()
+            )
 
     except Exception as e:
         logging.exception(f"HOME ERROR: {e}")
-
-
 # =========================
 # CALLBACK HOME
 # =========================
