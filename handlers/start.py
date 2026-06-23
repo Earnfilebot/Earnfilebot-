@@ -8,6 +8,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InputMediaDocument
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from utils.force_sub import check_force_sub
 from keyboards.menu import home_kb
