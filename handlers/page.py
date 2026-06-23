@@ -92,11 +92,29 @@ async def page_handler(call: CallbackQuery):
 
     now = time.time()
 
-    # anti spam ringan
-    if now - CLICK_COOLDOWN[user_id] < 0.5:
-        return await call.answer("⏳ Slow down")
+    # =========================
+    # ⏳ GLOBAL COOLDOWN 15 DETIK
+    # =========================
+    if now - USER_CLICK_COOLDOWN[user_id] < 15:
+        return await call.answer("⏳ Tunggu 15 detik sebelum klik lagi", show_alert=True)
 
-    CLICK_COOLDOWN[user_id] = now
+    USER_CLICK_COOLDOWN[user_id] = now
+
+    # =========================
+    # 🔒 24 JAM LOCK PER PAGE
+    # =========================
+    page_key = f"{user_id}:{code}:{page}"
+
+    last_open = USER_PAGE_LOCK.get(page_key)
+
+    if last_open:
+        if now - last_open < 86400:  # 24 jam
+            return await call.answer(
+                "⛔ Page ini sudah dibuka, tunggu 24 jam",
+                show_alert=True
+            )
+
+    USER_PAGE_LOCK[page_key] = now
 
     async with USER_LOCK[user_id]:
 
@@ -110,9 +128,6 @@ async def page_handler(call: CallbackQuery):
         if not file:
             return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
-        # =========================
-        # MEDIA FIX (IMPORTANT)
-        # =========================
         media = file.get("media")
 
         if isinstance(media, str):
@@ -183,8 +198,6 @@ async def page_handler(call: CallbackQuery):
             return await call.answer("❌ Tidak ada media valid", show_alert=True)
 
         try:
-            # IMPORTANT FIX:
-            # jangan spam answer_media_group + answer lagi kalau bisa
             await call.message.answer_media_group(media=album)
 
             await call.message.answer(
