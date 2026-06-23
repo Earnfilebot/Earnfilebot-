@@ -1,5 +1,6 @@
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+
 from config import BOT_TOKEN
 
 bot = Bot(
@@ -9,7 +10,9 @@ bot = Bot(
 
 dp = Dispatcher()
 
-# routers
+# =========================
+# ROUTERS
+# =========================
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
@@ -17,7 +20,6 @@ from handlers.getfile import router as getfile_router
 from handlers.buy import router as buy_router
 from handlers.page import router as page_router
 from handlers.account import router as account_router
-from handlers.withdraw import router as withdraw_router
 from handlers.help import router as help_router
 from handlers.about import router as about_router
 from handlers.admin import router as admin_router
@@ -29,7 +31,6 @@ dp.include_router(getfile_router)
 dp.include_router(buy_router)
 dp.include_router(page_router)
 dp.include_router(account_router)
-dp.include_router(withdraw_router)
 dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
