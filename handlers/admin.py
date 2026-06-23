@@ -48,7 +48,7 @@ def admin_menu():
 # =========================
 # /ADMIN
 # =========================
-@router.message(Command("admin"))
+@router.message(F.text.startswith("/admin"))
 async def admin_panel(message: Message):
     print("ADMIN HIT", message.from_user.id)
 
