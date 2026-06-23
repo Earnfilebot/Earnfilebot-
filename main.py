@@ -19,13 +19,22 @@ async def lifespan(app: FastAPI):
     # Database
     await get_pool()
 
-    app.state.bot = bot
-    app.state.dp = dp
+    # Hapus webhook lama
+    await bot.delete_webhook(drop_pending_updates=True)
 
-    # Jalankan polling di background
-    polling_task = asyncio.create_task(dp.start_polling(bot))
+    # Cek login bot
+    me = await bot.get_me()
+    logging.info(f"🤖 Login sebagai @{me.username}")
 
-    logging.info("🤖 BOT POLLING STARTED")
+    # Jalankan polling
+    polling_task = asyncio.create_task(
+        dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+        )
+    )
+
+    logging.info("✅ BOT POLLING STARTED")
 
     yield
 
@@ -56,5 +65,5 @@ async def root():
 async def health():
     return {
         "status": "ok",
-        "service": "Decoder File Bot"
+        "service": "Decoder File Bot",
     }
