@@ -3,36 +3,33 @@ from aiogram.types import (
     InlineKeyboardButton
 )
 
+
 def home_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📤 UPFILE",
+                    text="📤 Upload File",
                     callback_data="upfile"
                 ),
                 InlineKeyboardButton(
-                    text="📥 GETFILE",
+                    text="📥 Decode File",
                     callback_data="getfile"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="👤 ACCOUNT",
+                    text="👤 Account",
                     callback_data="account"
                 ),
                 InlineKeyboardButton(
-                    text="💸 WITHDRAW",
-                    callback_data="withdraw"
+                    text="❓ Help",
+                    callback_data="help"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="❓ HELP",
-                    callback_data="help"
-                ),
-                InlineKeyboardButton(
-                    text="ℹ️ ABOUT",
+                    text="ℹ️ About",
                     callback_data="about"
                 )
             ]
