@@ -35,38 +35,61 @@ async def start_cmd(message: Message, state: FSMContext):
         payload = args[1]
 
         if payload.startswith("getFile_"):
+
             code = payload.replace("getFile_", "")
 
             pool = await get_pool()
 
-            data = await pool.fetchrow(
+            file = await pool.fetchrow(
                 "SELECT media FROM files WHERE code=$1",
                 code
             )
 
-            if not data:
+            if not file:
                 return await message.answer("❌ File tidak ditemukan")
 
-            media = json.loads(data["media"])
+            media = json.loads(file["media"])
 
-            # kirim media group
-            group = [
-                InputMediaDocument(media=item["file_id"])
-                for item in media
-            ]
+            if not media:
+                return await message.answer("❌ File kosong")
+
+            first = media[0]
+
+            fid = first.get("file_id")
+            ftype = (first.get("type") or "document").lower()
+
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="📂 OPEN PAGE",
+                            callback_data=f"page:{code}:1"
+                        )
+                    ]
+                ]
+            )
+
+            caption = (
+                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+                f"🔑 CODE: {code}\n"
+                f"📦 FILE: {len(media)}\n"
+                "━━━━━━━━━━━━━━"
+            )
 
             try:
-                await message.answer_media_group(group)
-            except Exception:
-                for item in media:
-                    await message.bot.send_document(
-                        chat_id=message.chat.id,
-                        document=item["file_id"]
-                    )
+                if ftype == "photo":
+                    await message.answer_photo(fid, caption=caption, reply_markup=keyboard)
+
+                elif ftype == "video":
+                    await message.answer_video(fid, caption=caption, reply_markup=keyboard)
+
+                else:
+                    await message.answer_document(fid, caption=caption, reply_markup=keyboard)
+
+            except Exception as e:
+                await message.answer(f"❌ ERROR MEDIA: {e}")
 
             return
-
-
     # =========================
     # NORMAL START
     # =========================
