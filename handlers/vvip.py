@@ -12,15 +12,32 @@ async def vvip_handler(call: CallbackQuery):
     text = (
         "💎 <b>VVIP ACCESS</b>\n"
         "━━━━━━━━━━━━━━\n\n"
-        "🔥 Welcome VVIP User\n"
-        "✨ Fitur eksklusif akan ditambahkan\n\n"
+        "🔥 <b>Welcome VVIP User</b>\n\n"
+        "📌 <b>Manfaat Join VVIP Group:</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        "✅ Update code setiap hari\n"
+        "✅ Full notifikasi bot code terbaru\n"
+        "✅ Akses fitur premium lebih cepat\n"
+        "✅ Garansi support sampai paham\n"
+        "✅ Dibimbing oleh admin jika tidak mengerti\n"
+        "✅ Akses fitur eksklusif VVIP\n\n"
+        "💎 Join VVIP = akses lebih stabil & prioritas\n\n"
         "━━━━━━━━━━━━━━"
     )
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔙 Kembali", callback_data="account")
+                InlineKeyboardButton(
+                    text="🚀 VVIP ACCESS NOW",
+                    callback_data="vvip_join"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Kembali",
+                    callback_data="account"
+                )
             ]
         ]
     )
