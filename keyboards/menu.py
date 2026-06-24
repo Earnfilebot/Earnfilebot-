@@ -23,6 +23,12 @@ def home_kb():
                     callback_data="account"
                 ),
                 InlineKeyboardButton(
+                    text="💎 VVIP",
+                    callback_data="vvip"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="❓ Help",
                     callback_data="help"
                 )
