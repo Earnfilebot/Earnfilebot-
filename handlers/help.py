@@ -5,29 +5,25 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
 
-# =========================
-# CACHE
-# =========================
 HELP_CACHE = {}
+
 
 def get_cache(key):
     return HELP_CACHE.get(key)
+
 
 def set_cache(key, value):
     HELP_CACHE[key] = value
 
 
-# =========================
-# LOADING (LEBIH RINGAN)
-# =========================
 async def loading(call: CallbackQuery):
-    await call.message.edit_text("⏳ Loading...")
-    await asyncio.sleep(0.5)
+    try:
+        await call.message.edit_text("⏳ Loading...")
+    except:
+        pass
+    await asyncio.sleep(0.3)
 
 
-# =========================
-# KEYBOARD HELPER
-# =========================
 def kb_builder(buttons):
     builder = InlineKeyboardBuilder()
 
@@ -39,7 +35,7 @@ def kb_builder(buttons):
 
 
 # =========================
-# MAIN HELP MENU
+# HELP MENU
 # =========================
 @router.callback_query(F.data == "help")
 async def help_menu(call: CallbackQuery):
@@ -56,8 +52,7 @@ async def help_menu(call: CallbackQuery):
     kb = kb_builder([
         ("📤 Cara Upload File", "help_upfile"),
         ("📥 Cara Get File", "help_getfile"),
-        ("💸 Cara Withdraw", "help_withdraw"),
-        ("💰 Cara Cuan", "help_profit"),
+        ("💎 VVIP Info", "help_vvip"),
         ("🏠 Home", "home"),
     ])
 
@@ -66,15 +61,15 @@ async def help_menu(call: CallbackQuery):
 
 
 # =========================
-# TEMPLATE FUNCTION (BIAR GAK NGULANG)
+# TEMPLATE
 # =========================
 async def help_template(call: CallbackQuery, key: str, content: str):
 
     cached = get_cache(key)
 
-    if not cached:
+    if cached is None:
+        set_cache(key, content)
         cached = content
-        set_cache(key, cached)
 
     await loading(call)
 
@@ -91,7 +86,10 @@ async def help_template(call: CallbackQuery, key: str, content: str):
 # =========================
 @router.callback_query(F.data == "help_upfile")
 async def help_upfile(call: CallbackQuery):
-    await help_template(call, "upfile",
+
+    await help_template(
+        call,
+        "upfile",
         "━━━━━━━━━━━━━━\n"
         "📤 <b>CARA UPLOAD FILE</b>\n"
         "━━━━━━━━━━━━━━\n\n"
@@ -99,7 +97,7 @@ async def help_upfile(call: CallbackQuery):
         "2. Kirim file / link\n"
         "3. Tentukan harga\n"
         "4. System generate code otomatis\n"
-        "5. Code bisa dijual ke buyer\n"
+        "5. Code digunakan untuk akses file\n"
     )
 
 
@@ -108,48 +106,39 @@ async def help_upfile(call: CallbackQuery):
 # =========================
 @router.callback_query(F.data == "help_getfile")
 async def help_getfile(call: CallbackQuery):
-    await help_template(call, "getfile",
+
+    await help_template(
+        call,
+        "getfile",
         "━━━━━━━━━━━━━━\n"
         "📥 <b>CARA GET FILE</b>\n"
         "━━━━━━━━━━━━━━\n\n"
         "1. Klik GET FILE\n"
         "2. Masukkan kode\n"
-        "3. Jika GRATIS → langsung buka\n"
-        "4. Jika BERBAYAR → lakukan payment\n"
+        "3. Jika GRATIS → langsung akses\n"
+        "4. Jika BERBAYAR → lakukan unlock\n"
         "5. File akan dikirim otomatis\n"
     )
 
 
 # =========================
-# WITHDRAW
+# VVIP
 # =========================
-@router.callback_query(F.data == "help_withdraw")
-async def help_withdraw(call: CallbackQuery):
-    await help_template(call, "withdraw",
-        "━━━━━━━━━━━━━━\n"
-        "💸 <b>CARA WITHDRAW</b>\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "1. Masuk ACCOUNT\n"
-        "2. Klik WITHDRAW\n"
-        "3. Input nominal\n"
-        "4. Tunggu proses\n"
-        "5. Dana masuk ke wallet\n"
-    )
+@router.callback_query(F.data == "help_vvip")
+async def help_vvip(call: CallbackQuery):
 
-
-# =========================
-# PROFIT
-# =========================
-@router.callback_query(F.data == "help_profit")
-async def help_profit(call: CallbackQuery):
-    await help_template(call, "profit",
+    await help_template(
+        call,
+        "vvip",
         "━━━━━━━━━━━━━━\n"
-        "💰 <b>CARA MENGHASILKAN CUAN</b>\n"
+        "💎 <b>VVIP SYSTEM</b>\n"
         "━━━━━━━━━━━━━━\n\n"
-        "1. Upload file / code\n"
-        "2. Set harga jual\n"
-        "3. Dapatkan kode produk\n"
-        "4. Share ke buyer\n"
-        "5. Setiap transaksi → saldo masuk otomatis\n\n"
-        "🚀 Semakin banyak produk → semakin besar income"
+        "🔥 VVIP adalah akses premium user\n\n"
+        "📌 Manfaat VVIP:\n"
+        "• Update fitur lebih cepat\n"
+        "• Akses fitur eksklusif\n"
+        "• Support prioritas admin\n"
+        "• Tutorial sampai paham\n"
+        "• Sistem lebih stabil & prioritas server\n\n"
+        "🚀 VVIP dibuat untuk user yang serius menggunakan bot"
     )
