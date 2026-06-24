@@ -3,7 +3,17 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 
 router = Router()
 
+@router.callback_query(F.data == "vvip_join")
+async def vvip_join(call: CallbackQuery):
 
+    await call.message.edit_text(
+        "🚀 <b>VVIP ACCESS</b>\n\n"
+        "Untuk bergabung VVIP silakan hubungi admin:\n"
+        "👉 @admin_username\n\n"
+        "💎 Setelah join, kamu akan mendapatkan akses premium penuh."
+    )
+
+    await call.answer()
 @router.callback_query(F.data == "vvip")
 async def vvip_handler(call: CallbackQuery):
 
