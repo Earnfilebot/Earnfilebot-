@@ -4,11 +4,47 @@ from database import get_pool
 
 router = Router()
 
+# =========================
+# CONFIG
+# =========================
+LIMIT = 10  # ubah ke 20 kalau mau
+MAX_SHOW = 6  # anti leak (potong tampilan code)
 
-@router.callback_query(F.data == "my_code")
+
+# =========================
+# LOADING
+# =========================
+async def loading(call: CallbackQuery):
+    await call.message.edit_text("⏳ Loading...")
+
+
+# =========================
+# MASK CODE (ANTI LEAK)
+# =========================
+def mask_code(code: str):
+    if len(code) <= 8:
+        return "*" * len(code)
+
+    return code[:4] + "****" + code[-2:]
+
+
+# =========================
+# MY CODE (PAGINATION)
+# =========================
+@router.callback_query(F.data.startswith("my_code"))
 async def my_code(call: CallbackQuery):
 
-    msg = await call.message.edit_text("⏳ Loading...")
+    await loading(call)
+
+    page = 1
+    parts = call.data.split(":")
+    if len(parts) > 1:
+        try:
+            page = int(parts[1])
+        except:
+            page = 1
+
+    offset = (page - 1) * LIMIT
 
     pool = await get_pool()
 
@@ -19,23 +55,60 @@ async def my_code(call: CallbackQuery):
         WHERE user_id = $1
         AND code IS NOT NULL
         ORDER BY id DESC
+        LIMIT $2 OFFSET $3
         """,
-        call.from_user.id
+        call.from_user.id,
+        LIMIT,
+        offset
     )
 
-    text = "📦 <b>MY CODE</b>\n━━━━━━━━━━━━━━\n\n"
+    text = (
+        "📦 <b>MY CODE</b>\n"
+        "━━━━━━━━━━━━━━\n\n"
+    )
 
     if not rows:
         text += "❌ Belum ada code."
     else:
-        for i, row in enumerate(rows, 1):
-            text += f"{i}. <code>{row['code']}</code>\n"
+        for i, row in enumerate(rows, start=1):
+            code = mask_code(row["code"])
+            text += f"{i + offset}. <code>{code}</code>\n"
 
+    # =========================
+    # PAGINATION BUTTON
+    # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Kembali", callback_data="account")]
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Prev",
+                    callback_data=f"my_code:{page-1 if page > 1 else 1}"
+                ),
+                InlineKeyboardButton(
+                    text=f"📄 {page}",
+                    callback_data="noop"
+                ),
+                InlineKeyboardButton(
+                    text="Next ➡️",
+                    callback_data=f"my_code:{page+1}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Kembali",
+                    callback_data="account"
+                )
+            ]
         ]
     )
 
-    await msg.edit_text(text, reply_markup=kb)
+    await call.message.edit_text(text, reply_markup=kb)
+    await call.answer()
+
+
+# =========================
+# NOOP (biar tombol page tidak error)
+# =========================
+@router.callback_query(F.data == "noop")
+async def noop(call: CallbackQuery):
     await call.answer()
