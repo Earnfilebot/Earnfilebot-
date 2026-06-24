@@ -22,7 +22,7 @@ from handlers.upfile import router as upfile_router
 from handlers.getfile import router as getfile_router
 from handlers.page import router as page_router
 from handlers.account import router as account_router
-from handlers.code import router as code_router
+from handlers.my_code import router as my_code_router
 from handlers.vvip import router as vvip_router
 from handlers.help import router as help_router
 from handlers.about import router as about_router
@@ -37,7 +37,7 @@ dp.include_router(upfile_router)
 dp.include_router(getfile_router)
 dp.include_router(page_router)
 dp.include_router(account_router)
-dp.include_router(code_router)
+dp.include_router(my_code_router)
 dp.include_router(vvip_router)
 dp.include_router(help_router)
 dp.include_router(about_router)
