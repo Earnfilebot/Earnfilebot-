@@ -19,7 +19,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # =========================
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1004395938795"))
 GROUP_ID = int(os.getenv("GROUP_ID", str(CHANNEL_ID)))
-
+ADMIN_IDS = list(
+    map(int, os.getenv("ADMIN_IDS", "").split(","))
+)
 # =========================
 # VALIDATION
 # =========================
