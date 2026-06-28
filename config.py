@@ -13,7 +13,7 @@ TIMEZONE = "Asia/Jakarta"
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = "DecoderFileBot"
-
+BOT_URL = f"https://t.me/{BOT_USERNAME}"
 # =========================
 # DATABASE
 # =========================
