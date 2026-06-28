@@ -22,7 +22,7 @@ PAGE_SIZE = 10
 
 CLICK_COOLDOWN = defaultdict(float)
 USER_LOCK = defaultdict(lambda: asyncio.Lock())
-
+USER_PAGE_LOCK = defaultdict(float)
 
 # =========================
 # UTIL
@@ -95,11 +95,12 @@ async def page_handler(call: CallbackQuery):
     # =========================
     # ⏳ GLOBAL COOLDOWN 15 DETIK
     # =========================
-    if now - USER_CLICK_COOLDOWN[user_id] < 15:
-        return await call.answer("⏳ Tunggu 15 detik sebelum klik lagi", show_alert=True)
+    CLICK_KEY = f"{user_id}:{code}:{page}"
 
-    USER_CLICK_COOLDOWN[user_id] = now
-
+    if now - CLICK_COOLDOWN[CLICK_KEY] < 2:
+       return await call.answer("⏳ terlalu cepat", show_alert=True)
+    
+    CLICK_COOLDOWN[CLICK_KEY] = now
     # =========================
     # 🔒 24 JAM LOCK PER PAGE
     # =========================
