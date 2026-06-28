@@ -1,12 +1,21 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from config import TIMEZONE
 from bot import bot, dp
 from database import get_pool, close_db
 from tasks.auto_delete import auto_delete_worker
+
+os.environ["TZ"] = TIMEZONE
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
 polling_task = None
 auto_delete_task = None
