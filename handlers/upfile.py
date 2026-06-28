@@ -3,7 +3,6 @@ import json
 import random
 import string
 import time
-from config import BOT_URL
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
