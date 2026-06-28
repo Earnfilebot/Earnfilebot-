@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from tasks.payment_worker import payment_worker
 
 from config import TIMEZONE
 from bot import bot, dp
@@ -11,7 +13,9 @@ from database import get_pool, close_db
 from tasks.auto_delete import auto_delete_worker
 
 os.environ["TZ"] = TIMEZONE
-
+if hasattr(time, "tzset"):
+    time.tzset()
+    
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
@@ -19,12 +23,12 @@ logging.basicConfig(
 
 polling_task = None
 auto_delete_task = None
-
+payment_task = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    global polling_task, auto_delete_task
+    global polling_task, auto_delete_task, payment_task
 
     logging.info("🚀 START APP")
 
@@ -49,6 +53,9 @@ async def lifespan(app: FastAPI):
     # =========================
     auto_delete_task = asyncio.create_task(auto_delete_worker())
     logging.info("🧹 AUTO DELETE WORKER STARTED")
+
+    payment_task = asyncio.create_task(payment_worker())
+    logging.info("💳 PAYMENT WORKER STARTED")
 
     # =========================
     # START POLLING
@@ -82,6 +89,12 @@ async def lifespan(app: FastAPI):
             await auto_delete_task
         except asyncio.CancelledError:
             pass
+    if payment_task:
+        payment_task.cancel()
+        try:
+            await payment_task
+        except asyncio.CancelledError:
+            pass        
 
     await close_db()
     await bot.session.close()
