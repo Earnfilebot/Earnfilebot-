@@ -93,14 +93,15 @@ async def page_handler(call: CallbackQuery):
     now = time.time()
 
     # =========================
-    # ⏳ GLOBAL COOLDOWN 15 DETIK
+    # ⏳ CLICK COOLDOWN 2 DETIK
     # =========================
     CLICK_KEY = f"{user_id}:{code}:{page}"
 
     if now - CLICK_COOLDOWN[CLICK_KEY] < 2:
-       return await call.answer("⏳ terlalu cepat", show_alert=True)
-    
+        return await call.answer("⏳ terlalu cepat", show_alert=True)
+
     CLICK_COOLDOWN[CLICK_KEY] = now
+
     # =========================
     # 🔒 24 JAM LOCK PER PAGE
     # =========================
@@ -108,12 +109,11 @@ async def page_handler(call: CallbackQuery):
 
     last_open = USER_PAGE_LOCK.get(page_key)
 
-    if last_open:
-        if now - last_open < 86400:  # 24 jam
-            return await call.answer(
-                "⛔ Page ini sudah dibuka, tunggu 24 jam",
-                show_alert=True
-            )
+    if last_open and now - last_open < 86400:
+        return await call.answer(
+            "⛔ Page ini sudah dibuka, tunggu 24 jam",
+            show_alert=True
+        )
 
     USER_PAGE_LOCK[page_key] = now
 
@@ -144,7 +144,6 @@ async def page_handler(call: CallbackQuery):
 
         if page < 1:
             page = 1
-
         if page > total_page:
             return await call.answer("📦 Media sudah habis", show_alert=True)
 
@@ -158,8 +157,24 @@ async def page_handler(call: CallbackQuery):
             f"📊 TOTAL : {len(media)} FILE"
         )
 
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
+        # =========================
+        # BUTTON LOGIC CLEAN
+        # =========================
+        if total_page <= 1:
+            buttons = [
+                [
+                    InlineKeyboardButton(
+                        text="📢 Channel Update",
+                        url="https://t.me/+F6-XB1gFA9VhMDc1"
+                    ),
+                    InlineKeyboardButton(
+                        text="🔔 Notifikasi Code",
+                        url="https://t.me/+VebkFndPTeFkMGU1"
+                    )
+                ]
+            ]
+        else:
+            buttons = [
                 build_page_buttons(code, page, total_page),
                 [
                     InlineKeyboardButton(
@@ -172,7 +187,8 @@ async def page_handler(call: CallbackQuery):
                     )
                 ]
             ]
-        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
         album = []
 
