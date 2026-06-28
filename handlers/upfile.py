@@ -3,6 +3,7 @@ import json
 import random
 import string
 import time
+from config import BOT_URL
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
@@ -11,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import CHANNEL_ID, BOT_USERNAME
+from config import CHANNEL_ID, BOT_URL
 from database import get_pool
 from utils.force_sub import check_force_sub
 from keyboards.join import join_kb
@@ -326,7 +327,7 @@ async def finalize_save(message: Message, state: FSMContext):
             if not exists:
                 break
 
-        share_link = f"https://t.me/{BOT_USERNAME}?start=getFile_{code}"
+        share_link = f"{BOT_URL}?start=getFile_{code}"
 
         await pool.execute(
             """
