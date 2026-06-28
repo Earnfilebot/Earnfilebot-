@@ -169,7 +169,7 @@ async def page_handler(call: CallbackQuery):
                     ),
                     InlineKeyboardButton(
                         text="🔔 Notifikasi Code",
-                        url="https://t.me/+VebkFndPTeFkMGU1"
+                        url="https://t.me/+T8c4gdEWf843ZWQ1"
                     )
                 ]
             ]
@@ -183,7 +183,7 @@ async def page_handler(call: CallbackQuery):
                     ),
                     InlineKeyboardButton(
                         text="🔔 Notifikasi Code",
-                        url="https://t.me/+VebkFndPTeFkMGU1"
+                        url="https://t.me/+T8c4gdEWf843ZWQ1"
                     )
                 ]
             ]
