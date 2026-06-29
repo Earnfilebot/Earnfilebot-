@@ -1,54 +1,41 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database import get_pool
-
 router = Router()
-
-
 # =========================
 # PAY FILE
 # =========================
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
-
     user_id = call.from_user.id
     code = call.data.split(":")[1]
-
     pool = await get_pool()
-
     # =========================
-    # Ambil data file
+    # AMBIL DATA FILE
     # =========================
     file = await pool.fetchrow(
         """
-        SELECT
-            owner_id,
-            price,
-            is_paid
+        SELECT owner_id, price, is_paid
         FROM files
         WHERE code=$1
         """,
         code
     )
-
     if not file:
         return await call.answer(
             "❌ File tidak ditemukan",
             show_alert=True
         )
-
     owner_id = file["owner_id"]
     price = file["price"] or 0
-
     # =========================
-    # FILE GRATIS CHECK
+    # FILE GRATIS
     # =========================
     if not file["is_paid"]:
         return await call.answer(
             "File ini gratis.",
             show_alert=True
         )
-
     # =========================
     # OWNER AUTO ACCESS
     # =========================
@@ -63,11 +50,37 @@ async def pay_file(call: CallbackQuery):
                 ]
             ]
         )
-
         await call.message.edit_reply_markup(reply_markup=kb)
         return await call.answer()
-
-
+    # =========================
+    # VIP AUTO ACCESS
+    # =========================
+    vip = await pool.fetchval(
+        """
+        SELECT 1
+        FROM users
+        WHERE telegram_id=$1
+          AND vip=TRUE
+          AND vip_until > NOW()
+        """,
+        user_id
+    )
+    if vip:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📂 OPEN PAGE",
+                        callback_data=f"page:{code}:1"
+                    )
+                ]
+            ]
+        )
+        await call.message.edit_reply_markup(reply_markup=kb)
+        return await call.answer(
+            "💎 Akses VIP aktif.",
+            show_alert=True
+        )
     # =========================
     # SUDAH PERNAH BELI?
     # =========================
@@ -76,12 +89,13 @@ async def pay_file(call: CallbackQuery):
         SELECT 1
         FROM file_purchases
         WHERE user_id=$1
-        AND file_code=$2
+          AND file_code=$2
+          AND status='paid'
+        LIMIT 1
         """,
         user_id,
         code
     )
-
     if purchased:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -93,15 +107,11 @@ async def pay_file(call: CallbackQuery):
                 ]
             ]
         )
-
         await call.message.edit_reply_markup(reply_markup=kb)
-
         return await call.answer(
             "✅ Kamu sudah membeli file ini.",
             show_alert=True
         )
-
-
     # =========================
     # CEK SALDO
     # =========================
@@ -113,22 +123,17 @@ async def pay_file(call: CallbackQuery):
         """,
         user_id
     )
-
     balance = balance or 0
-
     if balance < price:
         return await call.answer(
             f"❌ Saldo kurang.\n\nSaldo : Rp {balance:,}\nHarga : Rp {price:,}".replace(",", "."),
             show_alert=True
         )
-
-
     # =========================
-    # TRANSACTION
+    # TRANSAKSI
     # =========================
     async with pool.acquire() as conn:
         async with conn.transaction():
-
             await conn.execute(
                 """
                 UPDATE users
@@ -138,7 +143,6 @@ async def pay_file(call: CallbackQuery):
                 price,
                 user_id
             )
-
             await conn.execute(
                 """
                 UPDATE users
@@ -150,7 +154,6 @@ async def pay_file(call: CallbackQuery):
                 price,
                 owner_id
             )
-
             await conn.execute(
                 """
                 UPDATE users
@@ -159,7 +162,6 @@ async def pay_file(call: CallbackQuery):
                 """,
                 user_id
             )
-
             await conn.execute(
                 """
                 INSERT INTO file_purchases
@@ -167,10 +169,11 @@ async def pay_file(call: CallbackQuery):
                     user_id,
                     file_code,
                     owner_id,
-                    paid_price
+                    paid_price,
+                    status
                 )
                 VALUES
-                ($1,$2,$3,$4)
+                ($1,$2,$3,$4,'paid')
                 ON CONFLICT DO NOTHING
                 """,
                 user_id,
@@ -178,8 +181,6 @@ async def pay_file(call: CallbackQuery):
                 owner_id,
                 price
             )
-
-
     # =========================
     # UNLOCK PAGE
     # =========================
@@ -193,9 +194,7 @@ async def pay_file(call: CallbackQuery):
             ]
         ]
     )
-
     await call.message.edit_reply_markup(reply_markup=kb)
-
     await call.answer(
         "✅ Pembayaran berhasil.",
         show_alert=True
