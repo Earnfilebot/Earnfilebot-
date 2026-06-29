@@ -98,6 +98,7 @@ async def buy_vip(call: CallbackQuery):
 
     invoice_id = payment["invoice_id"]
     payment_url = payment["payment_url"]
+    qris_string = payment.get("qris_string")
 
     expires_at = datetime.strptime(
         payment["expires_at"],
