@@ -81,74 +81,93 @@ def build_page_buttons(code: str, page: int, total: int):
 # =========================
 @router.callback_query(F.data.startswith("page:"))
 async def page_handler(call: CallbackQuery):
-
     user_id = call.from_user.id
-
     try:
         _, code, page = call.data.split(":")
         page = int(page)
     except Exception:
         return await call.answer("❌ Invalid data", show_alert=True)
-
     now = time.time()
-
     # =========================
-    # ⏳ CLICK COOLDOWN 2 DETIK
+    # CLICK COOLDOWN
     # =========================
-    CLICK_KEY = f"{user_id}:{code}:{page}"
-
-    if now - CLICK_COOLDOWN[CLICK_KEY] < 2:
-        return await call.answer("⏳ terlalu cepat", show_alert=True)
-
-    CLICK_COOLDOWN[CLICK_KEY] = now
-
+    click_key = f"{user_id}:{code}:{page}"
+    if now - CLICK_COOLDOWN[click_key] < 2:
+        return await call.answer("⏳ Terlalu cepat", show_alert=True)
+    CLICK_COOLDOWN[click_key] = now
     # =========================
-    # 🔒 24 JAM LOCK PER PAGE
+    # 24 JAM LOCK
     # =========================
     page_key = f"{user_id}:{code}:{page}"
-
     last_open = USER_PAGE_LOCK.get(page_key)
-
     if last_open and now - last_open < 86400:
         return await call.answer(
             "⛔ Page ini sudah dibuka, tunggu 24 jam",
             show_alert=True
         )
-
     USER_PAGE_LOCK[page_key] = now
-
     async with USER_LOCK[user_id]:
-
         pool = await get_pool()
-
         file = await pool.fetchrow(
             "SELECT * FROM files WHERE code=$1",
             code
         )
-
         if not file:
-            return await call.answer("❌ File tidak ditemukan", show_alert=True)
-
+            return await call.answer(
+                "❌ File tidak ditemukan",
+                show_alert=True
+            )
+        # =========================
+        # FILE PAID CHECK
+        # =========================
+        if file["is_paid"]:
+            if call.from_user.id != file["owner_id"]:
+                bought = await pool.fetchval(
+                    """
+                    SELECT 1
+                    FROM file_purchases
+                    WHERE user_id=$1
+                      AND code=$2
+                    """,
+                    call.from_user.id,
+                    code
+                )
+                if not bought:
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text=f"💳 Bayar Rp {file['price']:,}".replace(",", "."),
+                                    callback_data=f"buyfile:{code}"
+                                )
+                            ]
+                        ]
+                    )
+                    await call.message.answer(
+                        "🔒 File ini berbayar.\n\nSilakan beli terlebih dahulu.",
+                        reply_markup=kb
+                    )
+                    return await call.answer()
         media = file.get("media")
-
         if isinstance(media, str):
             try:
                 media = json.loads(media)
-            except:
+            except Exception:
                 media = []
-
         if not isinstance(media, list) or not media:
-            return await call.answer("❌ File kosong", show_alert=True)
-
-        total_page = max(1, (len(media) + PAGE_SIZE - 1) // PAGE_SIZE)
-
-        if page < 1:
-            page = 1
-        if page > total_page:
-            return await call.answer("📦 Media sudah habis", show_alert=True)
-
-        chunk = media[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
-
+            return await call.answer(
+                "❌ File kosong",
+                show_alert=True
+            )
+        total_page = max(
+            1,
+            (len(media) + PAGE_SIZE - 1) // PAGE_SIZE
+        )
+        page = max(1, min(page, total_page))
+        chunk = media[
+            (page - 1) * PAGE_SIZE:
+            page * PAGE_SIZE
+        ]
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
             "━━━━━━━━━━━━━━━\n\n"
@@ -156,10 +175,6 @@ async def page_handler(call: CallbackQuery):
             f"📦 PAGE : {page}/{total_page}\n"
             f"📊 TOTAL : {len(media)} FILE"
         )
-
-        # =========================
-        # BUTTON LOGIC CLEAN
-        # =========================
         if total_page <= 1:
             buttons = [
                 [
@@ -187,42 +202,45 @@ async def page_handler(call: CallbackQuery):
                     )
                 ]
             ]
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        )
         album = []
-
         for i, item in enumerate(chunk):
-
             fid = item.get("file_id")
             ftype = (item.get("type") or "document").lower()
-
             if not fid:
                 continue
-
             cap = caption if i == 0 else None
-
             if ftype == "photo":
-                album.append(InputMediaPhoto(media=fid, caption=cap))
-
+                album.append(
+                    InputMediaPhoto(
+                        media=fid,
+                        caption=cap
+                    )
+                )
             elif ftype == "video":
-                album.append(InputMediaVideo(media=fid, caption=cap))
-
+                album.append(
+                    InputMediaVideo(
+                        media=fid,
+                        caption=cap
+                    )
+                )
             else:
-                album.append(InputMediaDocument(media=fid, caption=cap))
-
+                album.append(
+                    InputMediaDocument(
+                        media=fid,
+                        caption=cap
+                    )
+                )
         if not album:
-            return await call.answer("❌ Tidak ada media valid", show_alert=True)
-
-        try:
-            await call.message.answer_media_group(media=album)
-
-            await call.message.answer(
-                "📦 NAVIGATION",
-                reply_markup=keyboard
+            return await call.answer(
+                "❌ Tidak ada media",
+                show_alert=True
             )
-
-        except Exception as e:
-            return await call.answer(f"❌ {str(e)}", show_alert=True)
-
+        await call.message.answer_media_group(album)
+        await call.message.answer(
+            "📦 NAVIGATION",
+            reply_markup=keyboard
+        )
         await call.answer()
