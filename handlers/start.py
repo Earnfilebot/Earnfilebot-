@@ -59,13 +59,8 @@ async def start_cmd(message: Message, state: FSMContext):
                 else "🆓 Free"
             )
             first = media[0]
-fid = first["file_id"]
-if fid.startswith("AgAC"):
-    ftype = "photo"
-elif fid.startswith("BAAC"):
-    ftype = "document"
-else:
-    ftype = "document"
+            fid = first["file_id"]
+            ftype = first.get("type", "document")
             if is_paid:
                 keyboard = InlineKeyboardMarkup(
                     inline_keyboard=[
