@@ -1,15 +1,21 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database import get_pool
+
 router = Router()
+
+
 # =========================
 # PAY FILE
 # =========================
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
+
     user_id = call.from_user.id
     code = call.data.split(":")[1]
+
     pool = await get_pool()
+
     # =========================
     # Ambil data file
     # =========================
@@ -24,14 +30,28 @@ async def pay_file(call: CallbackQuery):
         """,
         code
     )
+
     if not file:
         return await call.answer(
             "❌ File tidak ditemukan",
             show_alert=True
         )
+
     owner_id = file["owner_id"]
     price = file["price"] or 0
-    # Owner tidak perlu beli
+
+    # =========================
+    # FILE GRATIS CHECK
+    # =========================
+    if not file["is_paid"]:
+        return await call.answer(
+            "File ini gratis.",
+            show_alert=True
+        )
+
+    # =========================
+    # OWNER AUTO ACCESS
+    # =========================
     if owner_id == user_id:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -43,10 +63,13 @@ async def pay_file(call: CallbackQuery):
                 ]
             ]
         )
+
         await call.message.edit_reply_markup(reply_markup=kb)
         return await call.answer()
+
+
     # =========================
-    # Sudah pernah beli?
+    # SUDAH PERNAH BELI?
     # =========================
     purchased = await pool.fetchval(
         """
@@ -58,6 +81,7 @@ async def pay_file(call: CallbackQuery):
         user_id,
         code
     )
+
     if purchased:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -69,13 +93,17 @@ async def pay_file(call: CallbackQuery):
                 ]
             ]
         )
+
         await call.message.edit_reply_markup(reply_markup=kb)
+
         return await call.answer(
             "✅ Kamu sudah membeli file ini.",
             show_alert=True
         )
+
+
     # =========================
-    # Saldo user
+    # CEK SALDO
     # =========================
     balance = await pool.fetchval(
         """
@@ -85,18 +113,22 @@ async def pay_file(call: CallbackQuery):
         """,
         user_id
     )
+
     balance = balance or 0
+
     if balance < price:
         return await call.answer(
             f"❌ Saldo kurang.\n\nSaldo : Rp {balance:,}\nHarga : Rp {price:,}".replace(",", "."),
             show_alert=True
         )
+
+
     # =========================
-    # Transaction
+    # TRANSACTION
     # =========================
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # Potong saldo pembeli
+
             await conn.execute(
                 """
                 UPDATE users
@@ -106,7 +138,7 @@ async def pay_file(call: CallbackQuery):
                 price,
                 user_id
             )
-            # Tambah saldo owner
+
             await conn.execute(
                 """
                 UPDATE users
@@ -118,7 +150,7 @@ async def pay_file(call: CallbackQuery):
                 price,
                 owner_id
             )
-            # Tambah download user
+
             await conn.execute(
                 """
                 UPDATE users
@@ -127,7 +159,7 @@ async def pay_file(call: CallbackQuery):
                 """,
                 user_id
             )
-            # Simpan pembelian
+
             await conn.execute(
                 """
                 INSERT INTO file_purchases
@@ -139,12 +171,18 @@ async def pay_file(call: CallbackQuery):
                 )
                 VALUES
                 ($1,$2,$3,$4)
+                ON CONFLICT DO NOTHING
                 """,
                 user_id,
                 code,
                 owner_id,
                 price
             )
+
+
+    # =========================
+    # UNLOCK PAGE
+    # =========================
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -155,9 +193,9 @@ async def pay_file(call: CallbackQuery):
             ]
         ]
     )
-    await call.message.edit_reply_markup(
-        reply_markup=kb
-    )
+
+    await call.message.edit_reply_markup(reply_markup=kb)
+
     await call.answer(
         "✅ Pembayaran berhasil.",
         show_alert=True
