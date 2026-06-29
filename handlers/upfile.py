@@ -109,54 +109,46 @@ async def start_upfile(call: CallbackQuery, state: FSMContext):
 # =========================
 @router.message(F.document | F.video | F.photo)
 async def receive_media(message: Message, state: FSMContext):
-
     async with get_lock(message.from_user.id):
-
         data = await state.get_data()
-
         if not data.get("upload_mode"):
             return
-
         media = data.get("media", [])
-
         if len(media) >= MAX_MEDIA:
             return await message.answer(f"❌ Max {MAX_MEDIA} files reached")
-
         if message.document:
             fid = message.document.file_id
+            mtype = "document"
         elif message.video:
             fid = message.video.file_id
+            mtype = "video"
         else:
             fid = message.photo[-1].file_id
-
+            mtype = "photo"
         if any(x["file_id"] == fid for x in media):
             return
-
-        media.append({"file_id": fid})
+        media.append({
+            "file_id": fid,
+            "type": mtype
+        })
         await state.update_data(media=media)
-
         try:
             await message.delete()
         except:
             pass
-
         total = len(media)
-
         progress = min(10, int((total / MAX_MEDIA) * 10))
         bar = "█" * progress + "░" * (10 - progress)
-
         text = (
             "📦 <b>UPLOAD MANAGER</b>\n\n"
             f"📁 Total Files: <b>{total}</b>\n"
             f"📊 Progress: [{bar}]\n"
             f"{total}/{MAX_MEDIA}"
         )
-
         kb = InlineKeyboardBuilder()
         kb.button(text="⏹ STOP & SAVE", callback_data="save_upfile")
         kb.button(text="❌ CANCEL", callback_data="cancel_upfile")
         kb.adjust(2)
-
         await safe_update(
             message.bot,
             message.chat.id,
