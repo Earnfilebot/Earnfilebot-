@@ -11,10 +11,10 @@ class BayarGG:
     async def create_payment(
         amount: int,
         description: str,
-        callback_url: str = None,
-        redirect_url: str = None,
-        customer_name: str = None,
-        customer_phone: str = None,
+        callback_url: str | None = None,
+        redirect_url: str | None = None,
+        customer_name: str | None = None,
+        customer_phone: str | None = None,
         payment_method: str = "qris",
     ):
 
@@ -43,18 +43,20 @@ class BayarGG:
 
         async with httpx.AsyncClient(timeout=30) as client:
 
-            r = await client.post(
+            response = await client.post(
                 f"{BASE_URL}/create-payment.php",
                 headers=headers,
                 json=payload
             )
 
-        r.raise_for_status()
+        response.raise_for_status()
 
-        data = r.json()
+        data = response.json()
 
         if not data.get("success"):
-            raise Exception(data)
+            raise Exception(
+                data.get("message", str(data))
+            )
 
         return data["data"]
 
@@ -65,18 +67,23 @@ class BayarGG:
             "X-API-Key": BAYARGG_API_KEY
         }
 
-        params = {
-            "invoice": invoice_id
-        }
-
         async with httpx.AsyncClient(timeout=30) as client:
 
-            r = await client.get(
+            response = await client.get(
                 f"{BASE_URL}/check-payment.php",
                 headers=headers,
-                params=params
+                params={
+                    "invoice": invoice_id
+                }
             )
 
-        r.raise_for_status()
+        response.raise_for_status()
 
-        return r.json()
+        data = response.json()
+
+        if not data.get("success"):
+            raise Exception(
+                data.get("message", str(data))
+            )
+
+        return data
