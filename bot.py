@@ -16,6 +16,7 @@ dp = Dispatcher()
 # =========================
 # ROUTERS IMPORT
 # =========================
+from handlers.bayargg import router as bayargg_router
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
@@ -31,6 +32,7 @@ from handlers.admin import router as admin_router
 # =========================
 # REGISTER ROUTERS
 # =========================
+dp.include_router(bayargg_router)
 dp.include_router(start_router)
 dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
