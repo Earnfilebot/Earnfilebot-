@@ -41,6 +41,10 @@ class BayarGG:
         if customer_phone:
             payload["customer_phone"] = customer_phone
 
+        print("========== BAYARGG REQUEST ==========")
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        print("====================================")
+
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{BASE_URL}/create-payment.php",
@@ -48,7 +52,15 @@ class BayarGG:
                 json=payload
             )
 
-        response.raise_for_status()
+        print("========== BAYARGG HTTP ==========")
+        print("STATUS :", response.status_code)
+        print("BODY   :", response.text)
+        print("==================================")
+
+        if response.status_code != 200:
+            raise Exception(
+                f"HTTP {response.status_code}\n{response.text}"
+            )
 
         data = response.json()
 
@@ -90,6 +102,9 @@ class BayarGG:
                     "invoice": invoice_id
                 }
             )
+
+        print("CHECK STATUS :", response.status_code)
+        print("CHECK BODY   :", response.text)
 
         response.raise_for_status()
 
