@@ -1,15 +1,14 @@
 import hmac
 import hashlib
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 
 from bot import bot
 from config import BAYARGG_API_KEY
-from database import get_pool
 from config_vip import VIP_PACKAGES
-
-from datetime import datetime, timedelta, timezone
+from database import get_pool
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
@@ -70,70 +69,90 @@ async def bayargg_webhook(request: Request):
             "message": "already processed"
         }
 
-    paket = VIP_PACKAGES[trx["code"]]
+    paket = VIP_PACKAGES.get(trx["code"])
 
-    vip_until = datetime.now(timezone.utc) + timedelta(
-        days=paket["days"]
-    )
+    if not paket:
+        return {
+            "success": False,
+            "message": "invalid package"
+        }
 
-    # =========================
-    # UPDATE PAYMENT
-    # =========================
-    await pool.execute(
+    user = await pool.fetchrow(
         """
-        UPDATE payments
-        SET
-            status='paid',
-            updated_at=NOW()
-        WHERE invoice_id=$1
+        SELECT vip_until
+        FROM users
+        WHERE telegram_id=$1
         """,
-        invoice_id
-    )
-
-    # =========================
-    # UPDATE USER
-    # =========================
-    await pool.execute(
-        """
-        UPDATE users
-        SET
-            vip=true,
-            is_vip=true,
-            vip_until=$1
-        WHERE telegram_id=$2
-        """,
-        vip_until,
         trx["user_id"]
     )
 
-    # =========================
-    # VIP HISTORY
-    # =========================
-    await pool.execute(
-        """
-        INSERT INTO vip_users
-        (
-            user_id,
-            plan,
-            invoice_id,
-            started_at,
-            expires_at,
-            active
-        )
-        VALUES
-        ($1,$2,$3,NOW(),$4,TRUE)
-        """,
-        trx["user_id"],
-        paket["name"],
-        invoice_id,
-        vip_until
-    )
+    now = datetime.now(timezone.utc)
+
+    if user and user["vip_until"] and user["vip_until"] > now:
+        vip_until = user["vip_until"] + timedelta(days=paket["days"])
+    else:
+        vip_until = now + timedelta(days=paket["days"])
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+
+            # =========================
+            # UPDATE PAYMENT
+            # =========================
+            await conn.execute(
+                """
+                UPDATE payments
+                SET
+                    status='paid',
+                    updated_at=NOW()
+                WHERE invoice_id=$1
+                """,
+                invoice_id
+            )
+
+            # =========================
+            # UPDATE USER
+            # =========================
+            await conn.execute(
+                """
+                UPDATE users
+                SET
+                    vip=TRUE,
+                    is_vip=TRUE,
+                    vip_until=$1
+                WHERE telegram_id=$2
+                """,
+                vip_until,
+                trx["user_id"]
+            )
+
+            # =========================
+            # VIP HISTORY
+            # =========================
+            await conn.execute(
+                """
+                INSERT INTO vip_users
+                (
+                    user_id,
+                    plan,
+                    invoice_id,
+                    started_at,
+                    expires_at,
+                    active
+                )
+                VALUES
+                ($1,$2,$3,NOW(),$4,TRUE)
+                """,
+                trx["user_id"],
+                paket["name"],
+                invoice_id,
+                vip_until
+            )
 
     # =========================
     # SEND TELEGRAM
     # =========================
     try:
-
         await bot.send_message(
             trx["user_id"],
             (
@@ -145,7 +164,6 @@ async def bayargg_webhook(request: Request):
             ),
             parse_mode="HTML"
         )
-
     except Exception:
         logging.exception("Gagal mengirim pesan VIP")
 
