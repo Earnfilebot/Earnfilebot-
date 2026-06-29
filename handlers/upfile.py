@@ -66,7 +66,7 @@ class UploadState(StatesGroup):
     upload = State()
     wait_folder = State()
     wait_expiry = State()
-
+    wait_price = State()
 
 # =========================
 # START UPLOAD
@@ -287,11 +287,52 @@ async def set_expiry(call: CallbackQuery, state: FSMContext):
 
     await state.update_data(expiry=expiry)
 
-    await call.message.edit_text("⏳ Saving file...")
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="🆓 Free",
+        callback_data="file_free"
+    )
+
+    kb.button(
+        text="💰 Paid",
+        callback_data="file_paid"
+    )
+
+    kb.adjust(2)
+
+    await call.message.edit_text(
+        "💎 Pilih tipe file:",
+        reply_markup=kb.as_markup()
+    )
+
+@router.callback_query(F.data == "file_paid")
+async def file_paid(call: CallbackQuery, state: FSMContext):
+
+    await call.answer()
+
+    await call.message.edit_text(
+        "💰 Masukkan harga file.\n\n"
+        "Minimal: 1000"
+    )
+
+    await state.set_state(UploadState.wait_price)
+
+@router.callback_query(F.data == "file_free")
+async def file_free(call: CallbackQuery, state: FSMContext):
+
+    await call.answer()
+
+    await state.update_data(
+        is_paid=False,
+        price=0,
+        payment_provider=None
+    )
+
+    await call.message.edit_text("⏳ Menyimpan file...")
 
     await finalize_save(call.message, state)
-
-
+    
 # =========================
 # FINAL SAVE
 # =========================
