@@ -12,6 +12,7 @@ class BayarGG:
     async def create_payment(
         amount: int,
         description: str,
+        payment_url: str = "https://www.bayar.gg/pay",
         callback_url: str | None = None,
         redirect_url: str | None = None,
         customer_name: str | None = None,
@@ -20,12 +21,14 @@ class BayarGG:
     ):
 
         headers = {
-            "X-API-Key": BAYARGG_API_KEY
+            "X-API-Key": BAYARGG_API_KEY,
+            "Content-Type": "application/json"
         }
 
         payload = {
             "amount": amount,
             "description": description,
+            "payment_url": payment_url,
             "payment_method": payment_method,
         }
 
@@ -57,10 +60,7 @@ class BayarGG:
         print("BODY   :", response.text)
         print("==================================")
 
-        if response.status_code != 200:
-            raise Exception(
-                f"HTTP {response.status_code}\n{response.text}"
-            )
+        response.raise_for_status()
 
         data = response.json()
 
@@ -70,22 +70,12 @@ class BayarGG:
 
         if not data.get("success"):
             raise Exception(
-                data.get("message", str(data))
+                data.get("error")
+                or data.get("message")
+                or str(data)
             )
 
-        result = data.get("data", {})
-
-        result["payment_url"] = data.get(
-            "payment_url",
-            result.get("payment_url")
-        )
-
-        result["qris_string"] = data.get(
-            "qris_string",
-            result.get("qris_string")
-        )
-
-        return result
+        return data["data"]
 
     @staticmethod
     async def check_payment(invoice_id: str):
@@ -112,7 +102,9 @@ class BayarGG:
 
         if not data.get("success"):
             raise Exception(
-                data.get("message", str(data))
+                data.get("error")
+                or data.get("message")
+                or str(data)
             )
 
         return data
