@@ -95,17 +95,6 @@ async def page_handler(call: CallbackQuery):
     if now - CLICK_COOLDOWN[click_key] < 2:
         return await call.answer("⏳ Terlalu cepat", show_alert=True)
     CLICK_COOLDOWN[click_key] = now
-    # =========================
-    # 24 JAM LOCK
-    # =========================
-    page_key = f"{user_id}:{code}:{page}"
-    last_open = USER_PAGE_LOCK.get(page_key)
-    if last_open and now - last_open < 86400:
-        return await call.answer(
-            "⛔ Page ini sudah dibuka, tunggu 24 jam",
-            show_alert=True
-        )
-    USER_PAGE_LOCK[page_key] = now
     async with USER_LOCK[user_id]:
         pool = await get_pool()
         file = await pool.fetchrow(
@@ -121,15 +110,16 @@ async def page_handler(call: CallbackQuery):
         # FILE PAID CHECK
         # =========================
         if file["is_paid"]:
-            if call.from_user.id != file["owner_id"]:
+            # Owner selalu boleh
+            if user_id != file["owner_id"]:
                 bought = await pool.fetchval(
                     """
                     SELECT 1
                     FROM file_purchases
                     WHERE user_id=$1
-                      AND code=$2
+                    AND file_code=$2
                     """,
-                    call.from_user.id,
+                    user_id,
                     code
                 )
                 if not bought:
@@ -148,13 +138,24 @@ async def page_handler(call: CallbackQuery):
                         reply_markup=kb
                     )
                     return await call.answer()
-        media = file.get("media")
+        # =========================
+        # LOCK 24 JAM
+        # =========================
+        page_key = f"{user_id}:{code}:{page}"
+        last_open = USER_PAGE_LOCK.get(page_key)
+        if last_open and now - last_open < 86400:
+            return await call.answer(
+                "⛔ Page ini sudah dibuka, tunggu 24 jam",
+                show_alert=True
+            )
+        USER_PAGE_LOCK[page_key] = now
+        media = file["media"]
         if isinstance(media, str):
             try:
                 media = json.loads(media)
             except Exception:
                 media = []
-        if not isinstance(media, list) or not media:
+        if not media:
             return await call.answer(
                 "❌ File kosong",
                 show_alert=True
@@ -238,7 +239,9 @@ async def page_handler(call: CallbackQuery):
                 "❌ Tidak ada media",
                 show_alert=True
             )
-        await call.message.answer_media_group(album)
+        await call.message.answer_media_group(
+            media=album
+        )
         await call.message.answer(
             "📦 NAVIGATION",
             reply_markup=keyboard
