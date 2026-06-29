@@ -26,7 +26,6 @@ class BayarGG:
         payload = {
             "amount": amount,
             "description": description,
-            "payment_url": "https://www.bayar.gg/pay",
             "payment_method": payment_method,
         }
 
@@ -62,7 +61,19 @@ class BayarGG:
                 data.get("message", str(data))
             )
 
-        return data["data"]
+        result = data.get("data", {})
+
+        result["payment_url"] = data.get(
+            "payment_url",
+            result.get("payment_url")
+        )
+
+        result["qris_string"] = data.get(
+            "qris_string",
+            result.get("qris_string")
+        )
+
+        return result
 
     @staticmethod
     async def check_payment(invoice_id: str):
