@@ -23,84 +23,116 @@ router = Router()
 # =========================
 @router.message(CommandStart())
 async def start_cmd(message: Message, state: FSMContext):
-
     await state.clear()
-
     args = message.text.split(maxsplit=1)
-
     # =========================
     # HANDLE DEEP LINK FILE
     # =========================
     if len(args) > 1:
-
         payload = args[1]
-
         if payload.startswith("getFile_"):
-
             code = payload.replace("getFile_", "")
-
             pool = await get_pool()
-
             file = await pool.fetchrow(
-                "SELECT media FROM files WHERE code=$1",
+                """
+                SELECT
+                    media,
+                    is_paid,
+                    price,
+                    payment_provider,
+                    owner_id
+                FROM files
+                WHERE code=$1
+                """,
                 code
             )
-
             if not file:
                 return await message.answer("❌ File tidak ditemukan")
-
             media = json.loads(file["media"])
-
             if not media:
                 return await message.answer("❌ File kosong")
-
-            first = media[0]
-
-            fid = first.get("file_id")
-            ftype = (first.get("type") or "document").lower()
-
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="📂 OPEN PAGE",
-                            callback_data=f"page:{code}:1"
-                        )
-                    ]
-                ]
+            is_paid = file["is_paid"]
+            price = file["price"] or 0
+            mode = (
+                f"💰 Paid • Rp {price:,}".replace(",", ".")
+                if is_paid
+                else "🆓 Free"
             )
-
+            first = media[0]
+fid = first["file_id"]
+if fid.startswith("AgAC"):
+    ftype = "photo"
+elif fid.startswith("BAAC"):
+    ftype = "document"
+else:
+    ftype = "document"
+            if is_paid:
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text=f"💳 Bayar Rp {price:,}".replace(",", "."),
+                                callback_data=f"buyfile:{code}"
+                            )
+                        ]
+                    ]
+                )
+            else:
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="📂 OPEN PAGE",
+                                callback_data=f"page:{code}:1"
+                            )
+                        ]
+                    ]
+                )
             caption = (
                 "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-                f"🔑 CODE: {code}\n"
-                f"📦 FILE: {len(media)}\n"
+                f"🔑 CODE : {code}\n"
+                f"📦 FILE : {len(media)}\n"
+                f"📂 MODE : {mode}\n"
                 "━━━━━━━━━━━━━━"
             )
-
             try:
                 if ftype == "photo":
-                    await message.answer_photo(fid, caption=caption, reply_markup=keyboard)
-
+                    await message.answer_photo(
+                        fid,
+                        caption=caption,
+                        reply_markup=keyboard
+                    )
                 elif ftype == "video":
-                    await message.answer_video(fid, caption=caption, reply_markup=keyboard)
-
+                    await message.answer_video(
+                        fid,
+                        caption=caption,
+                        reply_markup=keyboard
+                    )
                 else:
-                    await message.answer_document(fid, caption=caption, reply_markup=keyboard)
-
+                    await message.answer_document(
+                        fid,
+                        caption=caption,
+                        reply_markup=keyboard
+                    )
             except Exception as e:
-                await message.answer(f"❌ ERROR MEDIA: {e}")
-
+                await message.answer(
+                    f"❌ ERROR MEDIA\n\n<code>{e}</code>",
+                    parse_mode="HTML"
+                )
             return
     # =========================
     # NORMAL START
     # =========================
     user_id = message.from_user.id
     username = message.from_user.username or "unknown"
-
     loading = await message.answer("⚡ Loading...")
-
     try:
-        await process_start(message, loading, user_id, username)
+        await process_start(
+            message,
+            loading,
+            user_id,
+            username
+        )
     except Exception as e:
         logging.exception(f"START ERROR: {e}")
         await loading.edit_text("❌ SYSTEM ERROR START")
@@ -128,30 +160,62 @@ async def process_start(message, loading, user_id, username):
 
     await pool.execute(
         """
-        INSERT INTO users (telegram_id, username)
-        VALUES ($1, $2)
-        ON CONFLICT (telegram_id) DO NOTHING
+        INSERT INTO users
+        (
+            telegram_id,
+            username,
+            balance
+        )
+        VALUES
+        ($1,$2,0)
+        ON CONFLICT (telegram_id)
+        DO UPDATE SET
+            username=EXCLUDED.username
         """,
         user_id,
         username
     )
 
-    await render_home_fast(bot, loading, user_id)
+    user = await pool.fetchrow(
+        """
+        SELECT username, balance
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        user_id
+    )
 
-
+    await render_home_fast(
+        bot,
+        loading,
+        user_id,
+        user["username"] or "unknown",
+        user["balance"] or 0
+    )
+    
 # =========================
 # HOME UI
 # =========================
-async def render_home_fast(bot, message, user_id):
+async def render_home_fast(
+    bot,
+    message,
+    user_id,
+    username,
+    balance
+):
 
     text = (
         "<b>📂 DECODER FILE BOT</b>\n\n"
         "Selamat datang di Decoder File Bot.\n\n"
+
         "━━━━━━━━━━━━━━━━━━\n"
         f"🆔 ID : <code>{user_id}</code>\n"
+        f"👤 Username : @{username}\n"
+        f"💰 Saldo : <b>Rp {balance:,}</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
+
         "Silakan pilih menu di bawah."
-    )
+    ).replace(",", ".")
 
     try:
         await message.edit_text(
@@ -159,6 +223,7 @@ async def render_home_fast(bot, message, user_id):
             parse_mode="HTML",
             reply_markup=home_kb()
         )
+
     except Exception:
         await bot.send_message(
             user_id,
@@ -190,5 +255,23 @@ async def back_home(call: CallbackQuery, state: FSMContext):
         )
         return await call.answer()
 
-    await render_home_fast(call.bot, call.message, user_id)
+    pool = await get_pool()
+
+    user = await pool.fetchrow(
+        """
+        SELECT username, balance
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        user_id
+    )
+
+    await render_home_fast(
+        call.bot,
+        call.message,
+        user_id,
+        user["username"] or "unknown",
+        user["balance"] or 0
+    )
+
     await call.answer()
