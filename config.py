@@ -48,3 +48,6 @@ if not BOT_TOKEN:
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL belum di-set di .env")
+
+if not BAYARGG_API_KEY:
+    raise ValueError("BAYARGG_API_KEY belum di-set di .env / Railway Variables")
