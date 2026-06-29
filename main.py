@@ -5,6 +5,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from handlers.test_bayargg import router as test_router
 from tasks.payment_worker import payment_worker
 
 from config import TIMEZONE
@@ -103,7 +104,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
+app.include_router(test_router)
 
 @app.get("/")
 async def root():
