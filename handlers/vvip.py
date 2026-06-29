@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from database import get_pool
 from utils.bayargg import BayarGG
 from aiogram.types import CallbackQuery
@@ -125,7 +125,6 @@ async def buy_vip(call: CallbackQuery):
         """,
         call.from_user.id,
         paket_id,
-        invoice_id,
         invoice_id,
         paket["price"],
         "pending",
