@@ -1,4 +1,5 @@
 import httpx
+import json
 
 from config import BAYARGG_API_KEY
 
@@ -42,7 +43,6 @@ class BayarGG:
             payload["customer_phone"] = customer_phone
 
         async with httpx.AsyncClient(timeout=30) as client:
-
             response = await client.post(
                 f"{BASE_URL}/create-payment.php",
                 headers=headers,
@@ -52,6 +52,10 @@ class BayarGG:
         response.raise_for_status()
 
         data = response.json()
+
+        print("========== BAYARGG RESPONSE ==========")
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        print("=====================================")
 
         if not data.get("success"):
             raise Exception(
@@ -68,7 +72,6 @@ class BayarGG:
         }
 
         async with httpx.AsyncClient(timeout=30) as client:
-
             response = await client.get(
                 f"{BASE_URL}/check-payment.php",
                 headers=headers,
