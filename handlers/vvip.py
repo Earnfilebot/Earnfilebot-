@@ -1,10 +1,11 @@
 from aiogram import Router, F
-from datetime import datetime, timezone, timedelta
-from database import get_pool
-from utils.bayargg import BayarGG
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from datetime import datetime, timezone, timedelta
+
+from database import get_pool
+from utils.bayargg import BayarGG
 from config_vip import VIP_PACKAGES
 
 router = Router()
@@ -31,7 +32,6 @@ async def vvip_menu(call: CallbackQuery):
     text = (
         "💎 <b>VVIP PREMIUM ACCESS</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-
         "Nikmati seluruh fitur premium selama masa VIP aktif.\n\n"
 
         "✨ <b>Benefit VIP</b>\n"
@@ -58,9 +58,9 @@ async def vvip_menu(call: CallbackQuery):
     )
 
     await call.message.edit_text(
-        text=text,
-        reply_markup=kb.as_markup(),
-        parse_mode="HTML"
+        text,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
     )
 
     await call.answer()
@@ -79,15 +79,16 @@ async def buy_vip(call: CallbackQuery):
 
     paket = VIP_PACKAGES[paket_id]
 
-    await call.message.edit_text(
-        "⏳ Membuat invoice pembayaran..."
-    )
+    await call.message.edit_text("⏳ Membuat invoice pembayaran...")
 
     try:
         payment = await BayarGG.create_payment(
             amount=paket["price"],
             description=paket["name"],
+            payment_url="https://www.bayar.gg/pay",
+            callback_url="https://earnfilebot-production.up.railway.app/bayargg/webhook",
             customer_name=call.from_user.full_name,
+            payment_method="qris"
         )
 
     except Exception as e:
@@ -98,12 +99,11 @@ async def buy_vip(call: CallbackQuery):
 
     invoice_id = payment["invoice_id"]
     payment_url = payment["payment_url"]
-    qris_string = payment.get("qris_string")
 
     expires_at = datetime.strptime(
         payment["expires_at"],
         "%Y-%m-%d %H:%M:%S"
-    )
+    ).replace(tzinfo=timezone.utc)
 
     pool = await get_pool()
 
@@ -161,8 +161,8 @@ async def buy_vip(call: CallbackQuery):
         f"💰 Harga : <b>Rp {paket['price']:,}</b>\n"
         f"🧾 Invoice :\n<code>{invoice_id}</code>\n\n"
         "⏳ Status : <b>MENUNGGU PEMBAYARAN</b>\n\n"
-        "Silakan klik tombol <b>Bayar Sekarang</b> di bawah.\n"
-        "Setelah selesai, tekan <b>Cek Status Pembayaran</b>."
+        "Silakan klik tombol <b>Bayar Sekarang</b>.\n"
+        "Setelah membayar tekan <b>Cek Status Pembayaran</b>."
     ).replace(",", ".")
 
     await call.message.edit_text(
@@ -173,6 +173,7 @@ async def buy_vip(call: CallbackQuery):
 
     await call.answer()
 
+
 @router.callback_query(F.data.startswith("cekvip:"))
 async def check_vip_payment(call: CallbackQuery):
 
@@ -182,6 +183,7 @@ async def check_vip_payment(call: CallbackQuery):
 
     try:
         payment = await BayarGG.check_payment(invoice_id)
+
     except Exception as e:
         return await call.answer(
             f"Gagal cek pembayaran\n{e}",
@@ -190,12 +192,9 @@ async def check_vip_payment(call: CallbackQuery):
 
     status = payment.get("status", "").lower()
 
-    # =========================
-    # BELUM BAYAR
-    # =========================
     if status != "paid":
         return await call.answer(
-            f"Status: {status.upper()}",
+            f"Status pembayaran: {status.upper()}",
             show_alert=True
         )
 
@@ -216,16 +215,12 @@ async def check_vip_payment(call: CallbackQuery):
             show_alert=True
         )
 
-    # Sudah pernah diproses
     if trx["status"] == "paid":
         return await call.answer(
             "VIP sudah aktif.",
             show_alert=True
         )
 
-    # =========================
-    # UPDATE PAYMENT
-    # =========================
     await pool.execute(
         """
         UPDATE payments
@@ -239,19 +234,32 @@ async def check_vip_payment(call: CallbackQuery):
 
     paket = VIP_PACKAGES[trx["code"]]
 
-    vip_until = datetime.now(timezone.utc) + timedelta(
-        days=paket["days"]
+    user = await pool.fetchrow(
+        """
+        SELECT vip_until
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        call.from_user.id
     )
 
-    # =========================
-    # UPDATE USERS
-    # =========================
+    now = datetime.now(timezone.utc)
+
+    if (
+        user
+        and user["vip_until"]
+        and user["vip_until"] > now
+    ):
+        vip_until = user["vip_until"] + timedelta(days=paket["days"])
+    else:
+        vip_until = now + timedelta(days=paket["days"])
+
     await pool.execute(
         """
         UPDATE users
         SET
-            vip=true,
-            is_vip=true,
+            vip=TRUE,
+            is_vip=TRUE,
             vip_until=$1
         WHERE telegram_id=$2
         """,
@@ -259,9 +267,6 @@ async def check_vip_payment(call: CallbackQuery):
         call.from_user.id
     )
 
-    # =========================
-    # VIP HISTORY
-    # =========================
     await pool.execute(
         """
         INSERT INTO vip_users
@@ -283,10 +288,13 @@ async def check_vip_payment(call: CallbackQuery):
     )
 
     await call.message.edit_text(
-        "✅ <b>Pembayaran Berhasil</b>\n\n"
-        f"💎 Paket : <b>{paket['name']}</b>\n"
-        f"📅 VIP Aktif Sampai:\n<code>{vip_until}</code>\n\n"
-        "Terima kasih telah membeli VIP ❤️",
+        (
+            "✅ <b>Pembayaran Berhasil</b>\n\n"
+            f"💎 Paket : <b>{paket['name']}</b>\n"
+            f"📅 VIP Aktif Sampai:\n"
+            f"<code>{vip_until.strftime('%d-%m-%Y %H:%M:%S UTC')}</code>\n\n"
+            "Terima kasih telah membeli VIP ❤️"
+        ),
         parse_mode="HTML"
     )
 
