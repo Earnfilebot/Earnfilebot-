@@ -270,3 +270,63 @@ async def back_home(call: CallbackQuery, state: FSMContext):
     )
 
     await call.answer()
+
+# =========================
+# BUY FILE
+# =========================
+@router.callback_query(F.data.startswith("buyfile:"))
+async def buy_file(call: CallbackQuery):
+
+    code = call.data.split(":")[1]
+
+    pool = await get_pool()
+
+    file = await pool.fetchrow(
+        """
+        SELECT
+            owner_id,
+            price,
+            payment_provider
+        FROM files
+        WHERE code=$1
+        """,
+        code
+    )
+
+    if not file:
+        return await call.answer(
+            "❌ File tidak ditemukan",
+            show_alert=True
+        )
+
+    # Pemilik tidak perlu membeli file sendiri
+    if call.from_user.id == file["owner_id"]:
+        return await call.answer(
+            "Ini file milik kamu.",
+            show_alert=True
+        )
+
+    price = file["price"] or 0
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💳 Bayar Sekarang",
+                    callback_data=f"pay:{code}"
+                )
+            ]
+        ]
+    )
+
+    await call.message.edit_text(
+        (
+            "💰 <b>FILE BERBAYAR</b>\n\n"
+            f"Harga : <b>Rp {price:,}</b>\n\n"
+            "Tekan tombol di bawah untuk membeli."
+        ).replace(",", "."),
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+    await call.answer()
