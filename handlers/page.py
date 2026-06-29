@@ -110,18 +110,37 @@ async def page_handler(call: CallbackQuery):
         # FILE PAID CHECK
         # =========================
         if file["is_paid"]:
+
             # Owner selalu boleh
             if user_id != file["owner_id"]:
-                bought = await pool.fetchval(
+
+                vip = await pool.fetchval(
                     """
                     SELECT 1
-                    FROM file_purchases
-                    WHERE user_id=$1
-                    AND file_code=$2
+                    FROM users
+                    WHERE telegram_id=$1
+                      AND vip=TRUE
+                      AND vip_until > NOW()
                     """,
-                    user_id,
-                    code
+                    user_id
                 )
+
+                if vip:
+                    bought = True
+                else:
+                    bought = await pool.fetchval(
+                        """
+                        SELECT 1
+                        FROM file_purchases
+                        WHERE user_id=$1
+                          AND file_code=$2
+                          AND status='paid'
+                        LIMIT 1
+                        """,
+                        user_id,
+                        code
+                    )
+
                 if not bought:
                     kb = InlineKeyboardMarkup(
                         inline_keyboard=[
@@ -133,42 +152,55 @@ async def page_handler(call: CallbackQuery):
                             ]
                         ]
                     )
+
                     await call.message.answer(
-                        "🔒 File ini berbayar.\n\nSilakan beli terlebih dahulu.",
+                        "🔒 File ini berbayar.\n\n"
+                        "Silakan beli file atau aktifkan VIP.",
                         reply_markup=kb
                     )
+
                     return await call.answer()
+
         # =========================
         # LOCK 24 JAM
         # =========================
         page_key = f"{user_id}:{code}:{page}"
         last_open = USER_PAGE_LOCK.get(page_key)
+
         if last_open and now - last_open < 86400:
             return await call.answer(
                 "⛔ Page ini sudah dibuka, tunggu 24 jam",
                 show_alert=True
             )
+
         USER_PAGE_LOCK[page_key] = now
+
         media = file["media"]
+
         if isinstance(media, str):
             try:
                 media = json.loads(media)
             except Exception:
                 media = []
+
         if not media:
             return await call.answer(
                 "❌ File kosong",
                 show_alert=True
             )
+
         total_page = max(
             1,
             (len(media) + PAGE_SIZE - 1) // PAGE_SIZE
         )
+
         page = max(1, min(page, total_page))
+
         chunk = media[
             (page - 1) * PAGE_SIZE:
             page * PAGE_SIZE
         ]
+
         caption = (
             "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
             "━━━━━━━━━━━━━━━\n\n"
@@ -176,6 +208,7 @@ async def page_handler(call: CallbackQuery):
             f"📦 PAGE : {page}/{total_page}\n"
             f"📊 TOTAL : {len(media)} FILE"
         )
+
         if total_page <= 1:
             buttons = [
                 [
@@ -203,16 +236,23 @@ async def page_handler(call: CallbackQuery):
                     )
                 ]
             ]
+
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=buttons
         )
+
         album = []
+
         for i, item in enumerate(chunk):
+
             fid = item.get("file_id")
             ftype = (item.get("type") or "document").lower()
+
             if not fid:
                 continue
+
             cap = caption if i == 0 else None
+
             if ftype == "photo":
                 album.append(
                     InputMediaPhoto(
@@ -234,16 +274,18 @@ async def page_handler(call: CallbackQuery):
                         caption=cap
                     )
                 )
+
         if not album:
             return await call.answer(
                 "❌ Tidak ada media",
                 show_alert=True
             )
-        await call.message.answer_media_group(
-            media=album
-        )
+
+        await call.message.answer_media_group(media=album)
+
         await call.message.answer(
             "📦 NAVIGATION",
             reply_markup=keyboard
         )
+
         await call.answer()
