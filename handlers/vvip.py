@@ -107,33 +107,67 @@ async def buy_vip(call: CallbackQuery):
 
     pool = await get_pool()
 
-    await pool.execute(
+    exists = await pool.fetchval(
         """
-        INSERT INTO payments
-        (
-            user_id,
-            code,
-            reference,
-            amount,
-            status,
-            provider,
+        SELECT 1
+        FROM payments
+        WHERE user_id=$1
+          AND code=$2
+        """,
+        call.from_user.id,
+        paket_id
+    )
+
+    if exists:
+        await pool.execute(
+            """
+            UPDATE payments
+            SET
+                reference=$3,
+                amount=$4,
+                status='pending',
+                provider='bayargg',
+                invoice_id=$5,
+                payment_url=$6,
+                expires_at=$7,
+                updated_at=NOW()
+            WHERE user_id=$1
+              AND code=$2
+            """,
+            call.from_user.id,
+            paket_id,
+            invoice_id,
+            paket["price"],
             invoice_id,
             payment_url,
             expires_at
         )
-        VALUES
-        ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        """,
-        call.from_user.id,
-        paket_id,
-        invoice_id,
-        paket["price"],
-        "pending",
-        "bayargg",
-        invoice_id,
-        payment_url,
-        expires_at
-    )
+    else:
+        await pool.execute(
+            """
+            INSERT INTO payments
+            (
+                user_id,
+                code,
+                reference,
+                amount,
+                status,
+                provider,
+                invoice_id,
+                payment_url,
+                expires_at
+            )
+            VALUES
+            ($1,$2,$3,$4,'pending','bayargg',$5,$6,$7)
+            """,
+            call.from_user.id,
+            paket_id,
+            invoice_id,
+            paket["price"],
+            invoice_id,
+            payment_url,
+            expires_at
+        )
 
     kb = InlineKeyboardBuilder()
 
@@ -192,6 +226,7 @@ async def check_vip_payment(call: CallbackQuery):
 
     status = payment.get("status", "").lower()
 
+    # 1. Kalau dari provider belum paid
     if status != "paid":
         return await call.answer(
             f"Status pembayaran: {status.upper()}",
@@ -215,85 +250,20 @@ async def check_vip_payment(call: CallbackQuery):
             show_alert=True
         )
 
-    if trx["status"] == "paid":
+    # 2. Kalau di DB masih belum di-update webhook
+    if trx["status"] != "paid":
         return await call.answer(
-            "VIP sudah aktif.",
+            "⏳ Pembayaran sudah diterima, sedang memproses aktivasi VIP...\n"
+            "Silakan tunggu 3–10 detik lalu cek lagi.",
             show_alert=True
         )
 
-    await pool.execute(
-        """
-        UPDATE payments
-        SET
-            status='paid',
-            updated_at=NOW()
-        WHERE invoice_id=$1
-        """,
-        invoice_id
-    )
-
-    paket = VIP_PACKAGES[trx["code"]]
-
-    user = await pool.fetchrow(
-        """
-        SELECT vip_until
-        FROM users
-        WHERE telegram_id=$1
-        """,
-        call.from_user.id
-    )
-
-    now = datetime.now(timezone.utc)
-
-    if (
-        user
-        and user["vip_until"]
-        and user["vip_until"] > now
-    ):
-        vip_until = user["vip_until"] + timedelta(days=paket["days"])
-    else:
-        vip_until = now + timedelta(days=paket["days"])
-
-    await pool.execute(
-        """
-        UPDATE users
-        SET
-            vip=TRUE,
-            is_vip=TRUE,
-            vip_until=$1
-        WHERE telegram_id=$2
-        """,
-        vip_until,
-        call.from_user.id
-    )
-
-    await pool.execute(
-        """
-        INSERT INTO vip_users
-        (
-            user_id,
-            plan,
-            invoice_id,
-            started_at,
-            expires_at,
-            active
-        )
-        VALUES
-        ($1,$2,$3,NOW(),$4,TRUE)
-        """,
-        call.from_user.id,
-        paket["name"],
-        invoice_id,
-        vip_until
-    )
-
+    # 3. Kalau sudah paid & sudah aktif
     await call.message.edit_text(
         (
             "✅ <b>Pembayaran Berhasil</b>\n\n"
-            f"💎 Paket : <b>{paket['name']}</b>\n"
-            f"📅 VIP Aktif Sampai:\n"
-            f"<code>{vip_until.strftime('%d-%m-%Y %H:%M:%S UTC')}</code>\n\n"
-            "Terima kasih telah membeli VIP ❤️"
+            "VIP sudah berhasil diaktifkan.\n"
+            "Silakan kembali ke menu akun."
         ),
         parse_mode="HTML"
     )
