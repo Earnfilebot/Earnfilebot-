@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from datetime import datetime
 
 from database import get_pool
 
@@ -16,6 +17,27 @@ ADMIN_IDS = [
 
 def is_admin(user_id: int):
     return user_id in ADMIN_IDS
+
+
+# =========================
+# FORMAT RUPIAH
+# =========================
+
+def rupiah(value):
+    if value is None:
+        value = 0
+    return f"Rp{value:,}".replace(",", ".")
+
+
+# =========================
+# DASHBOARD MENU
+# =========================
+
+def dashboard_menu():
+
+    kb = InlineKeyboardBuilder()
+
+    ...
 
 # =========================
 # DASHBOARD MENU
@@ -184,23 +206,50 @@ async def admin_dashboard(message: Message):
         """
     )
 
+    now = datetime.now().strftime("%d-%m-%Y %H:%M WIB")
+
     text = (
-        "🛠 <b>ADMIN PANEL</b>\n\n"
-        "📊 <b>DASHBOARD</b>\n\n"
-        f"👤 Total User : <b>{total_users}</b>\n"
-        f"📂 Total File : <b>{total_files}</b>\n"
-        f"🖼 Total Media : <b>{total_media}</b>\n\n"
-        f"💰 Total Balance : <b>Rp{total_balance:,}</b>\n\n"
-        "💳 <b>Payment</b>\n"
-        f"• Pending : {payment_pending}\n"
-        f"• Paid : {payment_paid}\n"
-        f"• Failed : {payment_failed}\n\n"
-        "🏧 <b>Withdraw</b>\n"
-        f"• Pending : {withdraw_pending}\n"
-        f"• Processing : {withdraw_processing}\n"
-        f"• Success : {withdraw_success}\n"
-        f"• Reject : {withdraw_reject}\n\n"
-        f"💵 Revenue : <b>Rp{revenue:,}</b>"
+        "🛠 <b>ADMIN PANEL</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "📊 <b>SYSTEM</b>\n\n"
+
+        f"👤 User        : <b>{total_users}</b>\n"
+        f"📂 Folder      : <b>{total_files}</b>\n"
+        f"🖼 Media       : <b>{total_media}</b>\n"
+        f"🔑 Code        : <b>{total_files}</b>\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "💰 <b>FINANCE</b>\n\n"
+
+        f"👛 Balance     : <b>{rupiah(total_balance)}</b>\n"
+        f"💵 Revenue     : <b>{rupiah(revenue)}</b>\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "💳 <b>PAYMENT</b>\n"
+
+        f"🟡 Pending : {payment_pending}\n"
+        f"🟢 Paid    : {payment_paid}\n"
+        f"🔴 Failed  : {payment_failed}\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "🏧 <b>WITHDRAW</b>\n"
+
+        f"🟡 Pending : {withdraw_pending}\n"
+        f"🔵 Process : {withdraw_processing}\n"
+        f"🟢 Success : {withdraw_success}\n"
+        f"🔴 Reject  : {withdraw_reject}\n\n"
+
+        f"🕒 Update : {now}"
+    )
+
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=dashboard_menu()
     )
 
     await message.answer(
