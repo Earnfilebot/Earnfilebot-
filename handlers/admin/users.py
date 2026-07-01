@@ -3,15 +3,20 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
-from .dashboard import is_admin
+from .dashboard import is_admin, rupiah
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+
 
 router = Router()
 
 class SearchUserState(StatesGroup):
     telegram_id = State()
+class BalanceState(StatesGroup):
+    waiting_user = State()
+    waiting_add = State()
+    waiting_reduce = State()
 
 @router.callback_query(F.data == "admin_users")
 async def admin_users(call: CallbackQuery):
@@ -205,4 +210,123 @@ async def process_search(message: Message, state: FSMContext):
 
     await state.clear()
 
+@router.callback_query(F.data == "users_balance")
+async def users_balance(call: CallbackQuery, state: FSMContext):
+
+    if not is_admin(call.from_user.id):
+        return
+
+    await state.set_state(BalanceState.waiting_user)
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="⬅ Kembali",
+        callback_data="admin_users"
+    )
+
+    await call.message.edit_text(
+        "💰 <b>BALANCE USER</b>\n\n"
+        "Masukkan User ID.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+@router.message(BalanceState.waiting_user)
+async def balance_user(message: Message, state: FSMContext):
+
+    if not message.text.isdigit():
+        return await message.answer("User ID harus berupa angka.")
+
+    telegram_id = int(message.text)
+
+    pool = await get_pool()
+
+    user = await pool.fetchrow(
+        """
+        SELECT *
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        user_id
+    )
+
+    if not user:
+        return await message.answer("User tidak ditemukan.")
+
+    await state.update_data(telegram_id=telegram_id)
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="➕ Tambah",
+        callback_data="balance_add"
+    )
+
+    kb.button(
+        text="➖ Kurangi",
+        callback_data="balance_reduce"
+    )
+
+    kb.button(
+        text="♻ Reset",
+        callback_data="balance_reset"
+    )
+
+    kb.button(
+        text="⬅ Kembali",
+        callback_data="admin_users"
+    )
+
+    kb.adjust(2)
+
+    await message.answer(
+        f"👤 Username : @{user['username'] or '-'}\n"
+        f"🆔 {user['user_id']}\n"
+        f"💰 Balance : <b>{rupiah(user['balance'])}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(F.data == "balance_add")
+async def balance_add(call: CallbackQuery, state: FSMContext):
+
+    await state.set_state(BalanceState.waiting_add)
+
+    await call.message.answer(
+        "Masukkan nominal yang ingin ditambahkan."
+    )
+
+    await call.answer()
+@router.message(BalanceState.waiting_add)
+async def process_add_balance(message: Message, state: FSMContext):
+
+    data = await state.get_data()
+
+    telegram_id = data["telegram_id"]
+
+    if not message.text.isdigit():
+        return await message.answer("Nominal harus angka.")
+
+    nominal = int(message.text)
+
+    pool = await get_pool()
+
+    await pool.execute(
+        """
+        UPDATE users
+        SET balance=balance+$1
+        WHERE telegram_id = $2
+        """,
+        nominal,
+        telegram_id
+    )
+
+    await message.answer(
+        f"✅ Berhasil menambahkan {rupiah(nominal)}"
+    )
+
+    await state.clear()
 
