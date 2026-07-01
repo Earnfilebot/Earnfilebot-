@@ -431,7 +431,7 @@ async def finalize_save(message: Message, state: FSMContext):
         try:
             await message.bot.send_message(
                 CHANNEL_ID,
-                text + f"\n\n👤 User : <code>{message.from_user.id}</code>",
+                text + f"\n\n🤖 Bot : @{me.username}",
                 parse_mode="HTML"
             )
         except Exception:
