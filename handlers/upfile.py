@@ -370,7 +370,7 @@ async def finalize_save(message: Message, state: FSMContext):
             expires_at = int(time.time()) + expiry
         pool = await get_pool()
         while True:
-            code = "EFB-" + "".join(
+            code = "DecoderFileBot" + "".join(
                 random.choices(
                     string.ascii_uppercase + string.digits,
                     k=10
