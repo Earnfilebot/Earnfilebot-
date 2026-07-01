@@ -252,8 +252,3 @@ async def admin_dashboard(message: Message):
         reply_markup=dashboard_menu()
     )
 
-    await message.answer(
-        text,
-        parse_mode="HTML",
-        reply_markup=dashboard_menu()
-    )
