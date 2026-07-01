@@ -72,7 +72,18 @@ async def users_total(call: CallbackQuery):
         "SELECT COUNT(*) FROM users"
     )
 
-    await call.message.edit_text(
-        f"👥 Total User : <b>{total}</b>",
-        parse_mode="HTML"
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="⬅ Kembali",
+        callback_data="admin_users"
     )
+
+    await call.message.edit_text(
+        f"👥 <b>TOTAL USER</b>\n\n"
+        f"Total User : <b>{total}</b>",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
