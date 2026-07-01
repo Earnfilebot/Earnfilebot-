@@ -62,7 +62,7 @@ async def receive_code(message: Message, state: FSMContext):
     if not message.text:
         return await message.answer("❌ Kode kosong")
 
-    code = message.text.strip().upper()
+    code = message.text.strip()
 
     pool = await get_pool()
 
