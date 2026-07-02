@@ -21,29 +21,24 @@ PAGE_SIZE = 10
 
 CLICK_COOLDOWN = defaultdict(float)
 USER_LOCK = defaultdict(lambda: asyncio.Lock())
-USER_PAGE_LOCK = defaultdict(float)
+USER_PAGE_CACHE = {}  # (user_id, code, page) -> media list
 
 
 # =========================
 # UTIL
 # =========================
 def clean_file_id(fid):
-    if isinstance(fid, dict):
-        return fid.get("file_id")
-    return fid
+    return fid.get("file_id") if isinstance(fid, dict) else fid
 
 
 def normalize_type(ftype):
-    if not ftype:
-        return "document"
-    return ftype.lower()
+    return (ftype or "document").lower()
 
 
 # =========================
-# BUTTON BUILDER
+# BUTTON
 # =========================
 def build_page_buttons(code: str, page: int, total: int):
-
     row = []
 
     row.append(
@@ -58,7 +53,6 @@ def build_page_buttons(code: str, page: int, total: int):
 
     for i in range(start, end + 1):
         emoji = "🟡" if i == page else ("🟢" if i < page else "🔴")
-
         row.append(
             InlineKeyboardButton(
                 text=f"{i}{emoji}",
@@ -94,11 +88,11 @@ async def page_handler(call: CallbackQuery):
     # =========================
     # COOLDOWN
     # =========================
-    click_key = f"{user_id}:{code}:{page}"
-    if now - CLICK_COOLDOWN[click_key] < 2:
-        return await call.answer("⏳ Terlalu cepat", show_alert=True)
+    ck = f"{user_id}:{code}:{page}"
+    if now - CLICK_COOLDOWN.get(ck, 0) < 1.5:
+        return await call.answer("⏳ Tunggu sebentar", show_alert=True)
 
-    CLICK_COOLDOWN[click_key] = now
+    CLICK_COOLDOWN[ck] = now
 
     async with USER_LOCK[user_id]:
         pool = await get_pool()
@@ -112,11 +106,9 @@ async def page_handler(call: CallbackQuery):
             return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
         # =========================
-        # PAID CHECK
+        # ACCESS CHECK (VIP + OWNER + PURCHASE)
         # =========================
         if file["is_paid"]:
-
-            bought = False
 
             if user_id == file["owner_id"]:
                 bought = True
@@ -146,54 +138,37 @@ async def page_handler(call: CallbackQuery):
                         user_id,
                         code
                     ))
+        else:
+            bought = True
 
-            if not bought:
-                kb = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text=f"💳 Bayar Rp {file['price']:,}".replace(",", "."),
-                                callback_data=f"pay:{code}"
-                            )
-                        ]
-                    ]
-                )
+        if not bought:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"💳 Bayar Rp {file['price']:,}".replace(",", "."),
+                        callback_data=f"pay:{code}"
+                    )
+                ]
+            ])
 
-                await call.message.answer(
-                    (
-                        "🔒 <b>FILE BERBAYAR</b>\n\n"
-                        f"💰 Harga : Rp {file['price']:,}\n\n"
-                        "Silakan beli file terlebih dahulu atau gunakan akses VIP."
-                    ).replace(",", "."),
-                    parse_mode="HTML",
-                    reply_markup=kb
-                )
-
-                return await call.answer()
-
-        # =========================
-        # 24H LOCK PER PAGE
-        # =========================
-        page_key = f"{user_id}:{code}:{page}"
-        last_open = USER_PAGE_LOCK.get(page_key)
-
-        if last_open and now - last_open < 86400:
-            return await call.answer(
-                "⛔ Page ini sudah dibuka, tunggu 24 jam",
-                show_alert=True
+            await call.message.answer(
+                f"🔒 <b>FILE BERBAYAR</b>\n\n"
+                f"💰 Harga : Rp {file['price']:,}\n\n"
+                "Silakan beli atau gunakan VIP.",
+                parse_mode="HTML",
+                reply_markup=kb
             )
-
-        USER_PAGE_LOCK[page_key] = now
+            return await call.answer()
 
         # =========================
-        # MEDIA PARSE
+        # LOAD MEDIA
         # =========================
         media = file["media"]
 
         if isinstance(media, str):
             try:
                 media = json.loads(media)
-            except Exception:
+            except:
                 media = []
 
         if not media:
@@ -204,74 +179,78 @@ async def page_handler(call: CallbackQuery):
 
         chunk = media[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
 
-        caption = (
-            "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
-            "━━━━━━━━━━━━━━━\n\n"
-            f"🔑 CODE : {code}\n"
-            f"📦 PAGE : {page}/{total_page}\n"
-            f"📊 TOTAL : {len(media)} FILE"
-        )
+        # =========================
+        # CACHE MEDIA (IMPORTANT)
+        # =========================
+        cache_key = (user_id, code, page)
 
-        # =========================
-        # KEYBOARD
-        # =========================
-        if total_page <= 1:
-            buttons = [
-                [
-                    InlineKeyboardButton(
-                        text="📢 Channel Update",
-                        url="https://t.me/+F6-XB1gFA9VhMDc1"
-                    ),
-                    InlineKeyboardButton(
-                        text="🔔 Notifikasi Code",
-                        url="https://t.me/+T8c4gdEWf843ZWQ1"
-                    )
-                ]
-            ]
+        if cache_key in USER_PAGE_CACHE:
+            album = USER_PAGE_CACHE[cache_key]
         else:
-            buttons = [
-                build_page_buttons(code, page, total_page),
-                [
-                    InlineKeyboardButton(
-                        text="📢 Channel Update",
-                        url="https://t.me/+F6-XB1gFA9VhMDc1"
-                    ),
-                    InlineKeyboardButton(
-                        text="🔔 Notifikasi Code",
-                        url="https://t.me/+T8c4gdEWf843ZWQ1"
-                    )
-                ]
+            caption = (
+                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+                "━━━━━━━━━━━━━━━\n\n"
+                f"🔑 CODE : {code}\n"
+                f"📦 PAGE : {page}/{total_page}\n"
+                f"📊 TOTAL : {len(media)} FILE"
+            )
+
+            album = []
+            for i, item in enumerate(chunk):
+                fid = clean_file_id(item.get("file_id"))
+                ftype = normalize_type(item.get("type"))
+
+                if not fid:
+                    continue
+
+                cap = caption if i == 0 else None
+
+                if ftype == "photo":
+                    album.append(InputMediaPhoto(media=fid, caption=cap))
+                elif ftype == "video":
+                    album.append(InputMediaVideo(media=fid, caption=cap))
+                else:
+                    album.append(InputMediaDocument(media=fid, caption=cap))
+
+            USER_PAGE_CACHE[cache_key] = album
+
+        # =========================
+        # NAVIGATION
+        # =========================
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            build_page_buttons(code, page, total_page),
+            [
+                InlineKeyboardButton(
+                    text="📢 Channel Update",
+                    url="https://t.me/+F6-XB1gFA9VhMDc1"
+                ),
+                InlineKeyboardButton(
+                    text="🔔 Notifikasi Code",
+                    url="https://t.me/+T8c4gdEWf843ZWQ1"
+                )
             ]
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        ])
 
         # =========================
-        # MEDIA GROUP
+        # EDIT IF POSSIBLE (BEST UX)
         # =========================
-        album = []
+        try:
+            await call.message.edit_media(
+                media=album[0],
+                reply_markup=keyboard
+            )
 
-        for i, item in enumerate(chunk):
+            # send remaining media (if any)
+            if len(album) > 1:
+                await call.message.answer_media_group(album[1:])
 
-            fid = clean_file_id(item.get("file_id"))
-            ftype = normalize_type(item.get("type"))
+        except Exception:
+            # fallback (first time open)
+            await call.message.answer_media_group(album)
 
-            if not fid:
-                continue
-
-            cap = caption if i == 0 else None
-
-            if ftype == "photo":
-                album.append(InputMediaPhoto(media=fid, caption=cap))
-            elif ftype == "video":
-                album.append(InputMediaVideo(media=fid, caption=cap))
-            else:
-                album.append(InputMediaDocument(media=fid, caption=cap))
-
-        if not album:
-            return await call.answer("❌ Tidak ada media", show_alert=True)
-
-        await call.message.answer_media_group(media=album)
-
-        await call.message.answer("📦 NAVIGATION", reply_markup=keyboard)
+            await call.message.answer(
+                "📦 NAVIGATION",
+                reply_markup=keyboard
+            )
 
         await call.answer()
