@@ -11,7 +11,7 @@ from config import BAYARGG_API_KEY
 router = Router()
 
 
-@router.callback_query(F.data.startswith("buyfile:"))
+@router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
     user_id = call.from_user.id
     code = call.data.split(":")[1]
@@ -140,10 +140,21 @@ async def pay_file(call: CallbackQuery):
     buffer.seek(0)
 
     kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Cancel", callback_data="cancelpay")]
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Cek Pembayaran",
+                callback_data=f"checkpay:{payment_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="❌ Cancel",
+                callback_data="cancelpay"
+            )
         ]
-    )
+    ]
+)
 
     await call.message.answer_photo(
         BufferedInputFile(buffer.read(), filename="qris.png"),
