@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Request
 
 from bot import bot
-from config import BAYARGG_API_KEY
+from config import BAYARGG_API_KEY, CHANNEL_ID
 from config_vip import VIP_PACKAGES
 from database import get_pool
 
@@ -115,6 +115,7 @@ async def bayargg_webhook(request: Request):
         )
 
         try:
+            # Kirim ke pembeli
             await bot.send_message(
                 purchase["user_id"],
                 (
@@ -125,8 +126,22 @@ async def bayargg_webhook(request: Request):
                 parse_mode="HTML",
                 reply_markup=kb
             )
+
+            # Log ke channel admin
+            await bot.send_message(
+                CHANNEL_ID,
+                (
+                    "📁 <b>FILE BERHASIL DIBELI</b>\n\n"
+                    f"👤 Buyer : <code>{purchase['user_id']}</code>\n"
+                    f"👑 Owner : <code>{purchase['owner_id']}</code>\n"
+                    f"🔑 Code : <code>{purchase['file_code']}</code>\n"
+                    f"💰 Harga : Rp {purchase['paid_price']:,}".replace(",", ".")
+                ),
+                parse_mode="HTML"
+            )
+
         except Exception:
-            logging.exception("Gagal mengirim OPEN PAGE")
+            logging.exception("Gagal mengirim pesan pembayaran file")
 
         return {
             "success": True
@@ -240,6 +255,22 @@ async def bayargg_webhook(request: Request):
             ),
             parse_mode="HTML"
         )
+
+        # =========================
+        # LOG CHANNEL
+        # =========================
+        await bot.send_message(
+            CHANNEL_ID,
+            (
+                "💎 <b>VIP BERHASIL DIBELI</b>\n\n"
+                f"👤 User ID : <code>{trx['user_id']}</code>\n"
+                f"📦 Paket : <b>{paket['name']}</b>\n"
+                f"💳 Invoice : <code>{invoice_id}</code>\n"
+                f"📅 Expired : <code>{vip_until}</code>"
+            ),
+            parse_mode="HTML"
+        )
+
     except Exception:
         logging.exception("Gagal mengirim pesan VIP")
 
