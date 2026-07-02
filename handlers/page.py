@@ -147,7 +147,7 @@ async def page_handler(call: CallbackQuery):
                             [
                                 InlineKeyboardButton(
                                     text=f"💳 Bayar Rp {file['price']:,}".replace(",", "."),
-                                    callback_data=f"buyfile:{code}"
+                                    callback_data=f"pay:{code}"
                                 )
                             ]
                         ]
