@@ -270,10 +270,13 @@ async def back_home(call: CallbackQuery, state: FSMContext):
     )
 
     await call.answer()
+    
 
 # =========================
 # BUY FILE
-# =========================@router.callback_query(F.data.startswith("buyfile:"))
+# ========================
+
+@router.callback_query(F.data.startswith("buyfile:"))
 async def buy_file(call: CallbackQuery):
 
     code = call.data.split(":")[1]
