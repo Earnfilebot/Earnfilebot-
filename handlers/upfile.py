@@ -356,6 +356,7 @@ async def input_price(message: Message, state: FSMContext):
 async def finalize_save(message: Message, state: FSMContext):
     async with get_lock(message.from_user.id):
         data = await state.get_data()
+
         media = data.get("media", [])
         share_media = data.get("share_media", True)
         folder_name = data.get("folder_name", "Folder AUTO")
@@ -363,12 +364,40 @@ async def finalize_save(message: Message, state: FSMContext):
         is_paid = data.get("is_paid", False)
         price = data.get("price", 0)
         payment_provider = data.get("payment_provider")
+
         if not media:
             return await message.answer("❌ No media found")
+
         expires_at = None
         if expiry > 0:
             expires_at = int(time.time()) + expiry
+
         pool = await get_pool()
+
+        # =========================
+        # AUTO REGISTER SELLER
+        # =========================
+        await pool.execute(
+            """
+            INSERT INTO users
+            (
+                id,
+                username,
+                first_name
+            )
+            VALUES
+            ($1,$2,$3)
+            ON CONFLICT (id)
+            DO NOTHING
+            """,
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.first_name
+        )
+
+        # =========================
+        # GENERATE UNIQUE CODE
+        # =========================
         while True:
             code = "DecoderFileBot" + "".join(
                 random.choices(
@@ -376,13 +405,20 @@ async def finalize_save(message: Message, state: FSMContext):
                     k=10
                 )
             )
+
             exists = await pool.fetchval(
                 "SELECT 1 FROM files WHERE code=$1",
                 code
             )
+
             if not exists:
                 break
+
         share_link = f"{BOT_URL}?start=getFile_{code}"
+
+        # =========================
+        # SAVE FILE
+        # =========================
         await pool.execute(
             """
             INSERT INTO files
@@ -412,12 +448,15 @@ async def finalize_save(message: Message, state: FSMContext):
             price,
             payment_provider
         )
+
         await state.clear()
+
         media_mode = (
             f"💰 Media Mode : Paid (Rp {price:,})".replace(",", ".")
             if is_paid
             else "🆓 Media Mode : Free"
         )
+
         text = (
             "✅ <b>FILE SAVED SUCCESSFULLY</b>\n\n"
             f"📝 Folder : {folder_name}\n"
@@ -426,17 +465,20 @@ async def finalize_save(message: Message, state: FSMContext):
             f"{media_mode}\n"
             f"🔗 Link : {share_link}"
         )
+
         await message.answer(
             text,
             parse_mode="HTML"
         )
+
         try:
             me = await message.bot.get_me()
-            
+
             await message.bot.send_message(
                 CHANNEL_ID,
                 text + f"\n\n🤖 Bot : @{me.username}",
                 parse_mode="HTML"
             )
+
         except Exception:
             pass
