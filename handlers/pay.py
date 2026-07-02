@@ -99,6 +99,29 @@ async def pay_file(call: CallbackQuery):
             customer_name=call.from_user.full_name
         )
 
+        print("========== DATA ==========")
+        print(data)
+        print("==========================")
+
+    except Exception as e:
+        return await call.answer(
+            f"Gagal membuat pembayaran\n{e}",
+            show_alert=True
+        )
+
+    payment_id = data["payment_id"]
+    qr_string = data["qris_string"]
+
+    # =========================
+    # CREATE BAYARGG PAYMENT
+    # =========================
+    try:
+        data = await BayarGG.create_payment(
+            amount=price,
+            description=f"Pembelian File {code}",
+            customer_name=call.from_user.full_name
+        )
+
     except Exception as e:
         return await call.answer(
             f"Gagal membuat pembayaran\n{e}",
