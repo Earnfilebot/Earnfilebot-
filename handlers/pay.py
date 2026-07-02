@@ -104,7 +104,8 @@ async def pay_file(call: CallbackQuery):
             INSERT INTO file_purchases
             (user_id, file_code, owner_id, paid_price, payment_id, status, created_at)
             VALUES ($1,$2,$3,$4,$5,'pending',NOW())
-            ON CONFLICT (payment_id) DO NOTHING
+            ON CONFLICT (payment_id)
+            DO UPDATE SET status='pending'
             """,
             user_id,
             code,
