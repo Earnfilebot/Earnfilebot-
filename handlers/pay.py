@@ -1,5 +1,5 @@
-from utils.bayargg import BayarGG
 import qrcode
+import time
 from io import BytesIO
 
 from aiogram import Router, F
@@ -11,107 +11,153 @@ from aiogram.types import (
 )
 
 from database import get_pool
+from utils.bayargg import BayarGG
+from utils.redis_client import redis_client
 
 router = Router()
 
+# =========================
+# CONFIG
+# =========================
+PAY_LOCK_TTL = 10  # anti spam click
+INVOICE_TTL = 3600  # 1 jam expire
 
+# =========================
+# PAY HANDLER (PRO)
+# =========================
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
     user_id = call.from_user.id
     code = call.data.split(":")[1]
 
+    lock_key = f"paylock:{user_id}:{code}"
+
+    # =========================
+    # REDIS LOCK (ANTI DOUBLE CLICK GLOBAL)
+    # =========================
+    if await redis_client.get(lock_key):
+        return await call.answer("⏳ Tunggu sebentar...", show_alert=True)
+
+    await redis_client.set(lock_key, "1", ex=PAY_LOCK_TTL)
+
     pool = await get_pool()
 
-    file = await pool.fetchrow(
-        "SELECT owner_id, price, is_paid FROM files WHERE code=$1",
-        code
-    )
-
-    if not file:
-        return await call.answer("❌ File tidak ditemukan", show_alert=True)
-
-    if not file["is_paid"]:
-        return await call.answer("File gratis", show_alert=True)
-
-    price = file["price"] or 0
-    owner_id = file["owner_id"]
-
-    # =========================
-    # CHECK EXISTING PENDING
-    # =========================
-    existing = await pool.fetchrow(
-        """
-        SELECT payment_id, status
-        FROM file_purchases
-        WHERE user_id=$1 AND file_code=$2
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        user_id,
-        code
-    )
-
-    if existing and existing["status"] == "pending":
-        return await call.answer(
-            "⏳ Kamu sudah punya invoice pending",
-            show_alert=True
-        )
-
-    # =========================
-    # CREATE PAYMENT
-    # =========================
     try:
-        invoice_id, qr_string = await create_payment_bayargg(
-            price, code, call.from_user
+        # =========================
+        # GET FILE
+        # =========================
+        file = await pool.fetchrow(
+            "SELECT owner_id, price, is_paid FROM files WHERE code=$1",
+            code
         )
-    except Exception as e:
-        return await call.answer(f"Gagal payment: {e}", show_alert=True)
 
-    # =========================
-    # SAVE PENDING
-    # =========================
-    await pool.execute(
-        """
-        INSERT INTO file_purchases
-        (user_id, file_code, owner_id, paid_price, payment_id, status)
-        VALUES ($1,$2,$3,$4,$5,'pending')
-        """,
-        user_id,
-        code,
-        owner_id,
-        price,
-        invoice_id
-    )
+        if not file:
+            return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
-    # =========================
-    # QR GENERATION
-    # =========================
-    qr = qrcode.make(qr_string)
-    buf = BytesIO()
-    qr.save(buf, format="PNG")
-    buf.seek(0)
+        if not file["is_paid"]:
+            return await call.answer("File gratis", show_alert=True)
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Check Payment",
-                    callback_data=f"check:{invoice_id}"
-                )
+        if file["owner_id"] == user_id:
+            return await call.answer("Owner tidak perlu bayar", show_alert=True)
+
+        price = file["price"] or 0
+
+        # =========================
+        # CHECK EXISTING INVOICE
+        # =========================
+        existing = await pool.fetchrow(
+            """
+            SELECT payment_id, status
+            FROM file_purchases
+            WHERE user_id=$1 AND file_code=$2
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            user_id,
+            code
+        )
+
+        if existing:
+            if existing["status"] == "paid":
+                return await call.answer("Sudah dibeli", show_alert=True)
+            if existing["status"] == "pending":
+                return await call.answer("Invoice masih aktif", show_alert=True)
+
+        # =========================
+        # CREATE PAYMENT
+        # =========================
+        data = await BayarGG.create_payment(
+            amount=price,
+            description=f"File {code}",
+            customer_name=call.from_user.full_name
+        )
+
+        invoice_id = data.get("invoice_id")
+        qr_string = data.get("qris_string")
+
+        if not invoice_id or not qr_string:
+            return await call.answer("Payment error invalid response", show_alert=True)
+
+        # =========================
+        # SAVE DB (PENDING)
+        # =========================
+        await pool.execute(
+            """
+            INSERT INTO file_purchases
+            (user_id, file_code, owner_id, paid_price, payment_id, status, created_at)
+            VALUES ($1,$2,$3,$4,$5,'pending',NOW())
+            ON CONFLICT (payment_id) DO NOTHING
+            """,
+            user_id,
+            code,
+            file["owner_id"],
+            price,
+            invoice_id
+        )
+
+        # =========================
+        # REDIS INVOICE EXPIRE TRACK
+        # =========================
+        await redis_client.set(f"invoice:{invoice_id}", "pending", ex=INVOICE_TTL)
+
+        # =========================
+        # QR GENERATE
+        # =========================
+        qr = qrcode.make(qr_string)
+        buf = BytesIO()
+        qr.save(buf, format="PNG")
+        buf.seek(0)
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Check Payment",
+                        callback_data=f"check:{invoice_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Cancel",
+                        callback_data=f"cancel:{invoice_id}"
+                    )
+                ]
             ]
-        ]
-    )
+        )
 
-    await call.message.answer_photo(
-        BufferedInputFile(buf.read(), filename="qris.png"),
-        caption=(
-            "💳 <b>PAYMENT QRIS</b>\n\n"
-            f"🧾 Invoice: {invoice_id}\n"
-            f"💰 Rp {price:,}\n\n"
-            "Scan & bayar sekarang"
-        ).replace(",", "."),
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+        await call.message.answer_photo(
+            BufferedInputFile(buf.read(), filename="qris.png"),
+            caption=(
+                "💳 <b>PAYMENT QRIS</b>\n\n"
+                f"🧾 Invoice: <code>{invoice_id}</code>\n"
+                f"💰 Rp {price:,}\n\n"
+                "Scan untuk bayar"
+            ).replace(",", "."),
+            parse_mode="HTML",
+            reply_markup=kb
+        )
 
-    await call.answer()
+        await call.answer()
+
+    finally:
+        await redis_client.delete(lock_key)
