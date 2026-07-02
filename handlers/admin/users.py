@@ -17,6 +17,8 @@ class BalanceState(StatesGroup):
     waiting_user = State()
     waiting_add = State()
     waiting_reduce = State()
+ALTER TABLE users
+ADD COLUMN is_banned BOOLEAN DEFAULT FALSE;
 
 @router.callback_query(F.data == "admin_users")
 async def admin_users(call: CallbackQuery):
