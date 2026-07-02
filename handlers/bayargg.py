@@ -48,6 +48,94 @@ async def bayargg_webhook(request: Request):
 
     pool = await get_pool()
 
+    # =====================================================
+    # FILE PURCHASE
+    # =====================================================
+    purchase = await pool.fetchrow(
+        """
+        SELECT *
+        FROM file_purchases
+        WHERE payment_id=$1
+        """,
+        invoice_id
+    )
+
+    if purchase:
+
+        if purchase["status"] == "paid":
+            return {
+                "success": True,
+                "message": "already processed"
+            }
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+
+                await conn.execute(
+                    """
+                    UPDATE file_purchases
+                    SET status='paid'
+                    WHERE payment_id=$1
+                    """,
+                    invoice_id
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET
+                        balance = balance + $1,
+                        total_sales = total_sales + 1
+                    WHERE telegram_id=$2
+                    """,
+                    purchase["paid_price"],
+                    purchase["owner_id"]
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET total_downloads = total_downloads + 1
+                    WHERE telegram_id=$1
+                    """,
+                    purchase["user_id"]
+                )
+
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📂 OPEN PAGE",
+                        callback_data=f"page:{purchase['file_code']}:1"
+                    )
+                ]
+            ]
+        )
+
+        try:
+            await bot.send_message(
+                purchase["user_id"],
+                (
+                    "✅ <b>Pembayaran Berhasil</b>\n\n"
+                    "File berhasil dibuka.\n"
+                    "Silakan klik tombol di bawah."
+                ),
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+        except Exception:
+            logging.exception("Gagal mengirim OPEN PAGE")
+
+        return {
+            "success": True
+        }
+
+    # =====================================================
+    # VIP PAYMENT
+    # =====================================================
+
     trx = await pool.fetchrow(
         """
         SELECT *
@@ -96,9 +184,6 @@ async def bayargg_webhook(request: Request):
     async with pool.acquire() as conn:
         async with conn.transaction():
 
-            # =========================
-            # UPDATE PAYMENT
-            # =========================
             await conn.execute(
                 """
                 UPDATE payments
@@ -110,9 +195,6 @@ async def bayargg_webhook(request: Request):
                 invoice_id
             )
 
-            # =========================
-            # UPDATE USER
-            # =========================
             await conn.execute(
                 """
                 UPDATE users
@@ -126,9 +208,6 @@ async def bayargg_webhook(request: Request):
                 trx["user_id"]
             )
 
-            # =========================
-            # VIP HISTORY
-            # =========================
             await conn.execute(
                 """
                 INSERT INTO vip_users
@@ -149,9 +228,6 @@ async def bayargg_webhook(request: Request):
                 vip_until
             )
 
-    # =========================
-    # SEND TELEGRAM
-    # =========================
     try:
         await bot.send_message(
             trx["user_id"],
