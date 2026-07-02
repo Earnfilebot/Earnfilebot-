@@ -388,6 +388,7 @@ async def finalize_save(message: Message, state: FSMContext):
             INSERT INTO files
             (
                 code,
+                folder_name,
                 media,
                 share_media,
                 owner_id,
@@ -398,9 +399,10 @@ async def finalize_save(message: Message, state: FSMContext):
                 payment_provider
             )
             VALUES
-            ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             """,
             code,
+            folder_name,
             json.dumps(media),
             share_media,
             message.from_user.id,
@@ -429,6 +431,8 @@ async def finalize_save(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
         try:
+            me = await message.bot.get_me()
+            
             await message.bot.send_message(
                 CHANNEL_ID,
                 text + f"\n\n🤖 Bot : @{me.username}",
