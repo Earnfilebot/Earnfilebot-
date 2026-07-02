@@ -11,7 +11,7 @@ from aiogram.types import (
 
 from database import get_pool
 from utils.bayargg import BayarGG
-from utils.redis_client import redis_client
+from utils.redis_client import safe_set, safe_delete
 
 router = Router()
 
@@ -27,9 +27,13 @@ async def pay_file(call: CallbackQuery):
     lock_key = f"paylock:{user_id}:{code}"
 
     # =========================
-    # REDIS LOCK (ANTI DOUBLE CLICK)
+    # REDIS LOCK (SAFE MODE)
     # =========================
-    lock_ok = await redis_client.set(lock_key, "1", nx=True, ex=PAY_LOCK_TTL)
+    try:
+        lock_ok = await safe_set(lock_key, "1", ex=PAY_LOCK_TTL, nx=True)
+    except Exception:
+        lock_ok = True  # fallback kalau Redis mati
+
     if not lock_ok:
         return await call.answer("⏳ Tunggu sebentar...", show_alert=True)
 
@@ -110,13 +114,16 @@ async def pay_file(call: CallbackQuery):
         )
 
         # =========================
-        # REDIS TRACK INVOICE
+        # REDIS INVOICE TRACK (SAFE)
         # =========================
-        await redis_client.set(
-            f"invoice:{invoice_id}",
-            f"{user_id}:{code}:pending",
-            ex=INVOICE_TTL
-        )
+        try:
+            await safe_set(
+                f"invoice:{invoice_id}",
+                f"{user_id}:{code}:pending",
+                ex=INVOICE_TTL
+            )
+        except Exception:
+            pass
 
         # =========================
         # QR GENERATE
@@ -158,4 +165,7 @@ async def pay_file(call: CallbackQuery):
         await call.answer()
 
     finally:
-        await redis_client.delete(lock_key)
+        try:
+            await safe_delete(lock_key)
+        except Exception:
+            pass
