@@ -2,6 +2,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
+from middlewares.ban import BanMiddleware
 
 # =========================
 # BOT INIT
@@ -12,6 +13,9 @@ bot = Bot(
 )
 
 dp = Dispatcher()
+
+dp.message.middleware(BanMiddleware())
+dp.callback_query.middleware(BanMiddleware())
 
 # =========================
 # ROUTERS IMPORT
