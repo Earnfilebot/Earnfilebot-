@@ -11,3 +11,4 @@ Pillow>=10.0.0
 
 orjson>=3.10.0
 aiofiles>=24.1.0
+redis==5.0.1
