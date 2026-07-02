@@ -1,4 +1,4 @@
-import aiohttp
+from utils.bayargg import BayarGG
 import qrcode
 from io import BytesIO
 
@@ -93,24 +93,19 @@ async def pay_file(call: CallbackQuery):
     # =========================
     # CREATE BAYARGG PAYMENT
     # =========================
-    payload = {
-        "api_key": BAYARGG_API_KEY,
-        "amount": price,
-        "unique_code": f"FILE_{code}_{user_id}",
-        "service": "QRIS"
-    }
+    try:
+        data = await BayarGG.create_payment(
+            amount=price,
+            description=f"Pembelian File {code}",
+            customer_name=call.from_user.full_name
+        )
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            "https://www.bayar.gg/api/create-payment.php",
-            data=payload
-        ) as resp:
-            result = await resp.json()
+    except Exception as e:
+        return await call.answer(
+            f"Gagal membuat pembayaran\n{e}",
+            show_alert=True
+        )
 
-    if not result.get("success"):
-        return await call.answer("Gagal buat pembayaran", show_alert=True)
-
-    data = result["data"]
     payment_id = data["payment_id"]
     qr_string = data["qris_string"]
 
@@ -140,24 +135,27 @@ async def pay_file(call: CallbackQuery):
     buffer.seek(0)
 
     kb = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="✅ Cek Pembayaran",
-                callback_data=f"checkpay:{payment_id}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="❌ Cancel",
-                callback_data="cancelpay"
-            )
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Cek Pembayaran",
+                    callback_data=f"checkpay:{payment_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Cancel",
+                    callback_data="cancelpay"
+                )
+            ]
         ]
-    ]
-)
+    )
 
     await call.message.answer_photo(
-        BufferedInputFile(buffer.read(), filename="qris.png"),
+        BufferedInputFile(
+            buffer.read(),
+            filename="qris.png"
+        ),
         caption=(
             "🔒 <b>PEMBAYARAN QRIS</b>\n\n"
             f"💰 Rp {price:,}\n"
