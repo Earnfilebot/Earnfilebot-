@@ -153,9 +153,11 @@ async def page_handler(call: CallbackQuery):
                         ]
                     )
 
-                    await call.message.answer(
-                        "🔒 File ini berbayar.\n\n"
-                        "Silakan beli file atau aktifkan VIP.",
+                    await call.message.edit_text(
+                        "🔒 <b>FILE BERBAYAR</b>\n\n"
+                        f"💰 Harga : Rp {file['price']:,}".replace(",", ".") +
+                        "\n\nSilakan beli file terlebih dahulu atau gunakan akses VIP.",
+                        parse_mode="HTML",
                         reply_markup=kb
                     )
 
