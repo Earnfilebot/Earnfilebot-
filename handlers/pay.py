@@ -93,6 +93,8 @@ async def pay_file(call: CallbackQuery):
         invoice_id = data.get("invoice_id")
         qr_string = data.get("qris_string")
 
+        print("SAVE PAYMENT ID:", invoice_id)
+
         if not invoice_id or not qr_string:
             return await call.answer("Payment error", show_alert=True)
 
