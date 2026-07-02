@@ -331,3 +331,72 @@ async def process_ban_user(message: Message, state: FSMContext):
     )
 
     await state.clear()
+
+@router.callback_query(F.data == "users_unban")
+async def users_unban(call: CallbackQuery, state: FSMContext):
+
+    if not is_admin(call.from_user.id):
+        return
+
+    await state.set_state(UnbanUserState.waiting_user)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="⬅ Kembali",
+        callback_data="admin_users"
+    )
+
+    await call.message.edit_text(
+        "✅ <b>UNBAN USER</b>\n\n"
+        "Masukkan Telegram ID user yang ingin di-unban.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+@router.message(UnbanUserState.waiting_user)
+async def process_unban_user(message: Message, state: FSMContext):
+
+    if not is_admin(message.from_user.id):
+        return
+
+    if not message.text.isdigit():
+        return await message.answer(
+            "❌ Telegram ID harus berupa angka."
+        )
+
+    telegram_id = int(message.text)
+
+    pool = await get_pool()
+
+    user = await pool.fetchrow(
+        """
+        SELECT username
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        telegram_id
+    )
+
+    if not user:
+        await state.clear()
+        return await message.answer(
+            "❌ User tidak ditemukan."
+        )
+
+    await pool.execute(
+        """
+        UPDATE users
+        SET is_banned=FALSE
+        WHERE telegram_id=$1
+        """,
+        telegram_id
+    )
+
+    await message.answer(
+        f"✅ User <code>{telegram_id}</code> berhasil di-unban.",
+        parse_mode="HTML"
+    )
+
+    await state.clear()
+
