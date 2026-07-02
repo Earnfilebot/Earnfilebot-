@@ -5,13 +5,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 # =========================
-# REDIS CONFIG
+# REDIS INIT
 # =========================
 REDIS_URL = os.getenv("REDIS_URL")
 
+redis_client = None
+
 if not REDIS_URL:
-    logger.warning("⚠️ REDIS_URL tidak ditemukan! Redis disabled.")
-    redis_client = None
+    logger.warning("⚠️ REDIS_URL tidak ditemukan, Redis disabled")
 else:
     try:
         redis_client = redis.from_url(
@@ -22,23 +23,18 @@ else:
             retry_on_timeout=True,
             health_check_interval=30
         )
-
-        logger.info("✅ Redis connected successfully")
-
+        logger.info("✅ Redis connected")
     except Exception as e:
         logger.error(f"❌ Redis connection failed: {e}")
         redis_client = None
 
 
 # =========================
-# SAFE WRAPPER (ANTI CRASH)
+# SAFE WRAPPERS (WAJIB DIPAKAI)
 # =========================
 async def safe_set(key: str, value: str, ex: int = None, nx: bool = False):
-    """
-    Safe Redis SET (tidak bikin bot crash kalau Redis down)
-    """
     if not redis_client:
-        return True  # fallback aman
+        return True
 
     try:
         return await redis_client.set(key, value, ex=ex, nx=nx)
