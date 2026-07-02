@@ -1,201 +1,159 @@
+import aiohttp
+import qrcode
+from io import BytesIO
+
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+
 from database import get_pool
+from config import BAYARGG_API_KEY
+
 router = Router()
-# =========================
-# PAY FILE
-# =========================
+
+
 @router.callback_query(F.data.startswith("buyfile:"))
 async def pay_file(call: CallbackQuery):
     user_id = call.from_user.id
     code = call.data.split(":")[1]
+
     pool = await get_pool()
+
     # =========================
-    # AMBIL DATA FILE
+    # AMBIL FILE
     # =========================
     file = await pool.fetchrow(
-        """
-        SELECT owner_id, price, is_paid
-        FROM files
-        WHERE code=$1
-        """,
+        "SELECT owner_id, price, is_paid FROM files WHERE code=$1",
         code
     )
+
     if not file:
-        return await call.answer(
-            "❌ File tidak ditemukan",
-            show_alert=True
-        )
+        return await call.answer("❌ File tidak ditemukan", show_alert=True)
+
+    if not file["is_paid"]:
+        return await call.answer("File ini gratis", show_alert=True)
+
     owner_id = file["owner_id"]
     price = file["price"] or 0
-    # =========================
-    # FILE GRATIS
-    # =========================
-    if not file["is_paid"]:
-        return await call.answer(
-            "File ini gratis.",
-            show_alert=True
-        )
+
     # =========================
     # OWNER AUTO ACCESS
     # =========================
     if owner_id == user_id:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📂 OPEN PAGE",
-                        callback_data=f"page:{code}:1"
-                    )
-                ]
+                [InlineKeyboardButton(text="📂 OPEN PAGE", callback_data=f"page:{code}:1")]
             ]
         )
         await call.message.edit_reply_markup(reply_markup=kb)
         return await call.answer()
+
     # =========================
-    # VIP AUTO ACCESS
+    # VIP CHECK
     # =========================
     vip = await pool.fetchval(
         """
-        SELECT 1
-        FROM users
+        SELECT 1 FROM users
         WHERE telegram_id=$1
-          AND vip=TRUE
-          AND vip_until > NOW()
+        AND vip=TRUE
+        AND vip_until > NOW()
         """,
         user_id
     )
+
     if vip:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📂 OPEN PAGE",
-                        callback_data=f"page:{code}:1"
-                    )
-                ]
+                [InlineKeyboardButton(text="📂 OPEN PAGE", callback_data=f"page:{code}:1")]
             ]
         )
         await call.message.edit_reply_markup(reply_markup=kb)
-        return await call.answer(
-            "💎 Akses VIP aktif.",
-            show_alert=True
-        )
+        return await call.answer("💎 VIP aktif", show_alert=True)
+
     # =========================
-    # SUDAH PERNAH BELI?
+    # CEK SUDAH BELI
     # =========================
     purchased = await pool.fetchval(
         """
-        SELECT 1
-        FROM file_purchases
-        WHERE user_id=$1
-          AND file_code=$2
-          AND status='paid'
-        LIMIT 1
+        SELECT 1 FROM file_purchases
+        WHERE user_id=$1 AND file_code=$2 AND status='paid'
         """,
         user_id,
         code
     )
+
     if purchased:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📂 OPEN PAGE",
-                        callback_data=f"page:{code}:1"
-                    )
-                ]
+                [InlineKeyboardButton(text="📂 OPEN PAGE", callback_data=f"page:{code}:1")]
             ]
         )
         await call.message.edit_reply_markup(reply_markup=kb)
-        return await call.answer(
-            "✅ Kamu sudah membeli file ini.",
-            show_alert=True
-        )
+        return await call.answer("Sudah dibeli", show_alert=True)
+
     # =========================
-    # CEK SALDO
+    # CREATE BAYARGG PAYMENT
     # =========================
-    balance = await pool.fetchval(
+    payload = {
+        "api_key": BAYARGG_API_KEY,
+        "amount": price,
+        "unique_code": f"FILE_{code}_{user_id}",
+        "service": "QRIS"
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://www.bayar.gg/api/create-payment.php",
+            data=payload
+        ) as resp:
+            result = await resp.json()
+
+    if not result.get("success"):
+        return await call.answer("Gagal buat pembayaran", show_alert=True)
+
+    data = result["data"]
+    payment_id = data["payment_id"]
+    qr_string = data["qris_string"]
+
+    # =========================
+    # SIMPAN PENDING
+    # =========================
+    await pool.execute(
         """
-        SELECT balance
-        FROM users
-        WHERE telegram_id=$1
+        INSERT INTO file_purchases
+        (user_id, file_code, owner_id, paid_price, status, payment_id)
+        VALUES ($1,$2,$3,$4,'pending',$5)
+        ON CONFLICT DO NOTHING
         """,
-        user_id
+        user_id,
+        code,
+        owner_id,
+        price,
+        payment_id
     )
-    balance = balance or 0
-    if balance < price:
-        return await call.answer(
-            f"❌ Saldo kurang.\n\nSaldo : Rp {balance:,}\nHarga : Rp {price:,}".replace(",", "."),
-            show_alert=True
-        )
+
     # =========================
-    # TRANSAKSI
+    # GENERATE QR
     # =========================
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                """
-                UPDATE users
-                SET balance = balance - $1
-                WHERE telegram_id=$2
-                """,
-                price,
-                user_id
-            )
-            await conn.execute(
-                """
-                UPDATE users
-                SET
-                    balance = balance + $1,
-                    total_sales = total_sales + 1
-                WHERE telegram_id=$2
-                """,
-                price,
-                owner_id
-            )
-            await conn.execute(
-                """
-                UPDATE users
-                SET total_downloads = total_downloads + 1
-                WHERE telegram_id=$1
-                """,
-                user_id
-            )
-            await conn.execute(
-                """
-                INSERT INTO file_purchases
-                (
-                    user_id,
-                    file_code,
-                    owner_id,
-                    paid_price,
-                    status
-                )
-                VALUES
-                ($1,$2,$3,$4,'paid')
-                ON CONFLICT DO NOTHING
-                """,
-                user_id,
-                code,
-                owner_id,
-                price
-            )
-    # =========================
-    # UNLOCK PAGE
-    # =========================
+    qr = qrcode.make(qr_string)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    buffer.seek(0)
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📂 OPEN PAGE",
-                    callback_data=f"page:{code}:1"
-                )
-            ]
+            [InlineKeyboardButton(text="❌ Cancel", callback_data="cancelpay")]
         ]
     )
-    await call.message.edit_reply_markup(reply_markup=kb)
-    await call.answer(
-        "✅ Pembayaran berhasil.",
-        show_alert=True
+
+    await call.message.answer_photo(
+        BufferedInputFile(buffer.read(), filename="qris.png"),
+        caption=(
+            "🔒 <b>PEMBAYARAN QRIS</b>\n\n"
+            f"💰 Rp {price:,}\n"
+            "Scan QR untuk bayar"
+        ).replace(",", "."),
+        parse_mode="HTML",
+        reply_markup=kb
     )
+
+    await call.answer()
