@@ -38,6 +38,10 @@ async def bayargg_webhook(request: Request):
     invoice_id = data.get("invoice_id")
     status = (data.get("status") or "").lower()
 
+    logging.info(f"🔥 WEBHOOK HIT: {invoice_id} - {status}")
+    print("🔥 WEBHOOK MASUK")
+    print(data)
+
     if not invoice_id:
         return {"success": False, "message": "missing invoice"}
 
@@ -45,7 +49,7 @@ async def bayargg_webhook(request: Request):
         return {"success": True, "message": "ignored"}
 
     # =========================
-    # 🔥 REDIS IDEMPOTENCY LOCK
+    # REDIS IDEMPOTENCY LOCK
     # =========================
     redis_key = f"webhook:processed:{invoice_id}"
     if await redis_client.get(redis_key):
@@ -70,20 +74,21 @@ async def bayargg_webhook(request: Request):
     if purchase:
 
         if purchase["status"] == "paid":
-            return {"success": True, "message": "already processed"}
+            return {"success": True}
 
-        async with pool.acquire() as conn:
-            async with conn.transaction():
+        await pool.execute(
+            """
+            UPDATE file_purchases
+            SET status='paid',
+                paid_at=NOW()
+            WHERE payment_id=$1
+            """,
+            invoice_id
+        )
 
-                await conn.execute(
-                    """
-                    UPDATE file_purchases
-                    SET status='paid',
-                        paid_at=NOW()
-                    WHERE payment_id=$1
-                    """,
-                    invoice_id
-                )
+        # CLEAN REDIS
+        await redis_client.delete(f"invoice:{invoice_id}")
+        await redis_client.set(f"invoice:{invoice_id}", "paid", ex=3600)
 
         try:
             kb = {
@@ -100,11 +105,6 @@ async def bayargg_webhook(request: Request):
                 "✅ <b>Pembayaran berhasil</b>",
                 parse_mode="HTML",
                 reply_markup=kb
-            )
-
-            await bot.send_message(
-                CHANNEL_ID,
-                f"📁 FILE PAID\nUser: {purchase['user_id']}\nCode: {purchase['file_code']}",
             )
 
         except Exception:
@@ -124,7 +124,7 @@ async def bayargg_webhook(request: Request):
         return {"success": False, "message": "not found"}
 
     if trx["status"] == "paid":
-        return {"success": True, "message": "already processed"}
+        return {"success": True}
 
     paket = VIP_PACKAGES.get(trx["code"])
     if not paket:
