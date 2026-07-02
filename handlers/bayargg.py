@@ -38,6 +38,9 @@ async def bayargg_webhook(request: Request):
     invoice_id = data.get("invoice_id")
     status = (data.get("status") or "").lower()
 
+    print("WEBHOOK INVOICE:", invoice_id)
+    print("WEBHOOK STATUS:", status)
+
     logging.info(f"🔥 WEBHOOK HIT: {invoice_id} - {status}")
     print("🔥 WEBHOOK MASUK")
     print(data)
