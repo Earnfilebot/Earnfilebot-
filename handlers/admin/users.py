@@ -296,25 +296,51 @@ async def process_ban_user(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
 
-    if not message.text.isdigit():
-        return await message.answer("❌ Telegram ID harus berupa angka.")
-
-    telegram_id = int(message.text)
+    keyword = message.text.strip()
 
     pool = await get_pool()
 
-    user = await pool.fetchrow(
-        """
-        SELECT username
-        FROM users
-        WHERE telegram_id=$1
-        """,
-        telegram_id
-    )
+    if keyword.isdigit():
+
+        user = await pool.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE telegram_id=$1
+            """,
+            int(keyword)
+        )
+
+    elif keyword.startswith("@"):
+
+        username = keyword[1:]
+
+        user = await pool.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE LOWER(username)=LOWER($1)
+            """,
+            username
+        )
+
+    else:
+
+        user = await pool.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE LOWER(username)=LOWER($1)
+               OR LOWER(full_name)=LOWER($1)
+            """,
+            keyword
+        )
 
     if not user:
         await state.clear()
-        return await message.answer("❌ User tidak ditemukan.")
+        return await message.answer(
+            "❌ User tidak ditemukan."
+        )
 
     await pool.execute(
         """
@@ -322,11 +348,14 @@ async def process_ban_user(message: Message, state: FSMContext):
         SET is_banned=TRUE
         WHERE telegram_id=$1
         """,
-        telegram_id
+        user["telegram_id"]
     )
 
     await message.answer(
-        f"✅ User <code>{telegram_id}</code> berhasil diban.",
+        "✅ <b>User berhasil diban.</b>\n\n"
+        f"🆔 ID : <code>{user['telegram_id']}</code>\n"
+        f"👤 Nama : {user.get('full_name') or '-'}\n"
+        f"📛 Username : @{user.get('username') or '-'}",
         parse_mode="HTML"
     )
 
@@ -360,23 +389,45 @@ async def process_unban_user(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
 
-    if not message.text.isdigit():
-        return await message.answer(
-            "❌ Telegram ID harus berupa angka."
-        )
-
-    telegram_id = int(message.text)
+    keyword = message.text.strip()
 
     pool = await get_pool()
 
-    user = await pool.fetchrow(
-        """
-        SELECT username
-        FROM users
-        WHERE telegram_id=$1
-        """,
-        telegram_id
-    )
+    if keyword.isdigit():
+
+        user = await pool.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE telegram_id=$1
+            """,
+            int(keyword)
+        )
+
+    elif keyword.startswith("@"):
+
+        username = keyword[1:]
+
+        user = await pool.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE LOWER(username)=LOWER($1)
+            """,
+            username
+        )
+
+    else:
+
+        user = await pool.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE LOWER(username)=LOWER($1)
+               OR LOWER(full_name)=LOWER($1)
+            """,
+            keyword
+        )
 
     if not user:
         await state.clear()
@@ -390,13 +441,15 @@ async def process_unban_user(message: Message, state: FSMContext):
         SET is_banned=FALSE
         WHERE telegram_id=$1
         """,
-        telegram_id
+        user["telegram_id"]
     )
 
     await message.answer(
-        f"✅ User <code>{telegram_id}</code> berhasil di-unban.",
+        "✅ <b>User berhasil di-unban.</b>\n\n"
+        f"🆔 ID : <code>{user['telegram_id']}</code>\n"
+        f"👤 Nama : {user.get('full_name') or '-'}\n"
+        f"📛 Username : @{user.get('username') or '-'}",
         parse_mode="HTML"
     )
 
     await state.clear()
-
