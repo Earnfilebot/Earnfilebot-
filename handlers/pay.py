@@ -27,10 +27,9 @@ async def pay_file(call: CallbackQuery):
     lock_key = f"paylock:{user_id}:{code}"
 
     # =========================
-    # REDIS ATOMIC LOCK (FIX PRO)
+    # REDIS LOCK (ANTI DOUBLE CLICK)
     # =========================
     lock_ok = await redis_client.set(lock_key, "1", nx=True, ex=PAY_LOCK_TTL)
-
     if not lock_ok:
         return await call.answer("⏳ Tunggu sebentar...", show_alert=True)
 
@@ -57,7 +56,7 @@ async def pay_file(call: CallbackQuery):
         price = file["price"] or 0
 
         # =========================
-        # CHECK EXISTING INVOICE (FIXED LOGIC)
+        # CHECK EXISTING TX
         # =========================
         existing = await pool.fetchrow(
             """
@@ -91,7 +90,7 @@ async def pay_file(call: CallbackQuery):
         qr_string = data.get("qris_string")
 
         if not invoice_id or not qr_string:
-            return await call.answer("Payment response invalid", show_alert=True)
+            return await call.answer("Payment error", show_alert=True)
 
         # =========================
         # SAVE DB
@@ -111,7 +110,7 @@ async def pay_file(call: CallbackQuery):
         )
 
         # =========================
-        # REDIS INVOICE TRACK (PRO)
+        # REDIS TRACK INVOICE
         # =========================
         await redis_client.set(
             f"invoice:{invoice_id}",
