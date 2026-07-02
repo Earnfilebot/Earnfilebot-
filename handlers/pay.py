@@ -5,7 +5,7 @@ router = Router()
 # =========================
 # PAY FILE
 # =========================
-@router.callback_query(F.data.startswith("pay:"))
+@router.callback_query(F.data.startswith("buyfile:"))
 async def pay_file(call: CallbackQuery):
     user_id = call.from_user.id
     code = call.data.split(":")[1]
