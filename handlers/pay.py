@@ -1,5 +1,4 @@
 import qrcode
-import time
 from io import BytesIO
 
 from aiogram import Router, F
@@ -16,15 +15,10 @@ from utils.redis_client import redis_client
 
 router = Router()
 
-# =========================
-# CONFIG
-# =========================
-PAY_LOCK_TTL = 10  # anti spam click
-INVOICE_TTL = 3600  # 1 jam expire
+PAY_LOCK_TTL = 10
+INVOICE_TTL = 3600
 
-# =========================
-# PAY HANDLER (PRO)
-# =========================
+
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
     user_id = call.from_user.id
@@ -33,12 +27,12 @@ async def pay_file(call: CallbackQuery):
     lock_key = f"paylock:{user_id}:{code}"
 
     # =========================
-    # REDIS LOCK (ANTI DOUBLE CLICK GLOBAL)
+    # REDIS ATOMIC LOCK (FIX PRO)
     # =========================
-    if await redis_client.get(lock_key):
-        return await call.answer("⏳ Tunggu sebentar...", show_alert=True)
+    lock_ok = await redis_client.set(lock_key, "1", nx=True, ex=PAY_LOCK_TTL)
 
-    await redis_client.set(lock_key, "1", ex=PAY_LOCK_TTL)
+    if not lock_ok:
+        return await call.answer("⏳ Tunggu sebentar...", show_alert=True)
 
     pool = await get_pool()
 
@@ -63,7 +57,7 @@ async def pay_file(call: CallbackQuery):
         price = file["price"] or 0
 
         # =========================
-        # CHECK EXISTING INVOICE
+        # CHECK EXISTING INVOICE (FIXED LOGIC)
         # =========================
         existing = await pool.fetchrow(
             """
@@ -80,8 +74,9 @@ async def pay_file(call: CallbackQuery):
         if existing:
             if existing["status"] == "paid":
                 return await call.answer("Sudah dibeli", show_alert=True)
+
             if existing["status"] == "pending":
-                return await call.answer("Invoice masih aktif", show_alert=True)
+                return await call.answer("⏳ Invoice masih aktif", show_alert=True)
 
         # =========================
         # CREATE PAYMENT
@@ -96,10 +91,10 @@ async def pay_file(call: CallbackQuery):
         qr_string = data.get("qris_string")
 
         if not invoice_id or not qr_string:
-            return await call.answer("Payment error invalid response", show_alert=True)
+            return await call.answer("Payment response invalid", show_alert=True)
 
         # =========================
-        # SAVE DB (PENDING)
+        # SAVE DB
         # =========================
         await pool.execute(
             """
@@ -116,9 +111,13 @@ async def pay_file(call: CallbackQuery):
         )
 
         # =========================
-        # REDIS INVOICE EXPIRE TRACK
+        # REDIS INVOICE TRACK (PRO)
         # =========================
-        await redis_client.set(f"invoice:{invoice_id}", "pending", ex=INVOICE_TTL)
+        await redis_client.set(
+            f"invoice:{invoice_id}",
+            f"{user_id}:{code}:pending",
+            ex=INVOICE_TTL
+        )
 
         # =========================
         # QR GENERATE
