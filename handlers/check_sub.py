@@ -15,6 +15,8 @@ router = Router()
 async def check_sub_callback(call: CallbackQuery):
 
     user_id = call.from_user.id
+    username = call.from_user.username or "unknown"
+
     logging.info(f"CHECK SUB CLICKED: {user_id}")
 
     try:
@@ -22,7 +24,6 @@ async def check_sub_callback(call: CallbackQuery):
         logging.info(f"FORCE SUB RESULT: {ok}")
 
         if not ok:
-
             await call.answer(
                 "❌ Kamu belum join semua channel.",
                 show_alert=True
@@ -36,6 +37,22 @@ async def check_sub_callback(call: CallbackQuery):
 
         pool = await get_pool()
 
+        # =========================
+        # AUTO CREATE USER (SAFE FIX)
+        # =========================
+        await pool.execute(
+            """
+            INSERT INTO users (telegram_id, username, balance)
+            VALUES ($1, $2, 0)
+            ON CONFLICT (telegram_id) DO NOTHING
+            """,
+            user_id,
+            username
+        )
+
+        # =========================
+        # FETCH USER
+        # =========================
         user = await pool.fetchrow(
             """
             SELECT username, balance
@@ -45,13 +62,28 @@ async def check_sub_callback(call: CallbackQuery):
             user_id
         )
 
+        # =========================
+        # SAFE FALLBACK (ANTI CRASH)
+        # =========================
+        if not user:
+            logging.warning(f"USER STILL NULL: {user_id}")
+
+            await render_home_fast(
+                call.bot,
+                call.message,
+                user_id,
+                username,
+                0
+            )
+            return
+
         await call.answer("✅ Verifikasi berhasil")
 
         await render_home_fast(
             call.bot,
             call.message,
             user_id,
-            user["username"] or "unknown",
+            user["username"] or username,
             user["balance"] or 0
         )
 
