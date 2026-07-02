@@ -6,7 +6,6 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 
 from database import get_pool
-from config import BAYARGG_API_KEY
 
 router = Router()
 
