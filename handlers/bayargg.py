@@ -13,14 +13,17 @@ from database import get_pool
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
 
+# =========================
+# SECURE COMPARE (ANTI TIMING ATTACK)
+# =========================
+def secure_compare(a: str, b: str) -> bool:
+    return hmac.compare_digest(a or "", b or "")
+
+
 @router.post("/webhook")
 async def bayargg_webhook(request: Request):
 
     body = await request.body()
-
-    # =========================
-    # VERIFY SIGNATURE
-    # =========================
     signature = request.headers.get("X-Callback-Signature", "")
 
     expected = hmac.new(
@@ -29,57 +32,61 @@ async def bayargg_webhook(request: Request):
         hashlib.sha256
     ).hexdigest()
 
-    if signature != expected:
-        return {
-            "success": False,
-            "message": "invalid signature"
-        }
+    # =========================
+    # VERIFY SIGNATURE (SECURE)
+    # =========================
+    if not secure_compare(signature, expected):
+        return {"success": False, "message": "invalid signature"}
 
     data = await request.json()
 
     invoice_id = data.get("invoice_id")
-    status = data.get("status", "").lower()
+    status = (data.get("status") or "").lower()
+
+    if not invoice_id:
+        return {"success": False, "message": "missing invoice"}
 
     if status != "paid":
-        return {
-            "success": True,
-            "message": "ignored"
-        }
+        return {"success": True, "message": "ignored"}
 
     pool = await get_pool()
 
     # =====================================================
-    # FILE PURCHASE
+    # ================= FILE PAYMENT =====================
     # =====================================================
     purchase = await pool.fetchrow(
         """
         SELECT *
         FROM file_purchases
         WHERE payment_id=$1
+        FOR UPDATE
         """,
         invoice_id
     )
 
     if purchase:
 
+        # =========================
+        # IDEMPOTENCY GUARD
+        # =========================
         if purchase["status"] == "paid":
-            return {
-                "success": True,
-                "message": "already processed"
-            }
+            return {"success": True, "message": "already processed"}
 
         async with pool.acquire() as conn:
             async with conn.transaction():
 
+                # MARK AS PAID FIRST (LOCK STEP)
                 await conn.execute(
                     """
                     UPDATE file_purchases
-                    SET status='paid'
+                    SET status='paid',
+                        paid_at=NOW()
                     WHERE payment_id=$1
                     """,
                     invoice_id
                 )
 
+                # OWNER UPDATE
                 await conn.execute(
                     """
                     UPDATE users
@@ -92,6 +99,7 @@ async def bayargg_webhook(request: Request):
                     purchase["owner_id"]
                 )
 
+                # BUYER UPDATE
                 await conn.execute(
                     """
                     UPDATE users
@@ -101,84 +109,68 @@ async def bayargg_webhook(request: Request):
                     purchase["user_id"]
                 )
 
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📂 OPEN PAGE",
-                        callback_data=f"page:{purchase['file_code']}:1"
-                    )
-                ]
-            ]
-        )
-
+        # =========================
+        # NOTIFICATION
+        # =========================
         try:
-            # Kirim ke pembeli
+            kb = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "📂 OPEN PAGE",
+                            "callback_data": f"page:{purchase['file_code']}:1"
+                        }
+                    ]
+                ]
+            }
+
             await bot.send_message(
                 purchase["user_id"],
-                (
-                    "✅ <b>Pembayaran Berhasil</b>\n\n"
-                    "File berhasil dibuka.\n"
-                    "Silakan klik tombol di bawah."
-                ),
+                "✅ <b>Pembayaran Berhasil</b>\n\nFile sudah dibuka.",
                 parse_mode="HTML",
                 reply_markup=kb
             )
 
-            # Log ke channel admin
             await bot.send_message(
                 CHANNEL_ID,
                 (
-                    "📁 <b>FILE BERHASIL DIBELI</b>\n\n"
-                    f"👤 Buyer : <code>{purchase['user_id']}</code>\n"
-                    f"👑 Owner : <code>{purchase['owner_id']}</code>\n"
-                    f"🔑 Code : <code>{purchase['file_code']}</code>\n"
-                    f"💰 Harga : Rp {purchase['paid_price']:,}".replace(",", ".")
-                ),
+                    "📁 <b>FILE PAID</b>\n\n"
+                    f"👤 Buyer: <code>{purchase['user_id']}</code>\n"
+                    f"👑 Owner: <code>{purchase['owner_id']}</code>\n"
+                    f"🔑 Code: <code>{purchase['file_code']}</code>\n"
+                    f"💰 Price: Rp {purchase['paid_price']:,}"
+                ).replace(",", "."),
                 parse_mode="HTML"
             )
 
         except Exception:
-            logging.exception("Gagal mengirim pesan pembayaran file")
+            logging.exception("file payment notify failed")
 
-        return {
-            "success": True
-        }
+        return {"success": True}
 
     # =====================================================
-    # VIP PAYMENT
+    # ================= VIP PAYMENT =======================
     # =====================================================
-
     trx = await pool.fetchrow(
         """
         SELECT *
         FROM payments
         WHERE invoice_id=$1
+        FOR UPDATE
         """,
         invoice_id
     )
 
     if not trx:
-        return {
-            "success": False,
-            "message": "invoice not found"
-        }
+        return {"success": False, "message": "invoice not found"}
 
     if trx["status"] == "paid":
-        return {
-            "success": True,
-            "message": "already processed"
-        }
+        return {"success": True, "message": "already processed"}
 
     paket = VIP_PACKAGES.get(trx["code"])
 
     if not paket:
-        return {
-            "success": False,
-            "message": "invalid package"
-        }
+        return {"success": False, "message": "invalid package"}
 
     user = await pool.fetchrow(
         """
@@ -202,8 +194,7 @@ async def bayargg_webhook(request: Request):
             await conn.execute(
                 """
                 UPDATE payments
-                SET
-                    status='paid',
+                SET status='paid',
                     updated_at=NOW()
                 WHERE invoice_id=$1
                 """,
@@ -213,8 +204,7 @@ async def bayargg_webhook(request: Request):
             await conn.execute(
                 """
                 UPDATE users
-                SET
-                    vip=TRUE,
+                SET vip=TRUE,
                     is_vip=TRUE,
                     vip_until=$1
                 WHERE telegram_id=$2
@@ -226,16 +216,8 @@ async def bayargg_webhook(request: Request):
             await conn.execute(
                 """
                 INSERT INTO vip_users
-                (
-                    user_id,
-                    plan,
-                    invoice_id,
-                    started_at,
-                    expires_at,
-                    active
-                )
-                VALUES
-                ($1,$2,$3,NOW(),$4,TRUE)
+                (user_id, plan, invoice_id, started_at, expires_at, active)
+                VALUES ($1,$2,$3,NOW(),$4,TRUE)
                 """,
                 trx["user_id"],
                 paket["name"],
@@ -248,32 +230,25 @@ async def bayargg_webhook(request: Request):
             trx["user_id"],
             (
                 "🎉 <b>Pembayaran Berhasil</b>\n\n"
-                f"💎 Paket : <b>{paket['name']}</b>\n"
-                f"📅 Berlaku sampai:\n"
-                f"<code>{vip_until}</code>\n\n"
-                "Selamat menikmati fitur VIP ❤️"
+                f"💎 Paket: <b>{paket['name']}</b>\n"
+                f"📅 Expired:\n<code>{vip_until}</code>"
             ),
             parse_mode="HTML"
         )
 
-        # =========================
-        # LOG CHANNEL
-        # =========================
         await bot.send_message(
             CHANNEL_ID,
             (
-                "💎 <b>VIP BERHASIL DIBELI</b>\n\n"
-                f"👤 User ID : <code>{trx['user_id']}</code>\n"
-                f"📦 Paket : <b>{paket['name']}</b>\n"
-                f"💳 Invoice : <code>{invoice_id}</code>\n"
-                f"📅 Expired : <code>{vip_until}</code>"
+                "💎 <b>VIP PURCHASED</b>\n\n"
+                f"👤 User: <code>{trx['user_id']}</code>\n"
+                f"📦 Paket: <b>{paket['name']}</b>\n"
+                f"🧾 Invoice: <code>{invoice_id}</code>\n"
+                f"📅 Expired: <code>{vip_until}</code>"
             ),
             parse_mode="HTML"
         )
 
     except Exception:
-        logging.exception("Gagal mengirim pesan VIP")
+        logging.exception("vip notify failed")
 
-    return {
-        "success": True
-    }
+    return {"success": True}
