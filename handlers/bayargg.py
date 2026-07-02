@@ -9,13 +9,11 @@ from bot import bot
 from config import BAYARGG_API_KEY, CHANNEL_ID
 from config_vip import VIP_PACKAGES
 from database import get_pool
+from utils.redis_client import redis_client
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
 
-# =========================
-# SECURE COMPARE (ANTI TIMING ATTACK)
-# =========================
 def secure_compare(a: str, b: str) -> bool:
     return hmac.compare_digest(a or "", b or "")
 
@@ -32,9 +30,6 @@ async def bayargg_webhook(request: Request):
         hashlib.sha256
     ).hexdigest()
 
-    # =========================
-    # VERIFY SIGNATURE (SECURE)
-    # =========================
     if not secure_compare(signature, expected):
         return {"success": False, "message": "invalid signature"}
 
@@ -49,33 +44,37 @@ async def bayargg_webhook(request: Request):
     if status != "paid":
         return {"success": True, "message": "ignored"}
 
+    # =========================
+    # 🔥 REDIS IDEMPOTENCY LOCK
+    # =========================
+    redis_key = f"webhook:processed:{invoice_id}"
+    if await redis_client.get(redis_key):
+        return {"success": True, "message": "already processed"}
+
+    await redis_client.set(redis_key, "1", ex=86400)
+
     pool = await get_pool()
 
     # =====================================================
-    # ================= FILE PAYMENT =====================
+    # FILE PAYMENT
     # =====================================================
     purchase = await pool.fetchrow(
         """
         SELECT *
         FROM file_purchases
         WHERE payment_id=$1
-        FOR UPDATE
         """,
         invoice_id
     )
 
     if purchase:
 
-        # =========================
-        # IDEMPOTENCY GUARD
-        # =========================
         if purchase["status"] == "paid":
             return {"success": True, "message": "already processed"}
 
         async with pool.acquire() as conn:
             async with conn.transaction():
 
-                # MARK AS PAID FIRST (LOCK STEP)
                 await conn.execute(
                     """
                     UPDATE file_purchases
@@ -86,166 +85,91 @@ async def bayargg_webhook(request: Request):
                     invoice_id
                 )
 
-                # OWNER UPDATE
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET
-                        balance = balance + $1,
-                        total_sales = total_sales + 1
-                    WHERE telegram_id=$2
-                    """,
-                    purchase["paid_price"],
-                    purchase["owner_id"]
-                )
-
-                # BUYER UPDATE
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET total_downloads = total_downloads + 1
-                    WHERE telegram_id=$1
-                    """,
-                    purchase["user_id"]
-                )
-
-        # =========================
-        # NOTIFICATION
-        # =========================
         try:
             kb = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "📂 OPEN PAGE",
-                            "callback_data": f"page:{purchase['file_code']}:1"
-                        }
-                    ]
-                ]
+                "inline_keyboard": [[
+                    {
+                        "text": "📂 OPEN FILE",
+                        "callback_data": f"page:{purchase['file_code']}:1"
+                    }
+                ]]
             }
 
             await bot.send_message(
                 purchase["user_id"],
-                "✅ <b>Pembayaran Berhasil</b>\n\nFile sudah dibuka.",
+                "✅ <b>Pembayaran berhasil</b>",
                 parse_mode="HTML",
                 reply_markup=kb
             )
 
             await bot.send_message(
                 CHANNEL_ID,
-                (
-                    "📁 <b>FILE PAID</b>\n\n"
-                    f"👤 Buyer: <code>{purchase['user_id']}</code>\n"
-                    f"👑 Owner: <code>{purchase['owner_id']}</code>\n"
-                    f"🔑 Code: <code>{purchase['file_code']}</code>\n"
-                    f"💰 Price: Rp {purchase['paid_price']:,}"
-                ).replace(",", "."),
-                parse_mode="HTML"
+                f"📁 FILE PAID\nUser: {purchase['user_id']}\nCode: {purchase['file_code']}",
             )
 
         except Exception:
-            logging.exception("file payment notify failed")
+            logging.exception("file notify failed")
 
         return {"success": True}
 
     # =====================================================
-    # ================= VIP PAYMENT =======================
+    # VIP PAYMENT
     # =====================================================
     trx = await pool.fetchrow(
-        """
-        SELECT *
-        FROM payments
-        WHERE invoice_id=$1
-        FOR UPDATE
-        """,
+        "SELECT * FROM payments WHERE invoice_id=$1",
         invoice_id
     )
 
     if not trx:
-        return {"success": False, "message": "invoice not found"}
+        return {"success": False, "message": "not found"}
 
     if trx["status"] == "paid":
         return {"success": True, "message": "already processed"}
 
     paket = VIP_PACKAGES.get(trx["code"])
-
     if not paket:
         return {"success": False, "message": "invalid package"}
 
     user = await pool.fetchrow(
-        """
-        SELECT vip_until
-        FROM users
-        WHERE telegram_id=$1
-        """,
+        "SELECT vip_until FROM users WHERE telegram_id=$1",
         trx["user_id"]
     )
 
     now = datetime.now(timezone.utc)
 
-    if user and user["vip_until"] and user["vip_until"] > now:
-        vip_until = user["vip_until"] + timedelta(days=paket["days"])
-    else:
-        vip_until = now + timedelta(days=paket["days"])
+    vip_until = (
+        user["vip_until"] + timedelta(days=paket["days"])
+        if user and user["vip_until"] and user["vip_until"] > now
+        else now + timedelta(days=paket["days"])
+    )
 
     async with pool.acquire() as conn:
         async with conn.transaction():
 
             await conn.execute(
-                """
-                UPDATE payments
-                SET status='paid',
-                    updated_at=NOW()
-                WHERE invoice_id=$1
-                """,
+                "UPDATE payments SET status='paid' WHERE invoice_id=$1",
                 invoice_id
             )
 
             await conn.execute(
                 """
                 UPDATE users
-                SET vip=TRUE,
-                    is_vip=TRUE,
-                    vip_until=$1
+                SET vip=TRUE, is_vip=TRUE, vip_until=$1
                 WHERE telegram_id=$2
                 """,
                 vip_until,
                 trx["user_id"]
             )
 
-            await conn.execute(
-                """
-                INSERT INTO vip_users
-                (user_id, plan, invoice_id, started_at, expires_at, active)
-                VALUES ($1,$2,$3,NOW(),$4,TRUE)
-                """,
-                trx["user_id"],
-                paket["name"],
-                invoice_id,
-                vip_until
-            )
-
     try:
         await bot.send_message(
             trx["user_id"],
-            (
-                "🎉 <b>Pembayaran Berhasil</b>\n\n"
-                f"💎 Paket: <b>{paket['name']}</b>\n"
-                f"📅 Expired:\n<code>{vip_until}</code>"
-            ),
-            parse_mode="HTML"
+            f"🎉 VIP ACTIVE\n{paket['name']}\nExpired: {vip_until}",
         )
 
         await bot.send_message(
             CHANNEL_ID,
-            (
-                "💎 <b>VIP PURCHASED</b>\n\n"
-                f"👤 User: <code>{trx['user_id']}</code>\n"
-                f"📦 Paket: <b>{paket['name']}</b>\n"
-                f"🧾 Invoice: <code>{invoice_id}</code>\n"
-                f"📅 Expired: <code>{vip_until}</code>"
-            ),
-            parse_mode="HTML"
+            f"💎 VIP SOLD\nUser: {trx['user_id']}\nPlan: {paket['name']}",
         )
 
     except Exception:
