@@ -210,29 +210,6 @@ async def process_search(message: Message, state: FSMContext):
 
     await state.clear()
 
-@router.callback_query(F.data == "users_balance")
-async def users_balance(call: CallbackQuery, state: FSMContext):
-
-    if not is_admin(call.from_user.id):
-        return
-
-    await state.set_state(BalanceState.waiting_user)
-
-    kb = InlineKeyboardBuilder()
-
-    kb.button(
-        text="⬅ Kembali",
-        callback_data="admin_users"
-    )
-
-    await call.message.edit_text(
-        "💰 <b>BALANCE USER</b>\n\n"
-        "Masukkan User ID.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup()
-    )
-
-    await call.answer()
 @router.message(BalanceState.waiting_user)
 async def balance_user(message: Message, state: FSMContext):
 
@@ -243,90 +220,112 @@ async def balance_user(message: Message, state: FSMContext):
 
     pool = await get_pool()
 
-    user = await pool.fetchrow(
-        """
+    user = await pool.fetchrow("""
         SELECT *
         FROM users
         WHERE telegram_id=$1
-        """,
-        user_id
-    )
+    """, telegram_id)
 
     if not user:
-        return await message.answer("User tidak ditemukan.")
+        await state.clear()
+        return await message.answer("❌ User tidak ditemukan.")
 
-    await state.update_data(telegram_id=telegram_id)
+    # Total withdraw berhasil
+    total_withdraw = await pool.fetchval("""
+        SELECT COALESCE(SUM(amount),0)
+        FROM withdraws
+        WHERE telegram_id=$1
+        AND status='approved'
+    """, telegram_id)
+
+    # Jumlah withdraw berhasil
+    total_request = await pool.fetchval("""
+        SELECT COUNT(*)
+        FROM withdraws
+        WHERE telegram_id=$1
+        AND status='approved'
+    """, telegram_id)
 
     kb = InlineKeyboardBuilder()
-
-    kb.button(
-        text="➕ Tambah",
-        callback_data="balance_add"
-    )
-
-    kb.button(
-        text="➖ Kurangi",
-        callback_data="balance_reduce"
-    )
-
-    kb.button(
-        text="♻ Reset",
-        callback_data="balance_reset"
-    )
 
     kb.button(
         text="⬅ Kembali",
         callback_data="admin_users"
     )
 
-    kb.adjust(2)
-
     await message.answer(
-        f"👤 Username : @{user['username'] or '-'}\n"
-        f"🆔 {user['user_id']}\n"
-        f"💰 Balance : <b>{rupiah(user['balance'])}</b>",
+        f"👤 <b>INFO BALANCE USER</b>\n\n"
+        f"🆔 Telegram ID : <code>{telegram_id}</code>\n"
+        f"👤 Username : @{user['username'] or '-'}\n\n"
+        f"💰 Saldo Saat Ini : <b>{rupiah(user['balance'])}</b>\n"
+        f"🏧 Total Withdraw : <b>{rupiah(total_withdraw)}</b>\n"
+        f"📦 Jumlah WD : <b>{total_request}</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup()
     )
 
+    await state.clear()
 
-@router.callback_query(F.data == "balance_add")
-async def balance_add(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "users_ban")
+async def users_ban(call: CallbackQuery, state: FSMContext):
 
-    await state.set_state(BalanceState.waiting_add)
+    if not is_admin(call.from_user.id):
+        return
 
-    await call.message.answer(
-        "Masukkan nominal yang ingin ditambahkan."
+    await state.set_state(BanUserState.waiting_user)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="⬅ Kembali",
+        callback_data="admin_users"
+    )
+
+    await call.message.edit_text(
+        "🚫 <b>BAN USER</b>\n\n"
+        "Masukkan Telegram ID user yang ingin diban.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
     )
 
     await call.answer()
-@router.message(BalanceState.waiting_add)
-async def process_add_balance(message: Message, state: FSMContext):
+@router.message(BanUserState.waiting_user)
+async def process_ban_user(message: Message, state: FSMContext):
 
-    data = await state.get_data()
-
-    telegram_id = data["telegram_id"]
+    if not is_admin(message.from_user.id):
+        return
 
     if not message.text.isdigit():
-        return await message.answer("Nominal harus angka.")
+        return await message.answer("❌ Telegram ID harus berupa angka.")
 
-    nominal = int(message.text)
+    telegram_id = int(message.text)
 
     pool = await get_pool()
+
+    user = await pool.fetchrow(
+        """
+        SELECT username
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        telegram_id
+    )
+
+    if not user:
+        await state.clear()
+        return await message.answer("❌ User tidak ditemukan.")
 
     await pool.execute(
         """
         UPDATE users
-        SET balance=balance+$1
-        WHERE telegram_id = $2
+        SET is_banned=TRUE
+        WHERE telegram_id=$1
         """,
-        nominal,
         telegram_id
     )
 
     await message.answer(
-        f"✅ Berhasil menambahkan {rupiah(nominal)}"
+        f"✅ User <code>{telegram_id}</code> berhasil diban.",
+        parse_mode="HTML"
     )
 
     await state.clear()
-
