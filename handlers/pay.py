@@ -3,7 +3,12 @@ import qrcode
 from io import BytesIO
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    BufferedInputFile
+)
 
 from database import get_pool
 
@@ -90,18 +95,18 @@ async def pay_file(call: CallbackQuery):
         return await call.answer("Sudah dibeli", show_alert=True)
 
     # =========================
-    # CREATE BAYARGG PAYMENT
+    # CREATE PAYMENT (FIXED)
     # =========================
     try:
-        data = await BayarGG.create_payment(
+        resp = await BayarGG.create_payment(
             amount=price,
             description=f"Pembelian File {code}",
             customer_name=call.from_user.full_name
         )
 
-        print("========== DATA ==========")
-        print(data)
-        print("==========================")
+        print("========== BAYARGG RESPONSE ==========")
+        print(resp)
+        print("======================================")
 
     except Exception as e:
         return await call.answer(
@@ -109,27 +114,19 @@ async def pay_file(call: CallbackQuery):
             show_alert=True
         )
 
-    payment_id = data["payment_id"]
-    qr_string = data["qris_string"]
-
     # =========================
-    # CREATE BAYARGG PAYMENT
+    # SAFE PARSING (ANTI ERROR)
     # =========================
-    try:
-        data = await BayarGG.create_payment(
-            amount=price,
-            description=f"Pembelian File {code}",
-            customer_name=call.from_user.full_name
-        )
+    data = resp.get("data", resp)
 
-    except Exception as e:
+    payment_id = data.get("invoice_id")  # ✅ INI YANG BENAR
+    qr_string = data.get("qris_string")
+
+    if not payment_id or not qr_string:
         return await call.answer(
-            f"Gagal membuat pembayaran\n{e}",
+            "❌ Response pembayaran tidak valid",
             show_alert=True
         )
-
-    payment_id = data["payment_id"]
-    qr_string = data["qris_string"]
 
     # =========================
     # SIMPAN PENDING
@@ -181,6 +178,7 @@ async def pay_file(call: CallbackQuery):
         caption=(
             "🔒 <b>PEMBAYARAN QRIS</b>\n\n"
             f"💰 Rp {price:,}\n"
+            f"🧾 Invoice: {payment_id}\n"
             "Scan QR untuk bayar"
         ).replace(",", "."),
         parse_mode="HTML",
