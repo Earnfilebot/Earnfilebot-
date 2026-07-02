@@ -19,6 +19,8 @@ class BalanceState(StatesGroup):
     waiting_reduce = State()
 class BanUserState(StatesGroup):
     waiting_user = State()
+class UnbanUserState(StatesGroup):
+    waiting_user = State()
 
 @router.callback_query(F.data == "admin_users")
 async def admin_users(call: CallbackQuery):
