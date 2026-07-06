@@ -7,11 +7,12 @@ from fastapi import APIRouter, Request
 from bot import bot
 from database import get_pool
 from utils.redis_client import redis_client
+from config import BAYARGG_SECRET
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
-BAYARGG_SECRET = b"YOUR_BAYARGG_SECRET"
-ADMIN_CHAT_ID = -1004395938795  # WAJIB INT
+BAYARGG_SECRET = BAYARGG_SECRET.encode()
+ADMIN_CHAT_ID = -1004395938795
 
 
 def secure_compare(a: str, b: str) -> bool:
@@ -30,10 +31,11 @@ async def webhook(request: Request):
         hashlib.sha256
     ).hexdigest()
 
-    # =========================
-    # SIGNATURE CHECK
-    # =========================
+    print("SIGNATURE:", signature)
+    print("EXPECTED :", expected)
+
     if not secure_compare(signature, expected):
+        print("INVALID SIGNATURE")
         return {"success": False, "message": "invalid signature"}
 
     try:
@@ -41,18 +43,18 @@ async def webhook(request: Request):
     except Exception:
         return {"success": False, "message": "invalid json"}
 
+    print("WEBHOOK DATA:", data)
+
     invoice_id = data.get("invoice_id")
-    status = (data.get("status") or "").lower()
+    status = str(data.get("status", "")).lower()
 
     if not invoice_id:
         return {"success": False, "message": "missing invoice"}
 
     if status != "paid":
+        print("STATUS BUKAN PAID:", status)
         return {"success": True, "message": "ignored"}
 
-    # =========================
-    # IDEMPOTENCY LOCK (REDIS)
-    # =========================
     redis_key = f"webhook:bayargg:{invoice_id}"
 
     try:
@@ -61,27 +63,26 @@ async def webhook(request: Request):
 
         await redis_client.set(redis_key, "1", ex=86400)
     except Exception:
-        pass  # jangan ganggu webhook kalau redis error
+        pass
 
     pool = await get_pool()
 
-    # =========================
-    # GET TRANSACTION
-    # =========================
     tx = await pool.fetchrow(
-        "SELECT user_id, file_code, status FROM file_purchases WHERE payment_id=$1",
+        """
+        SELECT user_id, file_code, status
+        FROM file_purchases
+        WHERE payment_id=$1
+        """,
         invoice_id
     )
 
     if not tx:
+        print("TRANSACTION NOT FOUND:", invoice_id)
         return {"success": False, "message": "not found"}
 
     if tx["status"] == "paid":
         return {"success": True, "message": "already paid"}
 
-    # =========================
-    # UPDATE DB
-    # =========================
     await pool.execute(
         """
         UPDATE file_purchases
@@ -92,9 +93,8 @@ async def webhook(request: Request):
         invoice_id
     )
 
-    # =========================
-    # NOTIFY USER
-    # =========================
+    print("PAYMENT UPDATED:", invoice_id)
+
     try:
         await bot.send_message(
             tx["user_id"],
