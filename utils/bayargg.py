@@ -56,8 +56,8 @@ class BayarGG:
                     json=payload
                 )
 
-            logging.error("STATUS :", response.status_code)
-            logging.error("BODY   :", response.text)
+            logging.error(f"STATUS : {response.status_code}")
+            logging.error(f"BODY   : {response.text}")
 
             response.raise_for_status()
             data = response.json()
@@ -72,7 +72,7 @@ class BayarGG:
             return data.get("data", data)
 
         except Exception as e:
-            logging.error("❌ CREATE PAYMENT ERROR:", e)
+            logging.exception("❌ CREATE PAYMENT ERROR")
             return None
 
     @staticmethod
