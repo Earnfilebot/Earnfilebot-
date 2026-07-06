@@ -33,6 +33,7 @@ from handlers.vvip import router as vvip_router
 from handlers.help import router as help_router
 from handlers.about import router as about_router
 from handlers.admin import router as admin_router
+from handlers.notify import router as notify_router
 
 # =========================
 # REGISTER ROUTERS
@@ -50,3 +51,4 @@ dp.include_router(vvip_router)
 dp.include_router(help_router)
 dp.include_router(about_router)
 dp.include_router(admin_router)
+dp.include_router(notify_router)
