@@ -30,19 +30,13 @@ async def webhook(request: Request):
         hashlib.sha256
     ).hexdigest()
 
-    print("SIGNATURE:", signature)
-    print("EXPECTED :", expected)
-
     if not secure_compare(signature, expected):
-        print("INVALID SIGNATURE")
         return {"success": False, "message": "invalid signature"}
 
     try:
         data = await request.json()
     except Exception:
         return {"success": False, "message": "invalid json"}
-
-    print("WEBHOOK DATA:", data)
 
     invoice_id = data.get("invoice_id")
     status = str(data.get("status", "")).lower()
@@ -51,12 +45,8 @@ async def webhook(request: Request):
         return {"success": False, "message": "missing invoice"}
 
     if status != "paid":
-        print("STATUS BUKAN PAID:", status)
         return {"success": True, "message": "ignored"}
 
-    # =========================
-    # REDIS LOCK (ANTI DOUBLE WEBHOOK)
-    # =========================
     redis_key = f"webhook:bayargg:{invoice_id}"
 
     try:
@@ -70,31 +60,128 @@ async def webhook(request: Request):
     pool = await get_pool()
 
     # =========================
-    # AMBIL TRANSAKSI
+    # CEK VIP PAYMENT
     # =========================
-    tx = await pool.fetchrow(
+    vip_tx = await pool.fetchrow(
         """
-        SELECT user_id,
-               owner_id,
-               paid_price,
-               file_code,
-               status
+        SELECT *
+        FROM payments
+        WHERE invoice_id=$1
+        """,
+        invoice_id
+    )
+
+    if vip_tx:
+
+        if vip_tx["status"] == "paid":
+            return {
+                "success": True,
+                "message": "vip already processed"
+            }
+
+        await pool.execute(
+            """
+            UPDATE payments
+            SET status='paid',
+                updated_at=NOW()
+            WHERE invoice_id=$1
+            """,
+            invoice_id
+        )
+
+        paket = vip_tx["code"]
+
+        vip_days = {
+            "vip1": 1,
+            "vip3": 3,
+            "vip5": 5,
+            "vip7": 7,
+            "vip10": 10,
+            "vip20": 20,
+            "vip30": 30
+        }
+
+        days = vip_days.get(paket, 30)
+
+        await pool.execute(
+            """
+            UPDATE users
+            SET
+                vip=TRUE,
+                vip_until=
+                CASE
+                    WHEN vip_until IS NULL
+                         OR vip_until < NOW()
+                    THEN NOW() + ($2 || ' days')::interval
+                    ELSE vip_until + ($2 || ' days')::interval
+                END
+            WHERE telegram_id=$1
+            """,
+            vip_tx["user_id"],
+            days
+        )
+
+        try:
+            await bot.send_message(
+                vip_tx["user_id"],
+                (
+                    "💎 <b>VIP BERHASIL DIAKTIFKAN</b>\n\n"
+                    f"Durasi : {days} hari"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            logging.exception("vip notify failed")
+
+        try:
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                (
+                    "💎 <b>VIP PURCHASE</b>\n\n"
+                    f"👤 User : <code>{vip_tx['user_id']}</code>\n"
+                    f"📦 Paket : <code>{paket}</code>\n"
+                    f"🧾 Invoice : <code>{invoice_id}</code>\n"
+                    f"💰 Amount : Rp {vip_tx['amount']:,}"
+                ).replace(",", "."),
+                parse_mode="HTML"
+            )
+        except Exception:
+            logging.exception("vip admin notify failed")
+
+        return {
+            "success": True,
+            "message": "vip activated"
+        }
+
+    # =========================
+    # CEK FILE PAYMENT
+    # =========================
+    file_tx = await pool.fetchrow(
+        """
+        SELECT
+            user_id,
+            owner_id,
+            paid_price,
+            file_code,
+            status
         FROM file_purchases
         WHERE payment_id=$1
         """,
         invoice_id
     )
 
-    if not tx:
-        print("TRANSACTION NOT FOUND:", invoice_id)
-        return {"success": False, "message": "not found"}
+    if not file_tx:
+        return {
+            "success": False,
+            "message": "transaction not found"
+        }
 
-    if tx["status"] == "paid":
-        return {"success": True, "message": "already paid"}
+    if file_tx["status"] == "paid":
+        return {
+            "success": True,
+            "message": "already paid"
+        }
 
-    # =========================
-    # UPDATE STATUS MENJADI PAID
-    # =========================
     updated = await pool.execute(
         """
         UPDATE file_purchases
@@ -106,51 +193,49 @@ async def webhook(request: Request):
         invoice_id
     )
 
-    # Jika tidak ada row yang diupdate, hentikan
     if updated == "UPDATE 0":
-        return {"success": True, "message": "already processed"}
+        return {
+            "success": True,
+            "message": "already processed"
+        }
 
-    # =========================
-    # TAMBAH SALDO OWNER
-    # =========================
     try:
         await pool.execute(
             """
             UPDATE users
             SET balance = balance + $1
-            WHERE user_id = $2
+            WHERE telegram_id = $2
             """,
-            tx["paid_price"],
-            tx["owner_id"]
+            file_tx["paid_price"],
+            file_tx["owner_id"]
         )
     except Exception:
-        logging.exception("failed to update owner balance")
+        logging.exception("failed update owner balance")
 
-    print("PAYMENT UPDATED:", invoice_id)
-
-    # =========================
-    # NOTIFIKASI TELEGRAM
-    # =========================
     try:
         await bot.send_message(
-            tx["user_id"],
+            file_tx["user_id"],
             "✅ <b>Pembayaran Berhasil!</b>\n\nFile kamu sudah aktif.",
             parse_mode="HTML"
         )
+    except Exception:
+        logging.exception("user notify failed")
 
+    try:
         await bot.send_message(
             ADMIN_CHAT_ID,
             (
                 "💰 <b>PAYMENT SUCCESS</b>\n\n"
-                f"🧾 Invoice: <code>{invoice_id}</code>\n"
-                f"👤 User: <code>{tx['user_id']}</code>\n"
-                f"📦 File: <code>{tx['file_code']}</code>\n"
-                f"💵 Amount: Rp {tx['paid_price']:,}".replace(",", ".")
-            ),
+                f"🧾 Invoice : <code>{invoice_id}</code>\n"
+                f"👤 User : <code>{file_tx['user_id']}</code>\n"
+                f"📂 File : <code>{file_tx['file_code']}</code>\n"
+                f"💵 Amount : Rp {file_tx['paid_price']:,}"
+            ).replace(",", "."),
             parse_mode="HTML"
         )
-
     except Exception:
-        logging.exception("telegram notify failed")
+        logging.exception("admin notify failed")
 
-    return {"success": True}
+    return {
+        "success": True
+    }
