@@ -11,6 +11,7 @@ from config import BAYARGG_API_KEY, CHANNEL_ID
 from config_vip import VIP_PACKAGES
 from database import get_pool
 from utils.redis_client import redis_client
+from page import send_page
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
@@ -48,7 +49,7 @@ async def bayargg_webhook(request: Request):
     logging.info(f"🔥 WEBHOOK: {invoice_id} - {status}")
 
     # =========================
-    # IDEMPOTENCY LOCK (SAFE)
+    # IDEMPOTENCY LOCK
     # =========================
     redis_key = f"webhook:processed:{invoice_id}"
 
@@ -72,6 +73,7 @@ async def bayargg_webhook(request: Request):
         if purchase["status"] == "paid":
             return {"success": True}
 
+        # UPDATE STATUS
         await pool.execute(
             """
             UPDATE file_purchases
@@ -82,24 +84,43 @@ async def bayargg_webhook(request: Request):
             invoice_id
         )
 
+        # CLEAN CACHE INVOICE
         await redis_client.delete(f"invoice:{invoice_id}")
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📂 OPEN FILE",
-                    callback_data=f"page:{purchase['file_code']}:1"
-                )
-            ]
-        ])
-
+        # =========================
+        # NOTIF USER + SEND FILE
+        # =========================
         try:
             await bot.send_message(
                 purchase["user_id"],
-                "✅ <b>Pembayaran berhasil</b>",
-                parse_mode="HTML",
+                "✅ <b>Pembayaran berhasil!</b>\n\nFile sedang dikirim...",
+                parse_mode="HTML"
+            )
+
+            # 🔥 AUTO SEND FILE (INI POIN PENTING)
+            await send_page(
+                bot=bot,
+                chat_id=purchase["user_id"],
+                user_id=purchase["user_id"],
+                code=purchase["file_code"],
+                page=1
+            )
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📂 OPEN FILE",
+                        callback_data=f"page:{purchase['file_code']}:1"
+                    )
+                ]
+            ])
+
+            await bot.send_message(
+                purchase["user_id"],
+                "📦 File sudah siap!",
                 reply_markup=kb
             )
+
         except Exception:
             logging.exception("file notify failed")
 
@@ -147,7 +168,9 @@ async def bayargg_webhook(request: Request):
             await conn.execute(
                 """
                 UPDATE users
-                SET vip=TRUE, is_vip=TRUE, vip_until=$1
+                SET vip=TRUE,
+                    is_vip=TRUE,
+                    vip_until=$1
                 WHERE telegram_id=$2
                 """,
                 vip_until,
@@ -157,7 +180,7 @@ async def bayargg_webhook(request: Request):
     try:
         await bot.send_message(
             trx["user_id"],
-            f"🎉 VIP ACTIVE\n{paket['name']}\nExpired: {vip_until}",
+            f"🎉 VIP ACTIVE\n\n{paket['name']}\nExpired: {vip_until}",
         )
 
         await bot.send_message(
