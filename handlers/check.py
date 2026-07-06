@@ -4,6 +4,8 @@ from aiogram.types import CallbackQuery
 from database import get_pool
 from utils.bayargg import BayarGG
 
+import json
+
 router = Router()
 
 status_map = {
@@ -16,11 +18,10 @@ status_map = {
 @router.callback_query(F.data.startswith("check:"))
 async def check_payment(call: CallbackQuery):
     invoice_id = call.data.split(":")[1]
-
     pool = await get_pool()
 
     # =========================
-    # 1. CEK KE GATEWAY
+    # 1. CEK GATEWAY
     # =========================
     data = await BayarGG.check_payment(invoice_id)
 
@@ -28,66 +29,71 @@ async def check_payment(call: CallbackQuery):
         return await call.answer("❌ Gagal cek payment", show_alert=True)
 
     # =========================
-    # 2. UPDATE STATUS JIKA SUDAH BAYAR
-    # =========================
-    if data.get("status") == "paid":
-
-        await pool.execute(
-            """
-            UPDATE file_purchases
-            SET status='paid'
-            WHERE payment_id=$1
-            """,
-            invoice_id
-        )
-
-        purchase = await pool.fetchrow(
-            """
-            SELECT user_id, file_code
-            FROM file_purchases
-            WHERE payment_id=$1
-            """,
-            invoice_id
-        )
-
-        if not purchase:
-            return await call.answer("Data pembelian tidak ditemukan", show_alert=True)
-
-        file = await pool.fetchrow(
-            "SELECT * FROM files WHERE code=$1",
-            purchase["file_code"]
-        )
-
-        if not file:
-            return await call.answer("File tidak ditemukan", show_alert=True)
-
-        media = json.loads(file["media"]) if isinstance(file["media"], str) else file["media"]
-        first = media[0] if media else None
-
-        if not first:
-            return await call.answer("File rusak", show_alert=True)
-
-        await call.message.bot.send_document(
-            purchase["user_id"],
-            first["file_id"],
-            caption=f"📁 FILE: {purchase['file_code']}\n✅ Payment berhasil"
-        )
-
-        await call.answer("✅ Payment sukses & file dikirim", show_alert=True)
-        return
-
-    # =========================
-    # 3. BELUM BAYAR
+    # 2. AMBIL TRANSAKSI DB
     # =========================
     tx = await pool.fetchrow(
-        "SELECT status FROM file_purchases WHERE payment_id=$1",
+        """
+        SELECT user_id, file_code, status
+        FROM file_purchases
+        WHERE payment_id=$1
+        """,
         invoice_id
     )
 
     if not tx:
         return await call.answer("Invoice tidak ditemukan", show_alert=True)
 
-    await call.answer(
-        status_map.get(tx["status"], tx["status"]),
-        show_alert=True
+    # =========================
+    # 3. SUDAH PERNAH PAID? (ANTI DOUBLE SEND)
+    # =========================
+    if tx["status"] == "paid":
+        return await call.answer("✅ Sudah diproses", show_alert=True)
+
+    # =========================
+    # 4. BELUM BAYAR
+    # =========================
+    if data.get("status") != "paid":
+        return await call.answer(
+            status_map.get(data.get("status", "pending")),
+            show_alert=True
+        )
+
+    # =========================
+    # 5. MARK AS PAID
+    # =========================
+    await pool.execute(
+        """
+        UPDATE file_purchases
+        SET status='paid'
+        WHERE payment_id=$1
+        """,
+        invoice_id
     )
+
+    # =========================
+    # 6. AMBIL FILE
+    # =========================
+    file = await pool.fetchrow(
+        "SELECT * FROM files WHERE code=$1",
+        tx["file_code"]
+    )
+
+    if not file:
+        return await call.answer("File tidak ditemukan", show_alert=True)
+
+    media = json.loads(file["media"]) if isinstance(file["media"], str) else file["media"]
+    first = media[0] if media else None
+
+    if not first:
+        return await call.answer("File rusak", show_alert=True)
+
+    # =========================
+    # 7. KIRIM FILE
+    # =========================
+    await call.message.bot.send_document(
+        tx["user_id"],
+        first["file_id"],
+        caption=f"📁 FILE: {tx['file_code']}\n✅ Payment berhasil"
+    )
+
+    await call.answer("✅ Payment sukses & file dikirim", show_alert=True)
