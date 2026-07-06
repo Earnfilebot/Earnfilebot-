@@ -66,7 +66,7 @@ async def start_cmd(message: Message, state: FSMContext):
             protect = not share_media
 
             # =========================
-            # CEK VIP + OWNER
+            # CEK VIP + OWNER + PURCHASE
             # =========================
             vip = await pool.fetchval(
                 """
@@ -77,6 +77,19 @@ async def start_cmd(message: Message, state: FSMContext):
                   AND vip_until > NOW()
                 """,
                 message.from_user.id
+            )
+
+            purchased = await pool.fetchval(
+                """
+                SELECT 1
+                FROM file_purchases
+                WHERE user_id=$1
+                  AND file_code=$2
+                  AND status='paid'
+                LIMIT 1
+                """,
+                message.from_user.id,
+                code
             )
 
             owner = message.from_user.id == file["owner_id"]
@@ -96,9 +109,9 @@ async def start_cmd(message: Message, state: FSMContext):
             )
 
             # =========================
-            # FILE BERBAYAR (VIP/OWNER BISA BYPASS)
+            # FILE BERBAYAR
             # =========================
-            if is_paid and not vip and not owner:
+            if is_paid and not vip and not owner and not purchased:
                 keyboard = InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
@@ -117,7 +130,7 @@ async def start_cmd(message: Message, state: FSMContext):
                 return
 
             # =========================
-            # FILE GRATIS / VIP / OWNER
+            # SUDAH BELI / VIP / OWNER
             # =========================
             first = media[0]
             fid = first["file_id"]
@@ -360,6 +373,39 @@ async def buy_file(call: CallbackQuery):
             "Ini file milik kamu.",
             show_alert=True
         )
+
+    # Cek apakah user sudah membeli file
+    purchased = await pool.fetchval(
+        """
+        SELECT 1
+        FROM file_purchases
+        WHERE user_id=$1
+          AND file_code=$2
+          AND status='paid'
+        LIMIT 1
+        """,
+        call.from_user.id,
+        code
+    )
+
+    if purchased:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📂 OPEN FILE",
+                        callback_data=f"page:{code}:1"
+                    )
+                ]
+            ]
+        )
+
+        await call.message.answer(
+            "✅ Kamu sudah membeli file ini.\n\nKlik tombol di bawah untuk membuka file.",
+            reply_markup=keyboard
+        )
+
+        return await call.answer()
 
     price = file["price"] or 0
 
