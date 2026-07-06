@@ -11,7 +11,7 @@ from config import BAYARGG_API_KEY, CHANNEL_ID
 from config_vip import VIP_PACKAGES
 from database import get_pool
 from utils.redis_client import redis_client
-from page import send_page
+from handlers.page import send_page
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
