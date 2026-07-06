@@ -136,6 +136,7 @@ async def receive_code(message: Message, state: FSMContext):
     # =========================
     share_media = file.get("share_media", True)
     share_status = "PUBLIC" if share_media else "PRIVATE"
+    protect = not share_media
 
     # =========================
     # BUTTON
@@ -163,21 +164,24 @@ async def receive_code(message: Message, state: FSMContext):
             await message.answer_photo(
                 fid,
                 caption=caption,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                protect_content=protect
             )
 
         elif ftype == "video":
             await message.answer_video(
                 fid,
                 caption=caption,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                protect_content=protect
             )
 
         else:
             await message.answer_document(
                 fid,
                 caption=caption,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                protect_content=protect
             )
 
     except Exception as e:
