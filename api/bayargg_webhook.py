@@ -10,16 +10,10 @@ from utils.redis_client import redis_client
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
-# =========================
-# CONFIG
-# =========================
 BAYARGG_SECRET = b"YOUR_BAYARGG_SECRET"
-ADMIN_CHAT_ID = "ADMIN_CHAT_ID"
+ADMIN_CHAT_ID = -1004395938795  # WAJIB INT
 
 
-# =========================
-# SECURE COMPARE
-# =========================
 def secure_compare(a: str, b: str) -> bool:
     return hmac.compare_digest(a or "", b or "")
 
@@ -28,7 +22,6 @@ def secure_compare(a: str, b: str) -> bool:
 async def webhook(request: Request):
 
     body = await request.body()
-
     signature = request.headers.get("X-Callback-Signature", "")
 
     expected = hmac.new(
@@ -43,7 +36,10 @@ async def webhook(request: Request):
     if not secure_compare(signature, expected):
         return {"success": False, "message": "invalid signature"}
 
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        return {"success": False, "message": "invalid json"}
 
     invoice_id = data.get("invoice_id")
     status = (data.get("status") or "").lower()
@@ -55,13 +51,17 @@ async def webhook(request: Request):
         return {"success": True, "message": "ignored"}
 
     # =========================
-    # 🔥 IDEMPOTENCY LOCK (ANTI DOUBLE WEBHOOK)
+    # IDEMPOTENCY LOCK (REDIS)
     # =========================
     redis_key = f"webhook:bayargg:{invoice_id}"
-    if await redis_client.get(redis_key):
-        return {"success": True, "message": "already processed"}
 
-    await redis_client.set(redis_key, "1", ex=86400)
+    try:
+        if await redis_client.get(redis_key):
+            return {"success": True, "message": "already processed"}
+
+        await redis_client.set(redis_key, "1", ex=86400)
+    except Exception:
+        pass  # jangan ganggu webhook kalau redis error
 
     pool = await get_pool()
 
@@ -69,60 +69,46 @@ async def webhook(request: Request):
     # GET TRANSACTION
     # =========================
     tx = await pool.fetchrow(
-        "SELECT * FROM file_purchases WHERE payment_id=$1",
+        "SELECT user_id, file_code, status FROM file_purchases WHERE payment_id=$1",
         invoice_id
     )
 
     if not tx:
         return {"success": False, "message": "not found"}
 
-    # =========================
-    # IDEMPOTENT CHECK DB
-    # =========================
     if tx["status"] == "paid":
         return {"success": True, "message": "already paid"}
 
     # =========================
-    # UPDATE DATABASE
+    # UPDATE DB
     # =========================
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-
-            await conn.execute(
-                """
-                UPDATE file_purchases
-                SET status='paid',
-                    paid_at=NOW()
-                WHERE payment_id=$1
-                """,
-                invoice_id
-            )
+    await pool.execute(
+        """
+        UPDATE file_purchases
+        SET status='paid',
+            paid_at=NOW()
+        WHERE payment_id=$1
+        """,
+        invoice_id
+    )
 
     # =========================
-    # TELEGRAM USER NOTIFY
+    # NOTIFY USER
     # =========================
     try:
         await bot.send_message(
             tx["user_id"],
-            (
-                "✅ <b>Pembayaran Berhasil!</b>\n\n"
-                "File kamu sudah terbuka.\n"
-                "Klik tombol di menu file."
-            ),
+            "✅ <b>Pembayaran Berhasil!</b>\n\nFile kamu sudah aktif.",
             parse_mode="HTML"
         )
 
-        # =========================
-        # ADMIN LOG
-        # =========================
         await bot.send_message(
             ADMIN_CHAT_ID,
             (
                 "💰 <b>PAYMENT SUCCESS</b>\n\n"
                 f"🧾 Invoice: <code>{invoice_id}</code>\n"
                 f"👤 User: <code>{tx['user_id']}</code>\n"
-                f"📦 File: <code>{tx['file_code']}</code>\n"
-                f"💵 Status: PAID"
+                f"📦 File: <code>{tx['file_code']}</code>"
             ),
             parse_mode="HTML"
         )
