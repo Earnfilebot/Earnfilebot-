@@ -73,6 +73,9 @@ async def bayargg_webhook(request: Request):
         if purchase["status"] == "paid":
             return {"success": True}
 
+        # =========================
+        # UPDATE STATUS
+        # =========================
         await pool.execute(
             """
             UPDATE file_purchases
@@ -83,8 +86,55 @@ async def bayargg_webhook(request: Request):
             invoice_id
         )
 
+        # =========================
+        # CREDIT OWNER (90%)
+        # =========================
+        file = await pool.fetchrow(
+            """
+            SELECT owner_id, price
+            FROM files
+            WHERE code=$1
+            """,
+            purchase["file_code"]
+        )
+
+        if file:
+            owner_income = int(file["price"] * 0.9)
+
+            await pool.execute(
+                """
+                UPDATE users
+                SET
+                    balance = balance + $1,
+                    total_sales = total_sales + 1,
+                    total_income = total_income + $1
+                WHERE telegram_id = $2
+                """,
+                owner_income,
+                file["owner_id"]
+            )
+
+            try:
+                await bot.send_message(
+                    file["owner_id"],
+                    (
+                        "💰 <b>File Berhasil Terjual!</b>\n\n"
+                        f"📂 File : {purchase['file_code']}\n"
+                        f"✅ Masuk ke Saldo : Rp {owner_income:,}"
+                    ).replace(",", "."),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                logging.exception("owner notify failed")
+
+        # =========================
+        # HAPUS CACHE
+        # =========================
         await redis_client.delete(f"invoice:{invoice_id}")
 
+        # =========================
+        # KIRIM FILE KE PEMBELI
+        # =========================
         try:
             await bot.send_message(
                 purchase["user_id"],
@@ -114,7 +164,7 @@ async def bayargg_webhook(request: Request):
 
                 await bot.send_message(
                     purchase["user_id"],
-                    "📦 File berhasil dikirim.\nJika ingin membukanya lagi silakan tekan tombol di bawah.",
+                    "📦 File berhasil dikirim.\n\nTekan tombol di bawah jika ingin membukanya lagi.",
                     reply_markup=kb
                 )
             else:
@@ -163,15 +213,20 @@ async def bayargg_webhook(request: Request):
         async with conn.transaction():
 
             await conn.execute(
-                "UPDATE payments SET status='paid' WHERE invoice_id=$1",
+                """
+                UPDATE payments
+                SET status='paid'
+                WHERE invoice_id=$1
+                """,
                 invoice_id
             )
 
             await conn.execute(
                 """
                 UPDATE users
-                SET vip=TRUE,
-                    is_vip=TRUE,
+                SET
+                    vip=TRUE,
+                    vip_started_at = NOW(),
                     vip_until=$1
                 WHERE telegram_id=$2
                 """,
@@ -195,9 +250,6 @@ async def bayargg_webhook(request: Request):
         )
 
     except Exception:
-        logging.exception("vip notify failed")
-
-    return {"success": True}
         logging.exception("vip notify failed")
 
     return {"success": True}
