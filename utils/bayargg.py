@@ -1,5 +1,7 @@
+import logging
 import httpx
 import json
+
 from config import BAYARGG_API_KEY
 
 BASE_URL = "https://www.bayar.gg/api"
