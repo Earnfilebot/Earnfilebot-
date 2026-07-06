@@ -44,8 +44,8 @@ class BayarGG:
             payload["customer_phone"] = customer_phone
 
         try:
-            print("========== BAYARGG REQUEST ==========")
-            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            logging.info("========== BAYARGG REQUEST ==========")
+            logging.info(json.dumps(payload, indent=2, ensure_ascii=False))
 
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
@@ -54,8 +54,8 @@ class BayarGG:
                     json=payload
                 )
 
-            print("STATUS :", response.status_code)
-            print("BODY   :", response.text)
+            logging.info("STATUS :", response.status_code)
+            logging.info("BODY   :", response.text)
 
             response.raise_for_status()
             data = response.json()
