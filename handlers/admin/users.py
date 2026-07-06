@@ -358,6 +358,7 @@ async def vvip_user(message: Message, state: FSMContext):
 # =========================
 # SET VVIP DAYS (FIXED)
 # =========================
+
 @router.message(VvipState.waiting_days)
 async def vvip_set_days(message: Message, state: FSMContext):
 
@@ -374,16 +375,15 @@ async def vvip_set_days(message: Message, state: FSMContext):
 
     pool = await get_pool()
 
-    # ✅ FIX: pakai timedelta (lebih aman dari SQL interval string)
     await pool.execute(
         """
         UPDATE users
         SET vip = TRUE,
-            vip_until = NOW() + $2::interval
+            vip_until = NOW() + $2
         WHERE telegram_id = $1
         """,
         user_id,
-        f"{days} days"
+        timedelta(days=days)
     )
 
     await message.answer(f"👑 VVIP aktif selama {days} hari")
