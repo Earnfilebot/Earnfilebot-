@@ -21,7 +21,6 @@ def secure_compare(a: str, b: str) -> bool:
 
 @router.post("/webhook")
 async def webhook(request: Request):
-
     body = await request.body()
     signature = request.headers.get("X-Callback-Signature", "")
 
@@ -55,6 +54,9 @@ async def webhook(request: Request):
         print("STATUS BUKAN PAID:", status)
         return {"success": True, "message": "ignored"}
 
+    # =========================
+    # REDIS LOCK (ANTI DOUBLE WEBHOOK)
+    # =========================
     redis_key = f"webhook:bayargg:{invoice_id}"
 
     try:
@@ -67,9 +69,16 @@ async def webhook(request: Request):
 
     pool = await get_pool()
 
+    # =========================
+    # AMBIL TRANSAKSI
+    # =========================
     tx = await pool.fetchrow(
         """
-        SELECT user_id, file_code, status
+        SELECT user_id,
+               owner_id,
+               paid_price,
+               file_code,
+               status
         FROM file_purchases
         WHERE payment_id=$1
         """,
@@ -83,18 +92,45 @@ async def webhook(request: Request):
     if tx["status"] == "paid":
         return {"success": True, "message": "already paid"}
 
-    await pool.execute(
+    # =========================
+    # UPDATE STATUS MENJADI PAID
+    # =========================
+    updated = await pool.execute(
         """
         UPDATE file_purchases
         SET status='paid',
             paid_at=NOW()
         WHERE payment_id=$1
+          AND status='pending'
         """,
         invoice_id
     )
 
+    # Jika tidak ada row yang diupdate, hentikan
+    if updated == "UPDATE 0":
+        return {"success": True, "message": "already processed"}
+
+    # =========================
+    # TAMBAH SALDO OWNER
+    # =========================
+    try:
+        await pool.execute(
+            """
+            UPDATE users
+            SET balance = balance + $1
+            WHERE user_id = $2
+            """,
+            tx["paid_price"],
+            tx["owner_id"]
+        )
+    except Exception:
+        logging.exception("failed to update owner balance")
+
     print("PAYMENT UPDATED:", invoice_id)
 
+    # =========================
+    # NOTIFIKASI TELEGRAM
+    # =========================
     try:
         await bot.send_message(
             tx["user_id"],
@@ -108,7 +144,8 @@ async def webhook(request: Request):
                 "💰 <b>PAYMENT SUCCESS</b>\n\n"
                 f"🧾 Invoice: <code>{invoice_id}</code>\n"
                 f"👤 User: <code>{tx['user_id']}</code>\n"
-                f"📦 File: <code>{tx['file_code']}</code>"
+                f"📦 File: <code>{tx['file_code']}</code>\n"
+                f"💵 Amount: Rp {tx['paid_price']:,}".replace(",", ".")
             ),
             parse_mode="HTML"
         )
