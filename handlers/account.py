@@ -1,4 +1,11 @@
 from datetime import datetime
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+
+from database import get_pool
+
+router = Router()
+
 
 @router.callback_query(F.data == "account")
 async def account_handler(call: CallbackQuery):
@@ -30,10 +37,7 @@ async def account_handler(call: CallbackQuery):
         if vip_until > now:
 
             delta = vip_until - now
-
-            # total & remaining days
             remaining_days = delta.days
-            total_days = (vip_until - (vip_until - delta)).days + remaining_days
 
             vip_status = "👑 VIP ACTIVE"
 
@@ -45,7 +49,9 @@ async def account_handler(call: CallbackQuery):
                 vip_type = "Lifetime"
 
             remaining = f"{remaining_days} hari"
-            duration = f"{total_days} hari"
+
+            # ❗ sementara: total durasi = remaining (karena tidak ada vip_started_at)
+            duration = f"{remaining_days} hari"
 
         else:
             vip_status = "❌ EXPIRED"
@@ -67,15 +73,9 @@ async def account_handler(call: CallbackQuery):
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📦 My Code", callback_data="my_code")
-            ],
-            [
-                InlineKeyboardButton(text="💎 VVIP", callback_data="vvip")
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Kembali", callback_data="home")
-            ]
+            [InlineKeyboardButton(text="📦 My Code", callback_data="my_code")],
+            [InlineKeyboardButton(text="💎 VVIP", callback_data="vvip")],
+            [InlineKeyboardButton(text="🔙 Kembali", callback_data="home")]
         ]
     )
 
