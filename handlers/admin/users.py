@@ -1,26 +1,43 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 
 from database import get_pool
 from .dashboard import is_admin, rupiah
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
-
 
 router = Router()
 
+
+# =========================
+# STATES
+# =========================
+
 class SearchUserState(StatesGroup):
     telegram_id = State()
+
+
 class BalanceState(StatesGroup):
     waiting_user = State()
-    waiting_add = State()
-    waiting_reduce = State()
+
+
 class BanUserState(StatesGroup):
     waiting_user = State()
+
+
 class UnbanUserState(StatesGroup):
     waiting_user = State()
+
+
+class VvipState(StatesGroup):
+    waiting_user = State()
+    waiting_days = State()
+
+
+# =========================
+# MENU USER
+# =========================
 
 @router.callback_query(F.data == "admin_users")
 async def admin_users(call: CallbackQuery):
@@ -30,40 +47,14 @@ async def admin_users(call: CallbackQuery):
 
     kb = InlineKeyboardBuilder()
 
-    kb.button(
-        text="👤 Total User",
-        callback_data="users_total"
-    )
-
-    kb.button(
-        text="🆕 User Baru",
-        callback_data="users_latest"
-    )
-
-    kb.button(
-        text="🔍 Cari User",
-        callback_data="users_search"
-    )
-
-    kb.button(
-        text="💰 Balance",
-        callback_data="users_balance"
-    )
-
-    kb.button(
-        text="🚫 Ban User",
-        callback_data="users_ban"
-    )
-
-    kb.button(
-        text="✅ Unban",
-        callback_data="users_unban"
-    )
-
-    kb.button(
-        text="⬅ Back",
-        callback_data="admin_home"
-    )
+    kb.button(text="👤 Total User", callback_data="users_total")
+    kb.button(text="🆕 User Baru", callback_data="users_latest")
+    kb.button(text="🔍 Cari User", callback_data="users_search")
+    kb.button(text="💰 Balance User", callback_data="users_balance")
+    kb.button(text="🚫 Ban User", callback_data="users_ban")
+    kb.button(text="✅ Unban User", callback_data="users_unban")
+    kb.button(text="👑 Set VVIP", callback_data="users_vvip")
+    kb.button(text="⬅ Back", callback_data="admin_home")
 
     kb.adjust(2)
 
@@ -75,39 +66,47 @@ async def admin_users(call: CallbackQuery):
 
     await call.answer()
 
+
+# =========================
+# BACK BUTTON GLOBAL
+# =========================
+
+@router.callback_query(F.data == "back_users")
+async def back_users(call: CallbackQuery):
+    await admin_users(call)
+
+
+# =========================
+# TOTAL USERS
+# =========================
+
 @router.callback_query(F.data == "users_total")
 async def users_total(call: CallbackQuery):
 
     if not is_admin(call.from_user.id):
-        return
+        return await call.answer("No access", show_alert=True)
 
     pool = await get_pool()
-
-    total = await pool.fetchval(
-        "SELECT COUNT(*) FROM users"
-    )
+    total = await pool.fetchval("SELECT COUNT(*) FROM users")
 
     kb = InlineKeyboardBuilder()
-
-    kb.button(
-        text="⬅ Kembali",
-        callback_data="admin_users"
-    )
+    kb.button(text="⬅ Kembali", callback_data="admin_users")
 
     await call.message.edit_text(
-        f"👥 <b>TOTAL USER</b>\n\n"
-        f"Total User : <b>{total}</b>",
+        f"👥 <b>TOTAL USER</b>\n\nTotal: <b>{total}</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup()
     )
 
     await call.answer()
 
+
+# =========================
+# LATEST USERS
+# =========================
+
 @router.callback_query(F.data == "users_latest")
 async def users_latest(call: CallbackQuery):
-
-    if not is_admin(call.from_user.id):
-        return await call.answer("No access", show_alert=True)
 
     pool = await get_pool()
 
@@ -119,339 +118,251 @@ async def users_latest(call: CallbackQuery):
     """)
 
     kb = InlineKeyboardBuilder()
-
-    kb.button(
-        text="⬅ Kembali",
-        callback_data="admin_users"
-    )
+    kb.button(text="⬅ Kembali", callback_data="admin_users")
 
     if not users:
-        return await call.message.edit_text(
-            "❌ Belum ada user.",
-            reply_markup=kb.as_markup()
-        )
+        return await call.message.edit_text("❌ Tidak ada user", reply_markup=kb.as_markup())
 
     text = "🆕 <b>10 USER TERBARU</b>\n\n"
 
-    for i, user in enumerate(users, start=1):
-        waktu = user["created_at"].strftime("%d-%m-%Y %H:%M")
+    for i, u in enumerate(users, 1):
+        tgl = u["created_at"].strftime("%d-%m-%Y %H:%M")
 
         text += (
-            f"{i}. <code>{user['telegram_id']}</code>\n"
-            f"💰 Balance : Rp{user['balance']:,}\n"
-            f"📅 {waktu}\n\n"
+            f"{i}. <code>{u['telegram_id']}</code>\n"
+            f"💰 {rupiah(u['balance'])}\n"
+            f"📅 {tgl}\n\n"
         )
 
-    await call.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=kb.as_markup()
-    )
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
-    await call.answer()
+
+# =========================
+# SEARCH USER
+# =========================
 
 @router.callback_query(F.data == "users_search")
 async def users_search(call: CallbackQuery, state: FSMContext):
 
-    if not is_admin(call.from_user.id):
-        return await call.answer("No access", show_alert=True)
-
     await state.set_state(SearchUserState.telegram_id)
 
-    await call.message.answer(
-        "🔍 Kirim Telegram ID user yang ingin dicari."
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅ Kembali", callback_data="admin_users")
+
+    await call.message.edit_text(
+        "🔍 Kirim Telegram ID user:",
+        reply_markup=kb.as_markup()
     )
 
     await call.answer()
+
 
 @router.message(SearchUserState.telegram_id)
 async def process_search(message: Message, state: FSMContext):
 
-    if not is_admin(message.from_user.id):
-        return
-
-    if not message.text.isdigit():
-        return await message.answer(
-            "❌ Telegram ID harus berupa angka."
-        )
-
-    telegram_id = int(message.text)
-
     pool = await get_pool()
 
-    user = await pool.fetchrow("""
-        SELECT *
-        FROM users
-        WHERE telegram_id=$1
-    """, telegram_id)
+    if not message.text.isdigit():
+        return await message.answer("❌ Harus angka")
+
+    user = await pool.fetchrow(
+        "SELECT * FROM users WHERE telegram_id=$1",
+        int(message.text)
+    )
 
     if not user:
         await state.clear()
-        return await message.answer(
-            "❌ User tidak ditemukan."
-        )
+        return await message.answer("❌ User tidak ditemukan")
 
     text = (
         "👤 <b>USER DETAIL</b>\n\n"
-
-        f"🆔 ID : <code>{user['telegram_id']}</code>\n"
-        f"💰 Balance : Rp{user['balance']:,}\n"
+        f"ID: <code>{user['telegram_id']}</code>\n"
+        f"Balance: {rupiah(user['balance'])}\n"
     )
 
-    if "username" in user:
-        text += f"👤 Username : @{user['username']}\n"
-
-    if "created_at" in user and user["created_at"]:
-        text += (
-            f"📅 Daftar : "
-            f"{user['created_at'].strftime('%d-%m-%Y %H:%M')}\n"
-        )
-
-    await message.answer(
-        text,
-        parse_mode="HTML"
-    )
-
+    await message.answer(text, parse_mode="HTML")
     await state.clear()
+
+
+# =========================
+# BALANCE USER
+# =========================
+
+@router.callback_query(F.data == "users_balance")
+async def users_balance(call: CallbackQuery, state: FSMContext):
+
+    await state.set_state(BalanceState.waiting_user)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅ Kembali", callback_data="admin_users")
+
+    await call.message.edit_text(
+        "💰 Kirim Telegram ID user:",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+
 
 @router.message(BalanceState.waiting_user)
 async def balance_user(message: Message, state: FSMContext):
 
-    if not message.text.isdigit():
-        return await message.answer("User ID harus berupa angka.")
-
-    telegram_id = int(message.text)
-
     pool = await get_pool()
 
-    user = await pool.fetchrow("""
-        SELECT *
-        FROM users
-        WHERE telegram_id=$1
-    """, telegram_id)
+    if not message.text.isdigit():
+        return await message.answer("❌ Harus angka")
+
+    user = await pool.fetchrow(
+        "SELECT * FROM users WHERE telegram_id=$1",
+        int(message.text)
+    )
 
     if not user:
         await state.clear()
-        return await message.answer("❌ User tidak ditemukan.")
-
-    # Total withdraw berhasil
-    total_withdraw = await pool.fetchval("""
-        SELECT COALESCE(SUM(amount),0)
-        FROM withdraws
-        WHERE telegram_id=$1
-        AND status='approved'
-    """, telegram_id)
-
-    # Jumlah withdraw berhasil
-    total_request = await pool.fetchval("""
-        SELECT COUNT(*)
-        FROM withdraws
-        WHERE telegram_id=$1
-        AND status='approved'
-    """, telegram_id)
-
-    kb = InlineKeyboardBuilder()
-
-    kb.button(
-        text="⬅ Kembali",
-        callback_data="admin_users"
-    )
+        return await message.answer("❌ User tidak ditemukan")
 
     await message.answer(
-        f"👤 <b>INFO BALANCE USER</b>\n\n"
-        f"🆔 Telegram ID : <code>{telegram_id}</code>\n"
-        f"👤 Username : @{user['username'] or '-'}\n\n"
-        f"💰 Saldo Saat Ini : <b>{rupiah(user['balance'])}</b>\n"
-        f"🏧 Total Withdraw : <b>{rupiah(total_withdraw)}</b>\n"
-        f"📦 Jumlah WD : <b>{total_request}</b>",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup()
+        f"💰 Balance: {rupiah(user['balance'])}"
     )
 
     await state.clear()
+
+
+# =========================
+# BAN
+# =========================
 
 @router.callback_query(F.data == "users_ban")
 async def users_ban(call: CallbackQuery, state: FSMContext):
 
-    if not is_admin(call.from_user.id):
-        return
-
     await state.set_state(BanUserState.waiting_user)
 
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text="⬅ Kembali",
-        callback_data="admin_users"
-    )
-
     await call.message.edit_text(
-        "🚫 <b>BAN USER</b>\n\n"
-        "Masukkan Telegram ID user yang ingin diban.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup()
+        "🚫 Kirim Telegram ID / username"
     )
 
     await call.answer()
+
+
 @router.message(BanUserState.waiting_user)
-async def process_ban_user(message: Message, state: FSMContext):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    keyword = message.text.strip()
+async def ban_user(message: Message, state: FSMContext):
 
     pool = await get_pool()
 
-    if keyword.isdigit():
+    key = message.text.strip()
 
-        user = await pool.fetchrow(
-            """
-            SELECT *
-            FROM users
-            WHERE telegram_id=$1
-            """,
-            int(keyword)
-        )
-
-    elif keyword.startswith("@"):
-
-        username = keyword[1:]
-
-        user = await pool.fetchrow(
-            """
-            SELECT *
-            FROM users
-            WHERE LOWER(username)=LOWER($1)
-            """,
-            username
-        )
-
+    if key.isdigit():
+        user = await pool.fetchrow("SELECT * FROM users WHERE telegram_id=$1", int(key))
     else:
-
-        user = await pool.fetchrow(
-            """
-            SELECT *
-            FROM users
-            WHERE LOWER(username)=LOWER($1)
-               OR LOWER(full_name)=LOWER($1)
-            """,
-            keyword
-        )
+        user = await pool.fetchrow("SELECT * FROM users WHERE LOWER(username)=LOWER($1)", key.replace("@", ""))
 
     if not user:
         await state.clear()
-        return await message.answer(
-            "❌ User tidak ditemukan."
-        )
+        return await message.answer("❌ Tidak ditemukan")
 
     await pool.execute(
-        """
-        UPDATE users
-        SET is_banned=TRUE
-        WHERE telegram_id=$1
-        """,
+        "UPDATE users SET is_banned=TRUE WHERE telegram_id=$1",
         user["telegram_id"]
     )
 
-    await message.answer(
-        "✅ <b>User berhasil diban.</b>\n\n"
-        f"🆔 ID : <code>{user['telegram_id']}</code>\n"
-        f"👤 Nama : {user.get('full_name') or '-'}\n"
-        f"📛 Username : @{user.get('username') or '-'}",
-        parse_mode="HTML"
-    )
-
+    await message.answer("🚫 User diban")
     await state.clear()
+
+
+# =========================
+# UNBAN
+# =========================
 
 @router.callback_query(F.data == "users_unban")
 async def users_unban(call: CallbackQuery, state: FSMContext):
 
-    if not is_admin(call.from_user.id):
-        return
-
     await state.set_state(UnbanUserState.waiting_user)
 
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text="⬅ Kembali",
-        callback_data="admin_users"
-    )
-
-    await call.message.edit_text(
-        "✅ <b>UNBAN USER</b>\n\n"
-        "Masukkan Telegram ID user yang ingin di-unban.",
-        parse_mode="HTML",
-        reply_markup=kb.as_markup()
-    )
+    await call.message.edit_text("✅ Kirim ID / username")
 
     await call.answer()
+
+
 @router.message(UnbanUserState.waiting_user)
-async def process_unban_user(message: Message, state: FSMContext):
-
-    if not is_admin(message.from_user.id):
-        return
-
-    keyword = message.text.strip()
+async def unban_user(message: Message, state: FSMContext):
 
     pool = await get_pool()
 
-    if keyword.isdigit():
+    key = message.text.strip()
 
-        user = await pool.fetchrow(
-            """
-            SELECT *
-            FROM users
-            WHERE telegram_id=$1
-            """,
-            int(keyword)
-        )
-
-    elif keyword.startswith("@"):
-
-        username = keyword[1:]
-
-        user = await pool.fetchrow(
-            """
-            SELECT *
-            FROM users
-            WHERE LOWER(username)=LOWER($1)
-            """,
-            username
-        )
-
+    if key.isdigit():
+        user = await pool.fetchrow("SELECT * FROM users WHERE telegram_id=$1", int(key))
     else:
-
-        user = await pool.fetchrow(
-            """
-            SELECT *
-            FROM users
-            WHERE LOWER(username)=LOWER($1)
-               OR LOWER(full_name)=LOWER($1)
-            """,
-            keyword
-        )
+        user = await pool.fetchrow("SELECT * FROM users WHERE LOWER(username)=LOWER($1)", key.replace("@", ""))
 
     if not user:
         await state.clear()
-        return await message.answer(
-            "❌ User tidak ditemukan."
-        )
+        return await message.answer("❌ Tidak ditemukan")
+
+    await pool.execute(
+        "UPDATE users SET is_banned=FALSE WHERE telegram_id=$1",
+        user["telegram_id"]
+    )
+
+    await message.answer("✅ User unban")
+    await state.clear()
+
+
+# =========================
+# VVIP SYSTEM (FULL FIX)
+# =========================
+
+@router.callback_query(F.data == "users_vvip")
+async def vvip_start(call: CallbackQuery, state: FSMContext):
+
+    await state.set_state(VvipState.waiting_user)
+
+    await call.message.edit_text("👑 Kirim user ID / username")
+
+    await call.answer()
+
+
+@router.message(VvipState.waiting_user)
+async def vvip_user(message: Message, state: FSMContext):
+
+    pool = await get_pool()
+    key = message.text.strip()
+
+    if key.isdigit():
+        user = await pool.fetchrow("SELECT * FROM users WHERE telegram_id=$1", int(key))
+    else:
+        user = await pool.fetchrow("SELECT * FROM users WHERE LOWER(username)=LOWER($1)", key.replace("@", ""))
+
+    if not user:
+        await state.clear()
+        return await message.answer("❌ User tidak ditemukan")
+
+    await state.update_data(user_id=user["telegram_id"])
+    await state.set_state(VvipState.waiting_days)
+
+    await message.answer("📅 Masukkan durasi VVIP (hari)")
+
+
+@router.message(VvipState.waiting_days)
+async def vvip_set_days(message: Message, state: FSMContext):
+
+    if not message.text.isdigit():
+        return await message.answer("❌ Harus angka")
+
+    days = int(message.text)
+    data = await state.get_data()
+
+    pool = await get_pool()
 
     await pool.execute(
         """
         UPDATE users
-        SET is_banned=FALSE
+        SET vip = TRUE,
+            vip_until = NOW() + ($2 || ' days')::interval
         WHERE telegram_id=$1
         """,
-        user["telegram_id"]
+        data["user_id"], days
     )
 
-    await message.answer(
-        "✅ <b>User berhasil di-unban.</b>\n\n"
-        f"🆔 ID : <code>{user['telegram_id']}</code>\n"
-        f"👤 Nama : {user.get('full_name') or '-'}\n"
-        f"📛 Username : @{user.get('username') or '-'}",
-        parse_mode="HTML"
-    )
-
+    await message.answer(f"👑 VVIP aktif {days} hari")
     await state.clear()
