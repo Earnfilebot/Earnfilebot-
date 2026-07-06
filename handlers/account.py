@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -31,8 +31,14 @@ async def account_handler(call: CallbackQuery):
 
     if user and user["vip"] and user["vip_until"]:
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         vip_until = user["vip_until"]
+
+        # samakan timezone biar aman
+        if vip_until.tzinfo is None:
+            vip_until = vip_until.replace(tzinfo=timezone.utc)
+        else:
+            vip_until = vip_until.astimezone(timezone.utc)
 
         if vip_until > now:
 
@@ -49,8 +55,6 @@ async def account_handler(call: CallbackQuery):
                 vip_type = "Lifetime"
 
             remaining = f"{remaining_days} hari"
-
-            # ❗ sementara: total durasi = remaining (karena tidak ada vip_started_at)
             duration = f"{remaining_days} hari"
 
         else:
