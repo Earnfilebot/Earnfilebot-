@@ -135,9 +135,13 @@ async def pay_file(call: CallbackQuery):
             description=f"File {code}",
             customer_name=call.from_user.full_name
         )
+        print("BayarGG Response:", data)
 
         invoice_id = data.get("invoice_id")
         qr_string = data.get("qris_string")
+
+        print("Invoice:", invoice_id)
+        print("QR String:", qr_string)
 
         print("SAVE PAYMENT ID:", invoice_id)
 
