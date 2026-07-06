@@ -21,8 +21,21 @@ INVOICE_TTL = 3600
 
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
+
+    await call.answer()
+    
     user_id = call.from_user.id
     code = call.data.split(":")[1]
+
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+
+    loading = await call.message.answer(
+        "⏳ <b>Membuat QRIS...</b>\n\nMohon tunggu sebentar.",
+        parse_mode="HTML"
+    )
 
     lock_key = f"paylock:{user_id}:{code}"
 
@@ -40,6 +53,11 @@ async def pay_file(call: CallbackQuery):
         lock_ok = True
 
     if not lock_ok:
+        try:
+           await loading.delete()
+        except Exception:
+           pass
+
         return await call.answer(
             "⏳ Tunggu sebentar...",
             show_alert=True
@@ -201,6 +219,7 @@ async def pay_file(call: CallbackQuery):
         # =========================
         # SEND QR
         # =========================
+     
         msg = await call.message.answer_photo(
             BufferedInputFile(
                 buf.read(),
@@ -234,6 +253,11 @@ async def pay_file(call: CallbackQuery):
         await call.answer()
 
     finally:
+        try:
+            await loading.delete()
+        except Exception:
+            pass
+
         try:
             await safe_delete(lock_key)
         except Exception:
