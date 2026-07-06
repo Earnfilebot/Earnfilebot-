@@ -37,6 +37,7 @@ async def start_cmd(message: Message, state: FSMContext):
                 """
                 SELECT
                     media,
+                    share_media,
                     is_paid,
                     price,
                     payment_provider,
@@ -53,6 +54,8 @@ async def start_cmd(message: Message, state: FSMContext):
                 return await message.answer("❌ File kosong")
             is_paid = file["is_paid"]
             price = file["price"] or 0
+            share_media = file.get("share_media", True)
+            protect = not share_media
             mode = (
                 f"💰 Paid • Rp {price:,}".replace(",", ".")
                 if is_paid
