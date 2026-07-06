@@ -55,15 +55,31 @@ async def start_cmd(message: Message, state: FSMContext):
             if not file:
                 return await message.answer("❌ File tidak ditemukan")
 
-            media = json.loads(file["media"])
+            media = json.loads(file["media"] or "[]")
 
             if not media:
                 return await message.answer("❌ File kosong")
 
             is_paid = file["is_paid"]
             price = file["price"] or 0
-            share_media = file["share_media"]
+            share_media = file.get("share_media", True)
             protect = not share_media
+
+            # =========================
+            # CEK VIP + OWNER
+            # =========================
+            vip = await pool.fetchval(
+                """
+                SELECT 1
+                FROM users
+                WHERE telegram_id=$1
+                  AND vip=TRUE
+                  AND vip_until > NOW()
+                """,
+                message.from_user.id
+            )
+
+            owner = message.from_user.id == file["owner_id"]
 
             mode = (
                 f"💰 Paid • Rp {price:,}".replace(",", ".")
@@ -79,8 +95,10 @@ async def start_cmd(message: Message, state: FSMContext):
                 "━━━━━━━━━━━━━━"
             )
 
-            # FILE BERBAYAR
-            if is_paid:
+            # =========================
+            # FILE BERBAYAR (VIP/OWNER BISA BYPASS)
+            # =========================
+            if is_paid and not vip and not owner:
                 keyboard = InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
@@ -98,7 +116,9 @@ async def start_cmd(message: Message, state: FSMContext):
                 )
                 return
 
-            # FILE GRATIS
+            # =========================
+            # FILE GRATIS / VIP / OWNER
+            # =========================
             first = media[0]
             fid = first["file_id"]
             ftype = first.get("type", "document")
