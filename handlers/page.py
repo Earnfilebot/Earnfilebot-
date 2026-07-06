@@ -105,6 +105,8 @@ async def page_handler(call: CallbackQuery):
         if not file:
             return await call.answer("❌ File tidak ditemukan", show_alert=True)
 
+        protect = not file.get("share_media", True)
+
         # =========================
         # ACCESS CHECK (VIP + OWNER + PURCHASE)
         # =========================
@@ -232,25 +234,58 @@ async def page_handler(call: CallbackQuery):
         ])
 
         # =========================
-        # EDIT IF POSSIBLE (BEST UX)
+        # SEND MEDIA
         # =========================
         try:
-            await call.message.edit_media(
-                media=album[0],
-                reply_markup=keyboard
-            )
+            if len(album) == 1:
+                item = chunk[0]
 
-            # send remaining media (if any)
-            if len(album) > 1:
-                await call.message.answer_media_group(album[1:])
+                fid = clean_file_id(item.get("file_id"))
+                ftype = normalize_type(item.get("type"))
 
-        except Exception:
-            # fallback (first time open)
-            await call.message.answer_media_group(album)
+                caption = (
+                    "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n"
+                    "━━━━━━━━━━━━━━━\n\n"
+                    f"🔑 CODE : {code}\n"
+                    f"📦 PAGE : {page}/{total_page}\n"
+                    f"📊 TOTAL : {len(media)} FILE"
+                )
+
+                if ftype == "photo":
+                    await call.message.answer_photo(
+                        fid,
+                        caption=caption,
+                        protect_content=protect
+                    )
+
+                elif ftype == "video":
+                    await call.message.answer_video(
+                        fid,
+                        caption=caption,
+                        protect_content=protect
+                    )
+
+                else:
+                    await call.message.answer_document(
+                        fid,
+                        caption=caption,
+                        protect_content=protect
+                    )
+
+            else:
+                await call.message.answer_media_group(
+                    album,
+                    protect_content=protect
+                )
 
             await call.message.answer(
                 "📦 NAVIGATION",
                 reply_markup=keyboard
+            )
+
+        except Exception as e:
+            await call.message.answer(
+                f"❌ Gagal mengirim file.\n{e}"
             )
 
         await call.answer()
