@@ -1,6 +1,8 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+
 from database import get_pool
+from utils.bayargg import BayarGG
 
 router = Router()
 
@@ -10,12 +12,56 @@ status_map = {
     "expired": "❌ Kadaluarsa"
 }
 
+
 @router.callback_query(F.data.startswith("check:"))
 async def check_payment(call: CallbackQuery):
     invoice_id = call.data.split(":")[1]
 
     pool = await get_pool()
 
+    # =========================
+    # 1. CEK KE GATEWAY
+    # =========================
+    data = await BayarGG.check_payment(invoice_id)
+
+    if not data:
+        return await call.answer("❌ Gagal cek payment", show_alert=True)
+
+    # =========================
+    # 2. UPDATE STATUS JIKA SUDAH BAYAR
+    # =========================
+    if data.get("status") == "paid":
+
+        await pool.execute(
+            """
+            UPDATE file_purchases
+            SET status='paid'
+            WHERE payment_id=$1
+            """,
+            invoice_id
+        )
+
+        # ambil data file
+        purchase = await pool.fetchrow(
+            """
+            SELECT user_id, file_code
+            FROM file_purchases
+            WHERE payment_id=$1
+            """,
+            invoice_id
+        )
+
+        if purchase:
+            await call.message.bot.send_message(
+                purchase["user_id"],
+                f"✅ Payment berhasil!\n🔑 File Code: {purchase['file_code']}"
+            )
+
+        return await call.answer("✅ Payment sukses!", show_alert=True)
+
+    # =========================
+    # 3. BELUM BAYAR
+    # =========================
     tx = await pool.fetchrow(
         "SELECT status FROM file_purchases WHERE payment_id=$1",
         invoice_id
