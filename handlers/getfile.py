@@ -62,7 +62,42 @@ async def receive_code(message: Message, state: FSMContext):
     if not message.text:
         return await message.answer("❌ Kode kosong")
 
-    code = message.text.strip()
+    import re
+
+    text = message.text.strip()
+    code = None
+
+    # Cari dari link start
+    m = re.search(
+        r"getFile_([A-Za-z0-9_-]+)",
+        text,
+        re.IGNORECASE
+    )
+    if m:
+        code = m.group(1)
+
+    # Cari dari "Code : xxx"
+    if not code:
+        m = re.search(
+            r"code\s*[:：]\s*([A-Za-z0-9_-]+)",
+            text,
+            re.IGNORECASE
+        )
+        if m:
+            code = m.group(1)
+
+    # Cari kode langsung di dalam teks
+    if not code:
+        m = re.search(
+            r"(DecoderFileBot[A-Za-z0-9_-]+)",
+            text
+        )
+        if m:
+            code = m.group(1)
+
+    # Kalau tetap tidak ketemu, anggap seluruh pesan adalah kode
+    if not code:
+        code = text
 
     pool = await get_pool()
 
@@ -123,19 +158,27 @@ async def receive_code(message: Message, state: FSMContext):
         f"📤 SHARE: {share_status}"
     )
 
-    # =========================
-    # SEND MEDIA
-    # =========================
     try:
-
         if ftype == "photo":
-            await message.answer_photo(fid, caption=caption, reply_markup=keyboard)
+            await message.answer_photo(
+                fid,
+                caption=caption,
+                reply_markup=keyboard
+            )
 
         elif ftype == "video":
-            await message.answer_video(fid, caption=caption, reply_markup=keyboard)
+            await message.answer_video(
+                fid,
+                caption=caption,
+                reply_markup=keyboard
+            )
 
         else:
-            await message.answer_document(fid, caption=caption, reply_markup=keyboard)
+            await message.answer_document(
+                fid,
+                caption=caption,
+                reply_markup=keyboard
+            )
 
     except Exception as e:
         await message.answer(f"❌ MEDIA ERROR:\n{e}")
