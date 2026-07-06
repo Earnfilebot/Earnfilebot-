@@ -1,26 +1,67 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-
-router = Router()
-
-
-async def loading(call: CallbackQuery):
-    return await call.message.edit_text("⏳ Loading...")
-
+from datetime import datetime
 
 @router.callback_query(F.data == "account")
 async def account_handler(call: CallbackQuery):
 
-    msg = await loading(call)
+    await call.message.edit_text("⏳ Loading...")
 
+    pool = await get_pool()
     user_id = call.from_user.id
+
+    user = await pool.fetchrow(
+        """
+        SELECT vip, vip_until
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        user_id
+    )
+
+    vip_status = "🆓 FREE"
+    vip_type = "-"
+    remaining = "-"
+    duration = "-"
+
+    if user and user["vip"] and user["vip_until"]:
+
+        now = datetime.utcnow()
+        vip_until = user["vip_until"]
+
+        if vip_until > now:
+
+            delta = vip_until - now
+
+            # total & remaining days
+            remaining_days = delta.days
+            total_days = (vip_until - (vip_until - delta)).days + remaining_days
+
+            vip_status = "👑 VIP ACTIVE"
+
+            if remaining_days <= 1:
+                vip_type = "Harian"
+            elif remaining_days <= 30:
+                vip_type = "Bulanan"
+            else:
+                vip_type = "Lifetime"
+
+            remaining = f"{remaining_days} hari"
+            duration = f"{total_days} hari"
+
+        else:
+            vip_status = "❌ EXPIRED"
+            vip_type = "-"
+            remaining = "0 hari"
+            duration = "0 hari"
 
     text = (
         "━━━━━━━━━━━━━━\n"
         "👤 <b>ACCOUNT INFO</b>\n"
         "━━━━━━━━━━━━━━\n\n"
         f"🆔 User ID : <code>{user_id}</code>\n"
-        "📊 Status : ✅ Akun Fresh & Aman\n\n"
+        f"💎 Status : {vip_status}\n"
+        f"📦 Tipe : {vip_type}\n"
+        f"⏳ Sisa VIP : {remaining}\n"
+        f"📊 Durasi VIP : {duration}\n\n"
         "━━━━━━━━━━━━━━"
     )
 
@@ -38,5 +79,5 @@ async def account_handler(call: CallbackQuery):
         ]
     )
 
-    await msg.edit_text(text, reply_markup=kb)
+    await call.message.edit_text(text, reply_markup=kb)
     await call.answer()
