@@ -345,6 +345,11 @@ async def back_home(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("buyfile:"))
 async def buy_file(call: CallbackQuery):
 
+    try:
+        await call.message.delete()
+    except TelegramBadRequest:
+        pass
+
     code = call.data.split(":")[1]
 
     pool = await get_pool()
