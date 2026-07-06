@@ -30,12 +30,20 @@ async def pay_file(call: CallbackQuery):
     # REDIS LOCK (SAFE MODE)
     # =========================
     try:
-        lock_ok = await safe_set(lock_key, "1", ex=PAY_LOCK_TTL, nx=True)
+        lock_ok = await safe_set(
+            lock_key,
+            "1",
+            ex=PAY_LOCK_TTL,
+            nx=True
+        )
     except Exception:
-        lock_ok = True  # fallback kalau Redis mati
+        lock_ok = True
 
     if not lock_ok:
-        return await call.answer("⏳ Tunggu sebentar...", show_alert=True)
+        return await call.answer(
+            "⏳ Tunggu sebentar...",
+            show_alert=True
+        )
 
     pool = await get_pool()
 
@@ -44,18 +52,31 @@ async def pay_file(call: CallbackQuery):
         # GET FILE
         # =========================
         file = await pool.fetchrow(
-            "SELECT owner_id, price, is_paid FROM files WHERE code=$1",
+            """
+            SELECT owner_id, price, is_paid
+            FROM files
+            WHERE code=$1
+            """,
             code
         )
 
         if not file:
-            return await call.answer("❌ File tidak ditemukan", show_alert=True)
+            return await call.answer(
+                "❌ File tidak ditemukan",
+                show_alert=True
+            )
 
         if not file["is_paid"]:
-            return await call.answer("File gratis", show_alert=True)
+            return await call.answer(
+                "File gratis",
+                show_alert=True
+            )
 
         if file["owner_id"] == user_id:
-            return await call.answer("Owner tidak perlu bayar", show_alert=True)
+            return await call.answer(
+                "Owner tidak perlu bayar",
+                show_alert=True
+            )
 
         price = file["price"] or 0
 
@@ -66,7 +87,8 @@ async def pay_file(call: CallbackQuery):
             """
             SELECT payment_id, status
             FROM file_purchases
-            WHERE user_id=$1 AND file_code=$2
+            WHERE user_id=$1
+              AND file_code=$2
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -76,10 +98,16 @@ async def pay_file(call: CallbackQuery):
 
         if existing:
             if existing["status"] == "paid":
-                return await call.answer("Sudah dibeli", show_alert=True)
+                return await call.answer(
+                    "Sudah dibeli",
+                    show_alert=True
+                )
 
             if existing["status"] == "pending":
-                return await call.answer("⏳ Invoice masih aktif", show_alert=True)
+                return await call.answer(
+                    "⏳ Invoice masih aktif",
+                    show_alert=True
+                )
 
         # =========================
         # CREATE PAYMENT
@@ -96,7 +124,10 @@ async def pay_file(call: CallbackQuery):
         print("SAVE PAYMENT ID:", invoice_id)
 
         if not invoice_id or not qr_string:
-            return await call.answer("Payment error", show_alert=True)
+            return await call.answer(
+                "Payment error",
+                show_alert=True
+            )
 
         # =========================
         # SAVE DB
@@ -104,10 +135,23 @@ async def pay_file(call: CallbackQuery):
         await pool.execute(
             """
             INSERT INTO file_purchases
-            (user_id, file_code, owner_id, paid_price, payment_id, status, created_at)
-            VALUES ($1,$2,$3,$4,$5,'pending',NOW())
+            (
+                user_id,
+                file_code,
+                owner_id,
+                paid_price,
+                payment_id,
+                status,
+                created_at
+            )
+            VALUES (
+                $1,$2,$3,$4,$5,
+                'pending',
+                NOW()
+            )
             ON CONFLICT (payment_id)
-            DO UPDATE SET status='pending'
+            DO UPDATE
+            SET status='pending'
             """,
             user_id,
             code,
@@ -117,7 +161,7 @@ async def pay_file(call: CallbackQuery):
         )
 
         # =========================
-        # REDIS INVOICE TRACK (SAFE)
+        # REDIS INVOICE TRACK
         # =========================
         try:
             await safe_set(
@@ -129,9 +173,10 @@ async def pay_file(call: CallbackQuery):
             pass
 
         # =========================
-        # QR GENERATE
+        # GENERATE QR
         # =========================
         qr = qrcode.make(qr_string)
+
         buf = BytesIO()
         qr.save(buf, format="PNG")
         buf.seek(0)
@@ -153,8 +198,14 @@ async def pay_file(call: CallbackQuery):
             ]
         )
 
-        await call.message.answer_photo(
-            BufferedInputFile(buf.read(), filename="qris.png"),
+        # =========================
+        # SEND QR
+        # =========================
+        msg = await call.message.answer_photo(
+            BufferedInputFile(
+                buf.read(),
+                filename="qris.png"
+            ),
             caption=(
                 "💳 <b>PAYMENT QRIS</b>\n\n"
                 f"🧾 Invoice: <code>{invoice_id}</code>\n"
@@ -163,6 +214,21 @@ async def pay_file(call: CallbackQuery):
             ).replace(",", "."),
             parse_mode="HTML",
             reply_markup=kb
+        )
+
+        # =========================
+        # SAVE MESSAGE ID
+        # =========================
+        await pool.execute(
+            """
+            UPDATE file_purchases
+            SET qr_message_id=$1,
+                qr_chat_id=$2
+            WHERE payment_id=$3
+            """,
+            msg.message_id,
+            msg.chat.id,
+            invoice_id
         )
 
         await call.answer()
