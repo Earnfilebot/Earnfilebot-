@@ -12,6 +12,8 @@ import json
 
 router = Router()
 
+CHANNEL_ID = -1004395938795
+
 status_map = {
     "pending": "⏳ Menunggu pembayaran",
     "paid": "✅ Sudah dibayar",
@@ -30,6 +32,7 @@ async def check_payment(call: CallbackQuery):
     try:
         data = await BayarGG.check_payment(invoice_id)
         print("CHECK PAYMENT:", data)
+
     except Exception as e:
         print("CHECK ERROR:", e)
         return await call.answer(
@@ -50,7 +53,12 @@ async def check_payment(call: CallbackQuery):
     # =========================
     tx = await pool.fetchrow(
         """
-        SELECT user_id, file_code, status
+        SELECT
+            user_id,
+            file_code,
+            status,
+            qr_message_id,
+            qr_chat_id
         FROM file_purchases
         WHERE payment_id=$1
         """,
@@ -93,6 +101,35 @@ async def check_payment(call: CallbackQuery):
         """,
         invoice_id
     )
+
+    # =========================
+    # HAPUS PESAN QR
+    # =========================
+    try:
+        if tx["qr_message_id"] and tx["qr_chat_id"]:
+            await call.bot.delete_message(
+                tx["qr_chat_id"],
+                tx["qr_message_id"]
+            )
+    except Exception as e:
+        print("DELETE QR ERROR:", e)
+
+    # =========================
+    # POST KE CHANNEL
+    # =========================
+    try:
+        await call.bot.send_message(
+            CHANNEL_ID,
+            (
+                "💰 <b>PAYMENT SUCCESS</b>\n\n"
+                f"👤 User : <code>{tx['user_id']}</code>\n"
+                f"📂 File : <code>{tx['file_code']}</code>\n"
+                f"🧾 Invoice : <code>{invoice_id}</code>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        print("CHANNEL POST ERROR:", e)
 
     # =========================
     # AMBIL FILE
@@ -153,11 +190,11 @@ async def check_payment(call: CallbackQuery):
     )
 
     # =========================
-    # KIRIM PREVIEW FILE
+    # KIRIM FILE KE USER
     # =========================
     try:
         if file_type == "photo":
-            await call.message.bot.send_photo(
+            await call.bot.send_photo(
                 tx["user_id"],
                 file_id,
                 caption=caption,
@@ -166,7 +203,7 @@ async def check_payment(call: CallbackQuery):
             )
 
         elif file_type == "video":
-            await call.message.bot.send_video(
+            await call.bot.send_video(
                 tx["user_id"],
                 file_id,
                 caption=caption,
@@ -175,7 +212,7 @@ async def check_payment(call: CallbackQuery):
             )
 
         else:
-            await call.message.bot.send_document(
+            await call.bot.send_document(
                 tx["user_id"],
                 file_id,
                 caption=caption,
@@ -191,6 +228,6 @@ async def check_payment(call: CallbackQuery):
         )
 
     await call.answer(
-        "✅ Payment sukses",
+        "✅ Payment sukses & file dikirim",
         show_alert=True
     )
