@@ -21,11 +21,14 @@ async def check_payment(call: CallbackQuery):
     pool = await get_pool()
 
     # =========================
-    # 1. CEK GATEWAY
+    # 1. CEK GATEWAY (SAFE)
     # =========================
-    data = await BayarGG.check_payment(invoice_id)
+    try:
+        data = await BayarGG.check_payment(invoice_id)
+    except Exception as e:
+        return await call.answer(f"❌ Error gateway", show_alert=True)
 
-    if not data:
+    if not data or "status" not in data:
         return await call.answer("❌ Gagal cek payment", show_alert=True)
 
     # =========================
@@ -44,7 +47,7 @@ async def check_payment(call: CallbackQuery):
         return await call.answer("Invoice tidak ditemukan", show_alert=True)
 
     # =========================
-    # 3. SUDAH PERNAH PAID? (ANTI DOUBLE SEND)
+    # 3. SUDAH DIPROSES (ANTI DOUBLE)
     # =========================
     if tx["status"] == "paid":
         return await call.answer("✅ Sudah diproses", show_alert=True)
@@ -52,14 +55,14 @@ async def check_payment(call: CallbackQuery):
     # =========================
     # 4. BELUM BAYAR
     # =========================
-    if data.get("status") != "paid":
+    if data["status"] != "paid":
         return await call.answer(
-            status_map.get(data.get("status", "pending")),
+            status_map.get(data["status"], data["status"]),
             show_alert=True
         )
 
     # =========================
-    # 5. MARK AS PAID
+    # 5. UPDATE STATUS
     # =========================
     await pool.execute(
         """
@@ -81,19 +84,28 @@ async def check_payment(call: CallbackQuery):
     if not file:
         return await call.answer("File tidak ditemukan", show_alert=True)
 
-    media = json.loads(file["media"]) if isinstance(file["media"], str) else file["media"]
-    first = media[0] if media else None
+    media = file["media"]
+    if isinstance(media, str):
+        media = json.loads(media)
 
-    if not first:
+    if not media:
         return await call.answer("File rusak", show_alert=True)
+
+    first = media[0]
+
+    if not first.get("file_id"):
+        return await call.answer("File invalid", show_alert=True)
 
     # =========================
     # 7. KIRIM FILE
     # =========================
-    await call.message.bot.send_document(
-        tx["user_id"],
-        first["file_id"],
-        caption=f"📁 FILE: {tx['file_code']}\n✅ Payment berhasil"
-    )
+    try:
+        await call.message.bot.send_document(
+            tx["user_id"],
+            first["file_id"],
+            caption=f"📁 FILE: {tx['file_code']}\n✅ Payment berhasil"
+        )
+    except Exception:
+        return await call.answer("❌ Gagal kirim file", show_alert=True)
 
     await call.answer("✅ Payment sukses & file dikirim", show_alert=True)
