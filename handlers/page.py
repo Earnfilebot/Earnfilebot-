@@ -49,6 +49,50 @@ async def send_page(bot, chat_id, user_id, code, page=1):
     if not file:
         return False
 
+    # =========================
+    # ACCESS CHECK
+    # =========================
+    if file["is_paid"]:
+
+        if user_id == file["owner_id"]:
+            bought = True
+
+        else:
+            vip = await pool.fetchval(
+                """
+                SELECT 1
+                FROM users
+                WHERE telegram_id=$1
+                  AND vip=TRUE
+                  AND vip_until > NOW()
+                """,
+                user_id
+            )
+
+            if vip:
+                bought = True
+            else:
+                bought = bool(
+                    await pool.fetchval(
+                        """
+                        SELECT 1
+                        FROM file_purchases
+                        WHERE user_id=$1
+                          AND file_code=$2
+                          AND status='paid'
+                        LIMIT 1
+                        """,
+                        user_id,
+                        code
+                    )
+                )
+
+    else:
+        bought = True
+
+    if not bought:
+        return False
+
     protect = not file.get("share_media", True)
 
     media = file["media"]
@@ -56,7 +100,7 @@ async def send_page(bot, chat_id, user_id, code, page=1):
     if isinstance(media, str):
         try:
             media = json.loads(media)
-        except:
+        except Exception:
             media = []
 
     if not media:
@@ -78,6 +122,7 @@ async def send_page(bot, chat_id, user_id, code, page=1):
     album = []
 
     for i, item in enumerate(chunk):
+
         fid = clean_file_id(item.get("file_id"))
         ftype = normalize_type(item.get("type"))
 
@@ -87,42 +132,88 @@ async def send_page(bot, chat_id, user_id, code, page=1):
         cap = caption if i == 0 else None
 
         if ftype == "photo":
-            album.append(InputMediaPhoto(media=fid, caption=cap))
-        elif ftype == "video":
-            album.append(InputMediaVideo(media=fid, caption=cap))
-        else:
-            album.append(InputMediaDocument(media=fid, caption=cap))
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        build_page_buttons(code, page, total_page),
-        [
-            InlineKeyboardButton(
-                text="📢 Channel Update",
-                url="https://t.me/+F6-XB1gFA9VhMDc1"
-            ),
-            InlineKeyboardButton(
-                text="🔔 Notifikasi Code",
-                url="https://t.me/+T8c4gdEWf843ZWQ1"
+            album.append(
+                InputMediaPhoto(
+                    media=fid,
+                    caption=cap
+                )
             )
+
+        elif ftype == "video":
+            album.append(
+                InputMediaVideo(
+                    media=fid,
+                    caption=cap
+                )
+            )
+
+        else:
+            album.append(
+                InputMediaDocument(
+                    media=fid,
+                    caption=cap
+                )
+            )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            build_page_buttons(code, page, total_page),
+            [
+                InlineKeyboardButton(
+                    text="📢 Channel Update",
+                    url="https://t.me/+F6-XB1gFA9VhMDc1"
+                ),
+                InlineKeyboardButton(
+                    text="🔔 Notifikasi Code",
+                    url="https://t.me/+T8c4gdEWf843ZWQ1"
+                )
+            ]
         ]
-    ])
+    )
 
     if len(album) == 1:
+
         item = chunk[0]
 
         fid = clean_file_id(item.get("file_id"))
         ftype = normalize_type(item.get("type"))
 
         if ftype == "photo":
-            await bot.send_photo(chat_id, fid, caption=caption, protect_content=protect)
-        elif ftype == "video":
-            await bot.send_video(chat_id, fid, caption=caption, protect_content=protect)
-        else:
-            await bot.send_document(chat_id, fid, caption=caption, protect_content=protect)
-    else:
-        await bot.send_media_group(chat_id, album, protect_content=protect)
+            await bot.send_photo(
+                chat_id,
+                fid,
+                caption=caption,
+                protect_content=protect
+            )
 
-    await bot.send_message(chat_id, "📦 NAVIGATION", reply_markup=keyboard)
+        elif ftype == "video":
+            await bot.send_video(
+                chat_id,
+                fid,
+                caption=caption,
+                protect_content=protect
+            )
+
+        else:
+            await bot.send_document(
+                chat_id,
+                fid,
+                caption=caption,
+                protect_content=protect
+            )
+
+    else:
+        await bot.send_media_group(
+            chat_id,
+            album,
+            protect_content=protect
+        )
+
+    await bot.send_message(
+        chat_id,
+        "📦 NAVIGATION",
+        reply_markup=keyboard
+    )
 
     return True
 
@@ -218,9 +309,12 @@ async def page_handler(call: CallbackQuery):
                 else:
                     bought = bool(await pool.fetchval(
                         """
-                        SELECT 1 FROM file_purchases
-                        WHERE user_id=$1 AND file_code=$2
-                        LIMIT 1
+                        SELECT 1
+FROM file_purchases
+WHERE user_id=$1
+  AND file_code=$2
+  AND status='paid'
+LIMIT 1
                         """,
                         user_id,
                         code
