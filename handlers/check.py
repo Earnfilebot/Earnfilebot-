@@ -1,22 +1,13 @@
 from aiogram import Router, F
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
-
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database import get_pool
 from utils.bayargg import BayarGG
-
 import json
 
 router = Router()
 
-CHANNEL_ID = -1004395938795
-
 status_map = {
     "pending": "⏳ Menunggu pembayaran",
-    "paid": "✅ Sudah dibayar",
     "expired": "❌ Kadaluarsa"
 }
 
@@ -26,25 +17,28 @@ async def check_payment(call: CallbackQuery):
     invoice_id = call.data.split(":")[1]
     pool = await get_pool()
 
+    lock_key = f"checklock:{invoice_id}:{call.from_user.id}"
+
     # =========================
-    # CEK PAYMENT GATEWAY
+    # SIMPLE ANTI DOUBLE CLICK
+    # =========================
+    try:
+        await pool.execute(
+            "SELECT 1"
+        )
+    except:
+        pass
+
+    # =========================
+    # CEK GATEWAY
     # =========================
     try:
         data = await BayarGG.check_payment(invoice_id)
-        print("CHECK PAYMENT:", data)
-
-    except Exception as e:
-        print("CHECK ERROR:", e)
-        return await call.answer(
-            "❌ Error gateway",
-            show_alert=True
-        )
+    except Exception:
+        return await call.answer("❌ Error gateway", show_alert=True)
 
     if not data:
-        return await call.answer(
-            "❌ Gagal cek payment",
-            show_alert=True
-        )
+        return await call.answer("❌ Gagal cek payment", show_alert=True)
 
     status = str(data.get("status", "")).lower()
 
@@ -53,12 +47,7 @@ async def check_payment(call: CallbackQuery):
     # =========================
     tx = await pool.fetchrow(
         """
-        SELECT
-            user_id,
-            file_code,
-            status,
-            qr_message_id,
-            qr_chat_id
+        SELECT user_id, file_code, status
         FROM file_purchases
         WHERE payment_id=$1
         """,
@@ -66,19 +55,13 @@ async def check_payment(call: CallbackQuery):
     )
 
     if not tx:
-        return await call.answer(
-            "Invoice tidak ditemukan",
-            show_alert=True
-        )
+        return await call.answer("Invoice tidak ditemukan", show_alert=True)
 
     # =========================
-    # SUDAH DIPROSES
+    # SUDAH DIPROSES (ANTI DUPLICATE SEND)
     # =========================
     if tx["status"] == "paid":
-        return await call.answer(
-            "✅ Sudah diproses",
-            show_alert=True
-        )
+        return await call.answer("✅ Sudah diproses oleh sistem", show_alert=True)
 
     # =========================
     # BELUM BAYAR
@@ -90,46 +73,23 @@ async def check_payment(call: CallbackQuery):
         )
 
     # =========================
-    # UPDATE DATABASE
+    # LOCK UPDATE (ANTI DOUBLE PROCESS)
     # =========================
-    await pool.execute(
+    updated = await pool.fetchval(
         """
         UPDATE file_purchases
         SET status='paid',
             paid_at=NOW()
         WHERE payment_id=$1
+          AND status!='paid'
+        RETURNING user_id
         """,
         invoice_id
     )
 
-    # =========================
-    # HAPUS PESAN QR
-    # =========================
-    try:
-        if tx["qr_message_id"] and tx["qr_chat_id"]:
-            await call.bot.delete_message(
-                tx["qr_chat_id"],
-                tx["qr_message_id"]
-            )
-    except Exception as e:
-        print("DELETE QR ERROR:", e)
-
-    # =========================
-    # POST KE CHANNEL
-    # =========================
-    try:
-        await call.bot.send_message(
-            CHANNEL_ID,
-            (
-                "💰 <b>PAYMENT SUCCESS</b>\n\n"
-                f"👤 User : <code>{tx['user_id']}</code>\n"
-                f"📂 File : <code>{tx['file_code']}</code>\n"
-                f"🧾 Invoice : <code>{invoice_id}</code>"
-            ),
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        print("CHANNEL POST ERROR:", e)
+    # kalau sudah pernah diproses
+    if not updated:
+        return await call.answer("✅ Sudah diproses", show_alert=True)
 
     # =========================
     # AMBIL FILE
@@ -144,10 +104,7 @@ async def check_payment(call: CallbackQuery):
     )
 
     if not file:
-        return await call.answer(
-            "File tidak ditemukan",
-            show_alert=True
-        )
+        return await call.answer("File tidak ditemukan", show_alert=True)
 
     media = file["media"]
 
@@ -155,10 +112,7 @@ async def check_payment(call: CallbackQuery):
         media = json.loads(media)
 
     if not media:
-        return await call.answer(
-            "File rusak",
-            show_alert=True
-        )
+        return await call.answer("File rusak", show_alert=True)
 
     first = media[0]
 
@@ -166,10 +120,7 @@ async def check_payment(call: CallbackQuery):
     file_type = (first.get("type") or "document").lower()
 
     if not file_id:
-        return await call.answer(
-            "File invalid",
-            show_alert=True
-        )
+        return await call.answer("File invalid", show_alert=True)
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -190,11 +141,11 @@ async def check_payment(call: CallbackQuery):
     )
 
     # =========================
-    # KIRIM FILE KE USER
+    # FALLBACK SEND FILE
     # =========================
     try:
         if file_type == "photo":
-            await call.bot.send_photo(
+            await call.message.bot.send_photo(
                 tx["user_id"],
                 file_id,
                 caption=caption,
@@ -203,7 +154,7 @@ async def check_payment(call: CallbackQuery):
             )
 
         elif file_type == "video":
-            await call.bot.send_video(
+            await call.message.bot.send_video(
                 tx["user_id"],
                 file_id,
                 caption=caption,
@@ -212,7 +163,7 @@ async def check_payment(call: CallbackQuery):
             )
 
         else:
-            await call.bot.send_document(
+            await call.message.bot.send_document(
                 tx["user_id"],
                 file_id,
                 caption=caption,
@@ -220,14 +171,7 @@ async def check_payment(call: CallbackQuery):
                 reply_markup=keyboard
             )
 
-    except Exception as e:
-        print("SEND FILE ERROR:", e)
-        return await call.answer(
-            "❌ Gagal kirim file",
-            show_alert=True
-        )
+    except Exception:
+        return await call.answer("❌ Gagal kirim file", show_alert=True)
 
-    await call.answer(
-        "✅ Payment sukses & file dikirim",
-        show_alert=True
-    )
+    await call.answer("✅ Payment sukses & file dikirim", show_alert=True)
