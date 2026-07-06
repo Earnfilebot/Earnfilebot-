@@ -1,5 +1,9 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 
 from database import get_pool
 from utils.bayargg import BayarGG
@@ -21,7 +25,7 @@ async def check_payment(call: CallbackQuery):
     pool = await get_pool()
 
     # =========================
-    # 1. CEK GATEWAY
+    # CEK PAYMENT GATEWAY
     # =========================
     try:
         data = await BayarGG.check_payment(invoice_id)
@@ -42,7 +46,7 @@ async def check_payment(call: CallbackQuery):
     status = str(data.get("status", "")).lower()
 
     # =========================
-    # 2. AMBIL TRANSAKSI DB
+    # AMBIL TRANSAKSI
     # =========================
     tx = await pool.fetchrow(
         """
@@ -60,7 +64,7 @@ async def check_payment(call: CallbackQuery):
         )
 
     # =========================
-    # 3. SUDAH DIPROSES
+    # SUDAH DIPROSES
     # =========================
     if tx["status"] == "paid":
         return await call.answer(
@@ -69,7 +73,7 @@ async def check_payment(call: CallbackQuery):
         )
 
     # =========================
-    # 4. BELUM BAYAR
+    # BELUM BAYAR
     # =========================
     if status != "paid":
         return await call.answer(
@@ -78,7 +82,7 @@ async def check_payment(call: CallbackQuery):
         )
 
     # =========================
-    # 5. UPDATE STATUS
+    # UPDATE DATABASE
     # =========================
     await pool.execute(
         """
@@ -91,10 +95,14 @@ async def check_payment(call: CallbackQuery):
     )
 
     # =========================
-    # 6. AMBIL FILE
+    # AMBIL FILE
     # =========================
     file = await pool.fetchrow(
-        "SELECT media FROM files WHERE code=$1",
+        """
+        SELECT media
+        FROM files
+        WHERE code=$1
+        """,
         tx["file_code"]
     )
 
@@ -126,29 +134,53 @@ async def check_payment(call: CallbackQuery):
             show_alert=True
         )
 
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📂 OPEN FILE",
+                    callback_data=f"page:{tx['file_code']}:1"
+                )
+            ]
+        ]
+    )
+
+    caption = (
+        "✅ <b>PAYMENT BERHASIL</b>\n\n"
+        f"🔑 CODE : <code>{tx['file_code']}</code>\n"
+        f"📦 TOTAL FILE : {len(media)}\n\n"
+        "Klik tombol di bawah untuk membuka semua file."
+    )
+
     # =========================
-    # 7. KIRIM FILE
+    # KIRIM PREVIEW FILE
     # =========================
     try:
         if file_type == "photo":
             await call.message.bot.send_photo(
                 tx["user_id"],
                 file_id,
-                caption=f"📁 FILE: {tx['file_code']}\n✅ Payment berhasil"
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard
             )
 
         elif file_type == "video":
             await call.message.bot.send_video(
                 tx["user_id"],
                 file_id,
-                caption=f"📁 FILE: {tx['file_code']}\n✅ Payment berhasil"
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard
             )
 
         else:
             await call.message.bot.send_document(
                 tx["user_id"],
                 file_id,
-                caption=f"📁 FILE: {tx['file_code']}\n✅ Payment berhasil"
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard
             )
 
     except Exception as e:
@@ -159,6 +191,6 @@ async def check_payment(call: CallbackQuery):
         )
 
     await call.answer(
-        "✅ Payment sukses & file dikirim",
+        "✅ Payment sukses",
         show_alert=True
     )
