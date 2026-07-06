@@ -45,11 +45,18 @@ async def cancel_payment(call: CallbackQuery):
 
     try:
         await safe_delete(f"invoice:{invoice_id}")
-    except:
+    except Exception:
         pass
 
-    await call.message.edit_caption(
-        caption="❌ Invoice dibatalkan."
+    # Hapus pesan QR beserta tombolnya
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+
+    # Kirim pemberitahuan baru
+    await call.message.answer(
+        "❌ Invoice berhasil dibatalkan."
     )
 
     await call.answer(
