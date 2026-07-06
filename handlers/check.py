@@ -41,7 +41,6 @@ async def check_payment(call: CallbackQuery):
             invoice_id
         )
 
-        # ambil data file
         purchase = await pool.fetchrow(
             """
             SELECT user_id, file_code
@@ -51,13 +50,31 @@ async def check_payment(call: CallbackQuery):
             invoice_id
         )
 
-        if purchase:
-            await call.message.bot.send_message(
-                purchase["user_id"],
-                f"✅ Payment berhasil!\n🔑 File Code: {purchase['file_code']}"
-            )
+        if not purchase:
+            return await call.answer("Data pembelian tidak ditemukan", show_alert=True)
 
-        return await call.answer("✅ Payment sukses!", show_alert=True)
+        file = await pool.fetchrow(
+            "SELECT * FROM files WHERE code=$1",
+            purchase["file_code"]
+        )
+
+        if not file:
+            return await call.answer("File tidak ditemukan", show_alert=True)
+
+        media = json.loads(file["media"]) if isinstance(file["media"], str) else file["media"]
+        first = media[0] if media else None
+
+        if not first:
+            return await call.answer("File rusak", show_alert=True)
+
+        await call.message.bot.send_document(
+            purchase["user_id"],
+            first["file_id"],
+            caption=f"📁 FILE: {purchase['file_code']}\n✅ Payment berhasil"
+        )
+
+        await call.answer("✅ Payment sukses & file dikirim", show_alert=True)
+        return
 
     # =========================
     # 3. BELUM BAYAR
