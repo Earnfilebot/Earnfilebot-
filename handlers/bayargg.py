@@ -73,7 +73,6 @@ async def bayargg_webhook(request: Request):
         if purchase["status"] == "paid":
             return {"success": True}
 
-        # UPDATE STATUS
         await pool.execute(
             """
             UPDATE file_purchases
@@ -84,21 +83,16 @@ async def bayargg_webhook(request: Request):
             invoice_id
         )
 
-        # CLEAN CACHE INVOICE
         await redis_client.delete(f"invoice:{invoice_id}")
 
-        # =========================
-        # NOTIF USER + SEND FILE
-        # =========================
         try:
             await bot.send_message(
                 purchase["user_id"],
-                "✅ <b>Pembayaran berhasil!</b>\n\nFile sedang dikirim...",
+                "✅ <b>Pembayaran berhasil!</b>\n\n📦 File sedang dikirim...",
                 parse_mode="HTML"
             )
 
-            # 🔥 AUTO SEND FILE (INI POIN PENTING)
-            await send_page(
+            success = await send_page(
                 bot=bot,
                 chat_id=purchase["user_id"],
                 user_id=purchase["user_id"],
@@ -106,20 +100,28 @@ async def bayargg_webhook(request: Request):
                 page=1
             )
 
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📂 OPEN FILE",
-                        callback_data=f"page:{purchase['file_code']}:1"
-                    )
-                ]
-            ])
+            if success:
+                kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="📂 OPEN FILE",
+                                callback_data=f"page:{purchase['file_code']}:1"
+                            )
+                        ]
+                    ]
+                )
 
-            await bot.send_message(
-                purchase["user_id"],
-                "📦 File sudah siap!",
-                reply_markup=kb
-            )
+                await bot.send_message(
+                    purchase["user_id"],
+                    "📦 File berhasil dikirim.\nJika ingin membukanya lagi silakan tekan tombol di bawah.",
+                    reply_markup=kb
+                )
+            else:
+                await bot.send_message(
+                    purchase["user_id"],
+                    "❌ File gagal dikirim, silakan hubungi admin."
+                )
 
         except Exception:
             logging.exception("file notify failed")
@@ -180,15 +182,22 @@ async def bayargg_webhook(request: Request):
     try:
         await bot.send_message(
             trx["user_id"],
-            f"🎉 VIP ACTIVE\n\n{paket['name']}\nExpired: {vip_until}",
+            f"🎉 VIP ACTIVE\n\n"
+            f"Paket : {paket['name']}\n"
+            f"Expired : {vip_until:%d-%m-%Y %H:%M UTC}"
         )
 
         await bot.send_message(
             CHANNEL_ID,
-            f"💎 VIP SOLD\nUser: {trx['user_id']}\nPlan: {paket['name']}",
+            f"💎 VIP SOLD\n"
+            f"User : {trx['user_id']}\n"
+            f"Plan : {paket['name']}"
         )
 
     except Exception:
+        logging.exception("vip notify failed")
+
+    return {"success": True}
         logging.exception("vip notify failed")
 
     return {"success": True}
