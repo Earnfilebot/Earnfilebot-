@@ -70,7 +70,7 @@ class BayarGG:
             return data.get("data", data)
 
         except Exception as e:
-            print("❌ CREATE PAYMENT ERROR:", e)
+            logging.info("❌ CREATE PAYMENT ERROR:", e)
             return None
 
     @staticmethod
