@@ -3,6 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
+from datetime import timedelta
 
 from database import get_pool
 from .dashboard import is_admin, rupiah
@@ -315,23 +316,34 @@ async def unban_user(message: Message, state: FSMContext):
 @router.callback_query(F.data == "users_vvip")
 async def vvip_start(call: CallbackQuery, state: FSMContext):
 
+    await state.clear()
     await state.set_state(VvipState.waiting_user)
 
     await call.message.edit_text("👑 Kirim user ID / username")
-
     await call.answer()
 
 
+# =========================
+# GET USER
+# =========================
 @router.message(VvipState.waiting_user)
 async def vvip_user(message: Message, state: FSMContext):
 
     pool = await get_pool()
     key = message.text.strip()
 
+    user = None
+
     if key.isdigit():
-        user = await pool.fetchrow("SELECT * FROM users WHERE telegram_id=$1", int(key))
+        user = await pool.fetchrow(
+            "SELECT telegram_id FROM users WHERE telegram_id=$1",
+            int(key)
+        )
     else:
-        user = await pool.fetchrow("SELECT * FROM users WHERE LOWER(username)=LOWER($1)", key.replace("@", ""))
+        user = await pool.fetchrow(
+            "SELECT telegram_id FROM users WHERE LOWER(username)=LOWER($1)",
+            key.replace("@", "")
+        )
 
     if not user:
         await state.clear()
@@ -343,26 +355,36 @@ async def vvip_user(message: Message, state: FSMContext):
     await message.answer("📅 Masukkan durasi VVIP (hari)")
 
 
+# =========================
+# SET VVIP DAYS (FIXED)
+# =========================
 @router.message(VvipState.waiting_days)
 async def vvip_set_days(message: Message, state: FSMContext):
 
-    if not message.text.isdigit():
-        return await message.answer("❌ Harus angka")
+    if not message.text or not message.text.isdigit():
+        return await message.answer("❌ Harus angka (hari)")
 
     days = int(message.text)
     data = await state.get_data()
+    user_id = data.get("user_id")
+
+    if not user_id:
+        await state.clear()
+        return await message.answer("❌ Session error, ulangi lagi")
 
     pool = await get_pool()
 
+    # ✅ FIX: pakai timedelta (lebih aman dari SQL interval string)
     await pool.execute(
         """
         UPDATE users
         SET vip = TRUE,
-            vip_until = NOW() + ($2 || ' days')::interval
-        WHERE telegram_id=$1
+            vip_until = NOW() + $2::interval
+        WHERE telegram_id = $1
         """,
-        data["user_id"], days
+        user_id,
+        f"{days} days"
     )
 
-    await message.answer(f"👑 VVIP aktif {days} hari")
+    await message.answer(f"👑 VVIP aktif selama {days} hari")
     await state.clear()
