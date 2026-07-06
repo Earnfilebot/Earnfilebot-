@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot import bot
 from config import BAYARGG_API_KEY, CHANNEL_ID
@@ -38,27 +39,23 @@ async def bayargg_webhook(request: Request):
     invoice_id = data.get("invoice_id")
     status = (data.get("status") or "").lower()
 
-    print("WEBHOOK INVOICE:", invoice_id)
-    print("WEBHOOK STATUS:", status)
-
-    logging.info(f"🔥 WEBHOOK HIT: {invoice_id} - {status}")
-    print("🔥 WEBHOOK MASUK")
-    print(data)
-
     if not invoice_id:
         return {"success": False, "message": "missing invoice"}
 
     if status != "paid":
         return {"success": True, "message": "ignored"}
 
+    logging.info(f"🔥 WEBHOOK: {invoice_id} - {status}")
+
     # =========================
-    # REDIS IDEMPOTENCY LOCK
+    # IDEMPOTENCY LOCK (SAFE)
     # =========================
     redis_key = f"webhook:processed:{invoice_id}"
+
     if await redis_client.get(redis_key):
         return {"success": True, "message": "already processed"}
 
-    await redis_client.set(redis_key, "1", ex=86400)
+    await redis_client.set(redis_key, "1", ex=86400, nx=True)
 
     pool = await get_pool()
 
@@ -66,11 +63,7 @@ async def bayargg_webhook(request: Request):
     # FILE PAYMENT
     # =====================================================
     purchase = await pool.fetchrow(
-        """
-        SELECT *
-        FROM file_purchases
-        WHERE payment_id=$1
-        """,
+        "SELECT * FROM file_purchases WHERE payment_id=$1",
         invoice_id
     )
 
@@ -89,27 +82,24 @@ async def bayargg_webhook(request: Request):
             invoice_id
         )
 
-        # CLEAN REDIS
         await redis_client.delete(f"invoice:{invoice_id}")
-        await redis_client.set(f"invoice:{invoice_id}", "paid", ex=3600)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📂 OPEN FILE",
+                    callback_data=f"page:{purchase['file_code']}:1"
+                )
+            ]
+        ])
 
         try:
-            kb = {
-                "inline_keyboard": [[
-                    {
-                        "text": "📂 OPEN FILE",
-                        "callback_data": f"page:{purchase['file_code']}:1"
-                    }
-                ]]
-            }
-
             await bot.send_message(
                 purchase["user_id"],
                 "✅ <b>Pembayaran berhasil</b>",
                 parse_mode="HTML",
                 reply_markup=kb
             )
-
         except Exception:
             logging.exception("file notify failed")
 
