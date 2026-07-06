@@ -39,10 +39,16 @@ async def webhook(request: Request):
         return {"success": False, "message": "invalid json"}
 
     invoice_id = data.get("invoice_id")
-    status = str(data.get("status", "")).lower()
+    status = str(data.get("status", "")).strip().lower()
 
     if not invoice_id:
         return {"success": False, "message": "missing invoice"}
+
+    logging.info(
+        "BayarGG webhook | invoice=%s | status=%s",
+        invoice_id,
+        status
+    )
 
     if status != "paid":
         return {"success": True, "message": "ignored"}
@@ -50,18 +56,28 @@ async def webhook(request: Request):
     redis_key = f"webhook:bayargg:{invoice_id}"
 
     try:
-        if await redis_client.get(redis_key):
-            return {"success": True, "message": "already processed"}
+        locked = await redis_client.set(
+            redis_key,
+            "1",
+            ex=86400,
+            nx=True
+        )
 
-        await redis_client.set(redis_key, "1", ex=86400)
+        if not locked:
+            return {
+                "success": True,
+                "message": "already processed"
+            }
+
     except Exception:
-        pass
+        logging.exception("Redis lock failed")
 
     pool = await get_pool()
 
     # =========================
     # CEK VIP PAYMENT
     # =========================
+
     vip_tx = await pool.fetchrow(
         """
         SELECT *
@@ -82,9 +98,11 @@ async def webhook(request: Request):
         await pool.execute(
             """
             UPDATE payments
-            SET status='paid',
+            SET
+                status='paid',
                 updated_at=NOW()
             WHERE invoice_id=$1
+              AND status!='paid'
             """,
             invoice_id
         )
@@ -156,6 +174,7 @@ async def webhook(request: Request):
     # =========================
     # CEK FILE PAYMENT
     # =========================
+
     file_tx = await pool.fetchrow(
         """
         SELECT
@@ -171,6 +190,11 @@ async def webhook(request: Request):
     )
 
     if not file_tx:
+        logging.warning(
+            "Invoice %s tidak ditemukan",
+            invoice_id
+        )
+
         return {
             "success": False,
             "message": "transaction not found"
@@ -185,7 +209,8 @@ async def webhook(request: Request):
     updated = await pool.execute(
         """
         UPDATE file_purchases
-        SET status='paid',
+        SET
+            status='paid',
             paid_at=NOW()
         WHERE payment_id=$1
           AND status='pending'
@@ -235,6 +260,11 @@ async def webhook(request: Request):
         )
     except Exception:
         logging.exception("admin notify failed")
+
+    logging.info(
+        "Invoice %s processed successfully",
+        invoice_id
+    )
 
     return {
         "success": True
