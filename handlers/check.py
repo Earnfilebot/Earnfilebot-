@@ -62,6 +62,11 @@ async def check_payment(call: CallbackQuery):
     # =========================
     # SUDAH BAYAR TAPI BELUM DIPROSES WEBHOOK
     # =========================
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+
     return await call.answer(
         "⏳ Pembayaran sudah diterima.\n"
         "Sedang diproses otomatis oleh server (webhook)...",
