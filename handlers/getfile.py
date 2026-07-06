@@ -67,7 +67,6 @@ async def receive_code(message: Message, state: FSMContext):
     text = message.text.strip()
     code = None
 
-    # Cari dari link start
     m = re.search(
         r"getFile_([A-Za-z0-9_-]+)",
         text,
@@ -76,7 +75,6 @@ async def receive_code(message: Message, state: FSMContext):
     if m:
         code = m.group(1)
 
-    # Cari dari "Code : xxx"
     if not code:
         m = re.search(
             r"code\s*[:：]\s*([A-Za-z0-9_-]+)",
@@ -86,7 +84,6 @@ async def receive_code(message: Message, state: FSMContext):
         if m:
             code = m.group(1)
 
-    # Cari kode langsung di dalam teks
     if not code:
         m = re.search(
             r"(DecoderFileBot[A-Za-z0-9_-]+)",
@@ -95,7 +92,6 @@ async def receive_code(message: Message, state: FSMContext):
         if m:
             code = m.group(1)
 
-    # Kalau tetap tidak ketemu, anggap seluruh pesan adalah kode
     if not code:
         code = text
 
@@ -111,9 +107,6 @@ async def receive_code(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # =========================
-    # MEDIA
-    # =========================
     media = safe_json(file.get("media"))
 
     if not media:
@@ -121,6 +114,53 @@ async def receive_code(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    # =========================
+    # FILE PAID
+    # =========================
+    is_paid = file.get("is_paid", False)
+    price = file.get("price", 0)
+
+    vip = await pool.fetchval(
+        """
+        SELECT 1
+        FROM users
+        WHERE telegram_id=$1
+          AND vip=TRUE
+          AND vip_until > NOW()
+        """,
+        message.from_user.id
+    )
+
+    owner = message.from_user.id == file["owner_id"]
+
+    if is_paid and not vip and not owner:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"💳 Bayar Rp {price:,}".replace(",", "."),
+                        callback_data=f"buyfile:{code}"
+                    )
+                ]
+            ]
+        )
+
+        await message.answer(
+            (
+                "🔒 FILE BERBAYAR\n\n"
+                f"🔑 CODE : {code}\n"
+                f"💰 Harga : Rp {price:,}\n\n"
+                "Silakan beli file terlebih dahulu."
+            ).replace(",", "."),
+            reply_markup=keyboard
+        )
+
+        await state.clear()
+        return
+
+    # =========================
+    # FILE GRATIS / VIP / OWNER
+    # =========================
     first = get_first_media(media)
 
     if not first or not first.get("file_id"):
@@ -131,16 +171,10 @@ async def receive_code(message: Message, state: FSMContext):
     fid = first["file_id"]
     ftype = (first.get("type") or "document").lower()
 
-    # =========================
-    # SHARE MODE
-    # =========================
     share_media = file.get("share_media", True)
     share_status = "PUBLIC" if share_media else "PRIVATE"
     protect = not share_media
 
-    # =========================
-    # BUTTON
-    # =========================
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
