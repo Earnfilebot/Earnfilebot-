@@ -46,8 +46,8 @@ class BayarGG:
             payload["customer_phone"] = customer_phone
 
         try:
-            logging.info("========== BAYARGG REQUEST ==========")
-            logging.info(json.dumps(payload, indent=2, ensure_ascii=False))
+            logging.error("========== BAYARGG REQUEST ==========")
+            logging.error(json.dumps(payload, indent=2, ensure_ascii=False))
 
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
@@ -56,8 +56,8 @@ class BayarGG:
                     json=payload
                 )
 
-            logging.info("STATUS :", response.status_code)
-            logging.info("BODY   :", response.text)
+            logging.error("STATUS :", response.status_code)
+            logging.error("BODY   :", response.text)
 
             response.raise_for_status()
             data = response.json()
@@ -72,7 +72,7 @@ class BayarGG:
             return data.get("data", data)
 
         except Exception as e:
-            logging.info("❌ CREATE PAYMENT ERROR:", e)
+            logging.error("❌ CREATE PAYMENT ERROR:", e)
             return None
 
     @staticmethod
