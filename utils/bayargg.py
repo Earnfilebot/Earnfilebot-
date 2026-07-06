@@ -1,6 +1,5 @@
 import httpx
 import json
-
 from config import BAYARGG_API_KEY
 
 BASE_URL = "https://www.bayar.gg/api"
@@ -44,38 +43,35 @@ class BayarGG:
         if customer_phone:
             payload["customer_phone"] = customer_phone
 
-        print("========== BAYARGG REQUEST ==========")
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-        print("====================================")
+        try:
+            print("========== BAYARGG REQUEST ==========")
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"{BASE_URL}/create-payment.php",
-                headers=headers,
-                json=payload
-            )
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{BASE_URL}/create-payment.php",
+                    headers=headers,
+                    json=payload
+                )
 
-        print("========== BAYARGG HTTP ==========")
-        print("STATUS :", response.status_code)
-        print("BODY   :", response.text)
-        print("==================================")
+            print("STATUS :", response.status_code)
+            print("BODY   :", response.text)
 
-        response.raise_for_status()
+            response.raise_for_status()
+            data = response.json()
 
-        data = response.json()
+            if not data.get("success"):
+                raise Exception(
+                    data.get("error")
+                    or data.get("message")
+                    or str(data)
+                )
 
-        print("========== BAYARGG RESPONSE ==========")
-        print(json.dumps(data, indent=2, ensure_ascii=False))
-        print("=====================================")
+            return data.get("data", data)
 
-        if not data.get("success"):
-            raise Exception(
-                data.get("error")
-                or data.get("message")
-                or str(data)
-            )
-
-        return data["data"]
+        except Exception as e:
+            print("❌ CREATE PAYMENT ERROR:", e)
+            return None
 
     @staticmethod
     async def check_payment(invoice_id: str):
@@ -84,27 +80,29 @@ class BayarGG:
             "X-API-Key": BAYARGG_API_KEY
         }
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(
-                f"{BASE_URL}/check-payment.php",
-                headers=headers,
-                params={
-                    "invoice": invoice_id
-                }
-            )
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(
+                    f"{BASE_URL}/check-payment.php",
+                    headers=headers,
+                    params={"invoice": invoice_id}
+                )
 
-        print("CHECK STATUS :", response.status_code)
-        print("CHECK BODY   :", response.text)
+            print("CHECK STATUS :", response.status_code)
+            print("CHECK BODY   :", response.text)
 
-        response.raise_for_status()
+            response.raise_for_status()
+            data = response.json()
 
-        data = response.json()
+            if not data.get("success"):
+                raise Exception(
+                    data.get("error")
+                    or data.get("message")
+                    or str(data)
+                )
 
-        if not data.get("success"):
-            raise Exception(
-                data.get("error")
-                or data.get("message")
-                or str(data)
-            )
+            return data.get("data", data)
 
-        return data
+        except Exception as e:
+            print("❌ CHECK PAYMENT ERROR:", e)
+            return None
