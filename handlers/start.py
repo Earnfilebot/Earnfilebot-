@@ -95,19 +95,22 @@ async def start_cmd(message: Message, state: FSMContext):
                     await message.answer_photo(
                         fid,
                         caption=caption,
-                        reply_markup=keyboard
+                        reply_markup=keyboard,
+                        protect_content=protect
                     )
                 elif ftype == "video":
                     await message.answer_video(
                         fid,
                         caption=caption,
-                        reply_markup=keyboard
+                        reply_markup=keyboard,
+                        protect_content=protect
                     )
                 else:
                     await message.answer_document(
                         fid,
                         caption=caption,
-                        reply_markup=keyboard
+                        reply_markup=keyboard,
+                        protect_content=protect
                     )
             except Exception as e:
                 await message.answer(
