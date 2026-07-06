@@ -25,14 +25,18 @@ router = Router()
 async def start_cmd(message: Message, state: FSMContext):
     await state.clear()
     args = message.text.split(maxsplit=1)
+
     # =========================
     # HANDLE DEEP LINK FILE
     # =========================
     if len(args) > 1:
         payload = args[1]
+
         if payload.startswith("getFile_"):
             code = payload.replace("getFile_", "")
+
             pool = await get_pool()
+
             file = await pool.fetchrow(
                 """
                 SELECT
@@ -47,23 +51,35 @@ async def start_cmd(message: Message, state: FSMContext):
                 """,
                 code
             )
+
             if not file:
                 return await message.answer("❌ File tidak ditemukan")
+
             media = json.loads(file["media"])
+
             if not media:
                 return await message.answer("❌ File kosong")
+
             is_paid = file["is_paid"]
             price = file["price"] or 0
-            share_media = file.get("share_media", True)
+            share_media = file["share_media"]
             protect = not share_media
+
             mode = (
                 f"💰 Paid • Rp {price:,}".replace(",", ".")
                 if is_paid
                 else "🆓 Free"
             )
-            first = media[0]
-            fid = first["file_id"]
-            ftype = first.get("type", "document")
+
+            caption = (
+                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
+                f"🔑 CODE : {code}\n"
+                f"📦 FILE : {len(media)}\n"
+                f"📂 MODE : {mode}\n"
+                "━━━━━━━━━━━━━━"
+            )
+
+            # FILE BERBAYAR
             if is_paid:
                 keyboard = InlineKeyboardMarkup(
                     inline_keyboard=[
@@ -75,24 +91,29 @@ async def start_cmd(message: Message, state: FSMContext):
                         ]
                     ]
                 )
-            else:
-                keyboard = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="📂 OPEN PAGE",
-                                callback_data=f"page:{code}:1"
-                            )
-                        ]
-                    ]
+
+                await message.answer(
+                    caption,
+                    reply_markup=keyboard
                 )
-            caption = (
-                "𝗘𝗔𝗥𝗡𝗙𝗜𝗟𝗘𝗕𝗢𝗫\n\n"
-                f"🔑 CODE : {code}\n"
-                f"📦 FILE : {len(media)}\n"
-                f"📂 MODE : {mode}\n"
-                "━━━━━━━━━━━━━━"
+                return
+
+            # FILE GRATIS
+            first = media[0]
+            fid = first["file_id"]
+            ftype = first.get("type", "document")
+
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="📂 OPEN PAGE",
+                            callback_data=f"page:{code}:1"
+                        )
+                    ]
+                ]
             )
+
             try:
                 if ftype == "photo":
                     await message.answer_photo(
@@ -101,6 +122,7 @@ async def start_cmd(message: Message, state: FSMContext):
                         reply_markup=keyboard,
                         protect_content=protect
                     )
+
                 elif ftype == "video":
                     await message.answer_video(
                         fid,
@@ -108,6 +130,7 @@ async def start_cmd(message: Message, state: FSMContext):
                         reply_markup=keyboard,
                         protect_content=protect
                     )
+
                 else:
                     await message.answer_document(
                         fid,
@@ -115,18 +138,22 @@ async def start_cmd(message: Message, state: FSMContext):
                         reply_markup=keyboard,
                         protect_content=protect
                     )
+
             except Exception as e:
                 await message.answer(
                     f"❌ ERROR MEDIA\n\n<code>{e}</code>",
                     parse_mode="HTML"
                 )
+
             return
+
     # =========================
     # NORMAL START
     # =========================
     user_id = message.from_user.id
     username = message.from_user.username or "unknown"
     loading = await message.answer("⚡ Loading...")
+
     try:
         await process_start(
             message,
