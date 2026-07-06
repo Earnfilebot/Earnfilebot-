@@ -67,28 +67,17 @@ async def receive_code(message: Message, state: FSMContext):
     text = message.text.strip()
     code = None
 
-    m = re.search(
-        r"getFile_([A-Za-z0-9_-]+)",
-        text,
-        re.IGNORECASE
-    )
+    m = re.search(r"getFile_([A-Za-z0-9_-]+)", text, re.IGNORECASE)
     if m:
         code = m.group(1)
 
     if not code:
-        m = re.search(
-            r"code\s*[:：]\s*([A-Za-z0-9_-]+)",
-            text,
-            re.IGNORECASE
-        )
+        m = re.search(r"code\s*[:：]\s*([A-Za-z0-9_-]+)", text, re.IGNORECASE)
         if m:
             code = m.group(1)
 
     if not code:
-        m = re.search(
-            r"(DecoderFileBot[A-Za-z0-9_-]+)",
-            text
-        )
+        m = re.search(r"(DecoderFileBot[A-Za-z0-9_-]+)", text)
         if m:
             code = m.group(1)
 
@@ -115,10 +104,10 @@ async def receive_code(message: Message, state: FSMContext):
         return
 
     # =========================
-    # FILE PAID
+    # FILE PAID CHECK
     # =========================
     is_paid = file.get("is_paid", False)
-    price = file.get("price", 0)
+    price = file.get("price") or 0
 
     vip = await pool.fetchval(
         """
@@ -133,33 +122,51 @@ async def receive_code(message: Message, state: FSMContext):
 
     owner = message.from_user.id == file["owner_id"]
 
-    if is_paid and not vip and not owner:
+    access = await pool.fetchval(
+        """
+        SELECT 1
+        FROM file_purchases
+        WHERE user_id=$1
+          AND file_code=$2
+          AND status='paid'
+        """,
+        message.from_user.id,
+        code
+    )
+
+    has_access = bool(vip or owner or access)
+
+    # =========================
+    # BLOCK PAID FILE
+    # =========================
+    if is_paid and not has_access:
+
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=f"💳 Bayar Rp {price:,}".replace(",", "."),
-                        callback_data=f"buyfile:{code}"
+                        text=f"💳 BAYAR Rp {price:,}".replace(",", "."),
+                        callback_data=f"pay:{code}"
                     )
                 ]
             ]
         )
 
-        await message.answer(
-            (
-                "🔒 FILE BERBAYAR\n\n"
-                f"🔑 CODE : {code}\n"
-                f"💰 Harga : Rp {price:,}\n\n"
-                "Silakan beli file terlebih dahulu."
-            ).replace(",", "."),
-            reply_markup=keyboard
-        )
+        text = (
+            "🔒 FILE BERBAYAR\n\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔑 CODE  : {code}\n\n"
+            f"💰 HARGA : Rp {price:,}\n\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "⚠️ Silakan lakukan pembayaran untuk membuka file."
+        ).replace(",", ".")
 
+        await message.answer(text, reply_markup=keyboard)
         await state.clear()
         return
 
     # =========================
-    # FILE GRATIS / VIP / OWNER
+    # FREE / VIP / OWNER ACCESS
     # =========================
     first = get_first_media(media)
 
@@ -195,28 +202,13 @@ async def receive_code(message: Message, state: FSMContext):
 
     try:
         if ftype == "photo":
-            await message.answer_photo(
-                fid,
-                caption=caption,
-                reply_markup=keyboard,
-                protect_content=protect
-            )
+            await message.answer_photo(fid, caption=caption, reply_markup=keyboard, protect_content=protect)
 
         elif ftype == "video":
-            await message.answer_video(
-                fid,
-                caption=caption,
-                reply_markup=keyboard,
-                protect_content=protect
-            )
+            await message.answer_video(fid, caption=caption, reply_markup=keyboard, protect_content=protect)
 
         else:
-            await message.answer_document(
-                fid,
-                caption=caption,
-                reply_markup=keyboard,
-                protect_content=protect
-            )
+            await message.answer_document(fid, caption=caption, reply_markup=keyboard, protect_content=protect)
 
     except Exception as e:
         await message.answer(f"❌ MEDIA ERROR:\n{e}")
