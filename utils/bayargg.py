@@ -1,8 +1,11 @@
-import logging
-import httpx
 import json
+import logging
+
+import httpx
 
 from config import BAYARGG_API_KEY
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.bayar.gg/api"
 
@@ -46,8 +49,14 @@ class BayarGG:
             payload["customer_phone"] = customer_phone
 
         try:
-            logging.error("========== BAYARGG REQUEST ==========")
-            logging.error(json.dumps(payload, indent=2, ensure_ascii=False))
+            logger.info("BayarGG create payment request")
+            logger.debug(
+                json.dumps(
+                    payload,
+                    indent=2,
+                    ensure_ascii=False
+                )
+            )
 
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
@@ -56,10 +65,18 @@ class BayarGG:
                     json=payload
                 )
 
-            logging.error(f"STATUS : {response.status_code}")
-            logging.error(f"BODY   : {response.text}")
+            logger.info(
+                "Create payment status: %s",
+                response.status_code
+            )
+
+            logger.debug(
+                "Create payment body: %s",
+                response.text
+            )
 
             response.raise_for_status()
+
             data = response.json()
 
             if not data.get("success"):
@@ -71,8 +88,8 @@ class BayarGG:
 
             return data.get("data", data)
 
-        except Exception as e:
-            logging.exception("❌ CREATE PAYMENT ERROR")
+        except Exception:
+            logger.exception("Create payment failed")
             return None
 
     @staticmethod
@@ -87,13 +104,23 @@ class BayarGG:
                 response = await client.get(
                     f"{BASE_URL}/check-payment.php",
                     headers=headers,
-                    params={"invoice": invoice_id}
+                    params={
+                        "invoice": invoice_id
+                    }
                 )
 
-            print("CHECK STATUS :", response.status_code)
-            print("CHECK BODY   :", response.text)
+            logger.info(
+                "Check payment status: %s",
+                response.status_code
+            )
+
+            logger.debug(
+                "Check payment body: %s",
+                response.text
+            )
 
             response.raise_for_status()
+
             data = response.json()
 
             if not data.get("success"):
@@ -105,6 +132,9 @@ class BayarGG:
 
             return data.get("data", data)
 
-        except Exception as e:
-            print("❌ CHECK PAYMENT ERROR:", e)
+        except Exception:
+            logger.exception(
+                "Check payment failed | invoice=%s",
+                invoice_id
+            )
             return None
