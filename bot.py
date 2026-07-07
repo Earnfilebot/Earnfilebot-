@@ -1,5 +1,3 @@
-import asyncio
-
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
@@ -67,25 +65,3 @@ dp.include_router(account_withdraw_router)
 dp.include_router(withdraw_router)
 dp.include_router(admin_router)
 dp.include_router(notify_router)
-
-# =========================
-# MAIN START
-# =========================
-async def main():
-    print("🚀 Bot started...")
-
-    # 🔥 jalankan scheduler di background
-    asyncio.create_task(scheduler_loop(bot))
-
-    # start bot
-    await dp.start_polling(bot)
-
-
-# =========================
-# RUN
-# =========================
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("❌ Bot stopped")
