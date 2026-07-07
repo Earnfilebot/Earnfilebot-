@@ -469,8 +469,13 @@ async def withdraw_account_detail(call: CallbackQuery):
         )
 
     kb.button(
+        text="✏️ Edit Nama",
+        callback_data=f"withdraw_edit:{account_id}"
+    )
+
+    kb.button(
         text="🗑 Hapus Rekening",
-        callback_data=f"withdraw_delete:{account_id}"
+        callback_data=f"withdraw_delete_confirm:{account_id}"
     )
 
     kb.button(
@@ -633,3 +638,99 @@ async def withdraw_delete(call: CallbackQuery):
 
     await withdraw_accounts(call)
     
+@router.callback_query(F.data.startswith("withdraw_delete_confirm:"))
+async def withdraw_delete_confirm(call: CallbackQuery):
+
+    account_id = int(call.data.split(":")[1])
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="✅ Ya, Hapus",
+        callback_data=f"withdraw_delete:{account_id}"
+    )
+
+    kb.button(
+        text="❌ Batal",
+        callback_data=f"withdraw_account_detail:{account_id}"
+    )
+
+    kb.adjust(1)
+
+    await call.message.edit_text(
+        (
+            "⚠️ <b>Hapus Rekening</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "Apakah kamu yakin ingin menghapus rekening ini?\n\n"
+            "Tindakan ini tidak dapat dibatalkan."
+        ),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+
+@router.callback_query(F.data.startswith("withdraw_edit:"))
+async def withdraw_edit(
+    call: CallbackQuery,
+    state: FSMContext
+):
+
+    account_id = int(call.data.split(":")[1])
+
+    await state.update_data(
+        edit_account_id=account_id
+    )
+
+    await state.set_state(
+        WithdrawState.edit_account_name
+    )
+
+    await call.message.edit_text(
+        (
+            "✏️ <b>EDIT NAMA PEMILIK</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "Silakan kirim nama pemilik yang baru."
+        ),
+        parse_mode="HTML"
+    )
+
+    await call.answer()
+
+@router.message(WithdrawState.edit_account_name)
+async def save_edit_account_name(
+    message: Message,
+    state: FSMContext
+):
+
+    account_name = message.text.strip()
+
+    if len(account_name) < 3:
+        return await message.answer(
+            "❌ Nama terlalu pendek."
+        )
+
+    data = await state.get_data()
+
+    pool = await get_pool()
+
+    await pool.execute(
+        """
+        UPDATE user_withdraw_accounts
+        SET
+            account_name=$1,
+            updated_at=NOW()
+        WHERE
+            id=$2
+            AND user_id=$3
+        """,
+        account_name,
+        data["edit_account_id"],
+        message.from_user.id
+    )
+
+    await state.clear()
+
+    await message.answer(
+        "✅ Nama rekening berhasil diperbarui."
+    )
