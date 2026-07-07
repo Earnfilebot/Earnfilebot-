@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-PAY_LOCK_TTL = 10
+PAY_LOCK_TTL = 30
 INVOICE_TTL = 3600
 
 
@@ -31,14 +31,9 @@ async def pay_file(call: CallbackQuery):
     )
 
     await call.answer()
-    
+
     user_id = call.from_user.id
     code = call.data.split(":")[1]
-
-    try:
-        await call.message.delete()
-    except Exception:
-        pass
 
     loading = await call.message.answer(
         "⏳ <b>Membuat QRIS...</b>\n\nMohon tunggu sebentar.",
@@ -234,6 +229,13 @@ async def pay_file(call: CallbackQuery):
         qr.save(buf, format="PNG")
         buf.seek(0)
 
+        if not buf.getbuffer().nbytes:
+            logger.error("QR buffer kosong")
+            return await call.answer(
+                "❌ QR gagal dibuat",
+                show_alert=True
+            )
+
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -294,6 +296,11 @@ async def pay_file(call: CallbackQuery):
             msg.chat.id,
             msg.message_id
         )
+
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
 
     except Exception:
         logger.exception(
