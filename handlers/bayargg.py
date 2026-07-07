@@ -286,11 +286,10 @@ async def bayargg_webhook(request: Request):
                     await bot.send_message(
                         CHANNEL_ID,
                         (
-                            "🔥 <b>FILE TERJUAL</b>\n\n"
+                            "✅ <b>SOLD OUT FILE</b>\n\n"
                             f"📂 File : <code>{purchase['file_code']}</code>\n"
                             f"👤 User : <code>{purchase['user_id']}</code>\n"
                             f"💰 Harga : Rp {file['price']:,}\n"
-                            f"💵 Owner : Rp {income:,}"
                         ).replace(",", "."),
                         parse_mode="HTML"
                     )
