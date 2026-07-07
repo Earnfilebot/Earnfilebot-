@@ -1,13 +1,12 @@
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from datetime import datetime
+import pytz
 
 from database import get_pool
 from config import ADMIN_IDS
-
-from datetime import datetime
-import pytz
 
 
 router = Router()
@@ -17,17 +16,15 @@ router = Router()
 # ADMIN CHECK
 # =========================
 
-def is_admin(user_id: int) -> bool:
+def is_admin(user_id:int):
     return user_id in ADMIN_IDS
 
 
-
 # =========================
-# RUPIAH FORMAT
+# RUPIAH
 # =========================
 
 def rupiah(value):
-
     try:
         value = int(value or 0)
     except:
@@ -38,10 +35,160 @@ def rupiah(value):
 
 
 # =========================
-# ADMIN KEYBOARD
+# SAFE COUNT
 # =========================
 
-def admin_keyboard():
+async def count_safe(pool, table):
+
+    try:
+        return await pool.fetchval(
+            f"SELECT COUNT(*) FROM {table}"
+        ) or 0
+
+    except Exception:
+        return 0
+
+
+
+async def sum_safe(pool, column, table):
+
+    try:
+        return await pool.fetchval(
+            f"""
+            SELECT COALESCE(SUM({column}),0)
+            FROM {table}
+            """
+        ) or 0
+
+    except Exception:
+        return 0
+
+
+
+# =========================
+# DASHBOARD TEXT
+# =========================
+
+async def dashboard_text():
+
+    pool = await get_pool()
+
+
+    users = await count_safe(
+        pool,
+        "users"
+    )
+
+
+    files = await count_safe(
+        pool,
+        "codes"
+    )
+
+
+    media = await count_safe(
+        pool,
+        "medias"
+    )
+
+
+    balance = await sum_safe(
+        pool,
+        "balance",
+        "users"
+    )
+
+
+    revenue = await sum_safe(
+        pool,
+        "amount",
+        "payments"
+    )
+
+
+    pending_payment = 0
+    paid_payment = 0
+    failed_payment = 0
+
+
+    try:
+
+        pending_payment = await pool.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM payments
+            WHERE status='pending'
+            """
+        ) or 0
+
+
+        paid_payment = await pool.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM payments
+            WHERE status='paid'
+            """
+        ) or 0
+
+
+        failed_payment = await pool.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM payments
+            WHERE status='failed'
+            """
+        ) or 0
+
+
+    except:
+        pass
+
+
+
+    now = datetime.now(
+        pytz.timezone("Asia/Jakarta")
+    ).strftime(
+        "%d-%m-%Y %H:%M WIB"
+    )
+
+
+    return (
+        "🛠 <b>ADMIN PANEL</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "📊 <b>SYSTEM</b>\n\n"
+
+        f"👤 User     : {users}\n"
+        f"📂 Files    : {files}\n"
+        f"🖼 Media    : {media}\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "💰 <b>FINANCE</b>\n\n"
+
+        f"👛 Balance  : {rupiah(balance)}\n"
+        f"💵 Revenue  : {rupiah(revenue)}\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        "💳 <b>PAYMENT</b>\n"
+
+        f"🟡 Pending : {pending_payment}\n"
+        f"🟢 Paid    : {paid_payment}\n"
+        f"🔴 Failed  : {failed_payment}\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        f"🕒 Update : {now}"
+    )
+
+
+
+# =========================
+# BUTTON
+# =========================
+
+def dashboard_keyboard():
 
     kb = InlineKeyboardBuilder()
 
@@ -56,35 +203,36 @@ def admin_keyboard():
         callback_data="admin_files"
     )
 
-    kb.button(
-        text="📢 Broadcast",
-        callback_data="admin_broadcast"
-    )
 
     kb.button(
         text="💳 Payment",
-        callback_data="admin_payment"
+        callback_data="admin_payments"
     )
+
 
     kb.button(
         text="🏧 Withdraw",
         callback_data="admin_withdraw"
     )
 
+
     kb.button(
         text="💰 Balance",
         callback_data="admin_balance"
     )
 
-    kb.button(
-        text="📊 Statistik",
-        callback_data="admin_stats"
-    )
 
     kb.button(
-        text="📝 Logs",
+        text="📢 Broadcast",
+        callback_data="admin_broadcast"
+    )
+
+
+    kb.button(
+        text="📜 Logs",
         callback_data="admin_logs"
     )
+
 
     kb.button(
         text="⚙️ Settings",
@@ -100,80 +248,17 @@ def admin_keyboard():
 
 
 # =========================
-# DASHBOARD TEXT
-# =========================
-
-async def dashboard_text():
-
-    pool = await get_pool()
-
-
-    users = await pool.fetchval(
-        """
-        SELECT COUNT(*)
-        FROM users
-        """
-    ) or 0
-
-
-    files = await pool.fetchval(
-        """
-        SELECT COUNT(*)
-        FROM codes
-        """
-    ) or 0
-
-
-    media = await pool.fetchval(
-        """
-        SELECT COUNT(*)
-        FROM medias
-        """
-    ) or 0
-
-
-
-    tz = pytz.timezone(
-        "Asia/Jakarta"
-    )
-
-    update = datetime.now(tz).strftime(
-        "%d-%m-%Y %H:%M"
-    )
-
-
-    return f"""
-🛠 <b>ADMIN PANEL</b>
-━━━━━━━━━━━━━━━━━━
-
-📊 <b>SYSTEM</b>
-
-👤 Users  : {users}
-📂 Files  : {files}
-🖼 Media  : {media}
-
-━━━━━━━━━━━━━━━━━━
-
-⚡ Status : Online
-
-🕒 Update : {update} WIB
-"""
-
-
-
-# =========================
-# COMMAND /ADMIN
+# /admin COMMAND
 # =========================
 
 @router.message(Command("admin"))
-async def admin_command(
-    message: Message
-):
+async def admin_command(message:Message):
 
-    if not is_admin(
-        message.from_user.id
-    ):
-        return
+    if not is_admin(message.from_user.id):
+
+        return await message.answer(
+            "❌ Tidak punya akses"
+        )
 
 
     text = await dashboard_text()
@@ -181,40 +266,27 @@ async def admin_command(
 
     await message.answer(
         text,
-        parse_mode="HTML",
-        reply_markup=admin_keyboard()
+        reply_markup=dashboard_keyboard(),
+        parse_mode="HTML"
     )
 
 
 
 # =========================
-# CALLBACK HOME
+# BUTTON HOME
 # =========================
 
-@router.callback_query(
-    lambda c: c.data == "admin_home"
-)
-async def admin_home(
-    call: CallbackQuery
-):
+@router.callback_query(F.data=="admin_home")
+async def admin_home(call:CallbackQuery):
 
-    if not is_admin(
-        call.from_user.id
-    ):
-        return await call.answer(
-            "❌ No Access",
-            show_alert=True
-        )
-
-
-    text = await dashboard_text()
+    if not is_admin(call.from_user.id):
+        return
 
 
     await call.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=admin_keyboard()
+        await dashboard_text(),
+        reply_markup=dashboard_keyboard(),
+        parse_mode="HTML"
     )
-
 
     await call.answer()
