@@ -25,6 +25,11 @@ INVOICE_TTL = 3600
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_file(call: CallbackQuery):
 
+    logger.info(
+        "MASUK PAY FILE | %s",
+        call.data
+    )
+
     await call.answer()
     
     user_id = call.from_user.id
