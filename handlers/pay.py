@@ -31,7 +31,7 @@ async def pay_file(call: CallbackQuery):
         call.data
     )
 
-    await call.answer()
+    await call.answer("⏳ Memproses pembayaran...")
 
     user_id = call.from_user.id
     code = call.data.split(":")[1]
@@ -119,6 +119,11 @@ async def pay_file(call: CallbackQuery):
         # =========================
         # CHECK EXISTING PAYMENT
         # =========================
+        logger.info(
+            "CHECK EXISTING PAYMENT | user=%s file=%s",
+            user_id,
+            code
+        )
         existing = await fetchrow(
             """
             SELECT
@@ -145,12 +150,10 @@ async def pay_file(call: CallbackQuery):
 
 
             if existing["status"] == "pending":
-                return await call.answer(
-                    "⏳ Invoice masih aktif",
-                    show_alert=True
+                logger.info(
+                    "Old pending invoice ignored | %s",
+                    existing["payment_id"]
                 )
-
-
 
         # =========================
         # CREATE PAYMENT
