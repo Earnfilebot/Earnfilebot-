@@ -23,8 +23,6 @@ dp.callback_query.middleware(BanMiddleware())
 # =========================
 # ROUTERS IMPORT
 # =========================
-from handlers import maintenance
-
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
@@ -45,9 +43,6 @@ from handlers.notify import router as notify_router
 # =========================
 # REGISTER ROUTERS
 # =========================
-
-# 🔥 maintenance HARUS paling atas
-dp.include_router(maintenance.router)
 
 dp.include_router(start_router)
 dp.include_router(check_sub_router)
