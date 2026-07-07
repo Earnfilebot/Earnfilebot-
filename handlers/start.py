@@ -127,7 +127,7 @@ async def start_cmd(message: Message, state: FSMContext):
                         [
                             InlineKeyboardButton(
                                 text="💎 Upgrade VIP",
-                                callback_data="vip_menu"
+                                callback_data="vvip"
                             )
                         ]
                     ]
