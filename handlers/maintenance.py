@@ -2,7 +2,11 @@ from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineQuery
 from database import get_pool
 
+# ✅ IMPORT LANGSUNG (FIX)
+from handlers.admin.utils import is_admin
+
 router = Router()
+
 
 # =========================
 # GET STATUS
@@ -28,13 +32,11 @@ async def get_maintenance_text():
 # =========================
 @router.message()
 async def block_message(message: Message):
-    from handlers.admin import is_admin  # biar gak circular
-
     if await is_maintenance() and not is_admin(message.from_user.id):
         text = await get_maintenance_text()
 
         try:
-            await message.delete()  # optional: hapus pesan user
+            await message.delete()
         except:
             pass
 
@@ -46,8 +48,6 @@ async def block_message(message: Message):
 # =========================
 @router.callback_query()
 async def block_callback(call: CallbackQuery):
-    from handlers.admin import is_admin
-
     if await is_maintenance() and not is_admin(call.from_user.id):
         text = await get_maintenance_text()
         await call.answer(text, show_alert=True)
@@ -59,8 +59,6 @@ async def block_callback(call: CallbackQuery):
 # =========================
 @router.inline_query()
 async def block_inline(query: InlineQuery):
-    from handlers.admin import is_admin
-
     if await is_maintenance() and not is_admin(query.from_user.id):
         await query.answer(
             results=[],
