@@ -27,6 +27,7 @@ router = APIRouter(
 )
 
 
+
 def secure_compare(a: str, b: str) -> bool:
     return hmac.compare_digest(
         a or "",
@@ -53,27 +54,57 @@ async def bayargg_webhook(request: Request):
     ).hexdigest()
 
 
+
+    # ==============================
+    # SIGNATURE DEBUG
+    # ==============================
+
     if not secure_compare(
         signature,
         expected
     ):
+
         logger.warning(
             "INVALID WEBHOOK SIGNATURE"
         )
 
+        logger.warning(
+            "HEADERS : %s",
+            dict(request.headers)
+        )
+
+        logger.warning(
+            "BODY : %s",
+            body.decode(
+                errors="ignore"
+            )
+        )
+
+        # sementara lanjut
+        # nanti setelah tahu format asli BayarGG dikunci kembali
+
+
+
+    try:
+
+        data = await request.json()
+
+    except Exception:
+
+        logger.exception(
+            "JSON WEBHOOK ERROR"
+        )
+
         return {
-            "success":False,
-            "message":"invalid signature"
+            "success":False
         }
 
-
-
-    data = await request.json()
 
 
     invoice_id = data.get(
         "invoice_id"
     )
+
 
     status = (
         data.get("status")
@@ -83,13 +114,15 @@ async def bayargg_webhook(request: Request):
 
 
     logger.info(
-        "WEBHOOK RECEIVED | invoice=%s | status=%s",
+        "WEBHOOK RECEIVED | invoice=%s status=%s",
         invoice_id,
         status
     )
 
 
+
     if not invoice_id:
+
         return {
             "success":False,
             "message":"missing invoice"
@@ -106,13 +139,44 @@ async def bayargg_webhook(request: Request):
 
 
 
+    # ==============================
+    # DUPLICATE PROTECTION
+    # ==============================
+
+    webhook_key = (
+        f"webhook:processed:{invoice_id}"
+    )
+
+
+    if await redis_client.get(
+        webhook_key
+    ):
+
+        logger.info(
+            "WEBHOOK ALREADY PROCESSED %s",
+            invoice_id
+        )
+
+        return {
+            "success":True
+        }
+
+
+    await redis_client.set(
+        webhook_key,
+        "1",
+        ex=86400
+    )
+
+
+
     pool = await get_pool()
 
 
 
-    # =====================================
-    # CHECK FILE PURCHASE
-    # =====================================
+    # =====================================================
+    # FILE PAYMENT
+    # =====================================================
 
     purchase = await pool.fetchrow(
         """
@@ -136,98 +200,73 @@ async def bayargg_webhook(request: Request):
 
 
 
-        if purchase["status"] == "paid":
-
-            logger.info(
-                "FILE ALREADY PAID | %s",
-                invoice_id
-            )
-
-            return {
-                "success":True
-            }
-
-
-
-        # ================================
-        # UPDATE PAYMENT
-        # ================================
-
-        await pool.execute(
-            """
-            UPDATE file_purchases
-            SET
-                status='paid',
-                paid_at=NOW()
-            WHERE payment_id=$1
-            """,
-            invoice_id
-        )
-
-
-
-        # ================================
-        # OWNER SALDO
-        # ================================
-
-        file = await pool.fetchrow(
-            """
-            SELECT
-                owner_id,
-                price
-            FROM files
-            WHERE code=$1
-            """,
-            purchase["file_code"]
-        )
-
-
-        if file:
-
-            income = int(
-                file["price"] * 0.9
-            )
-
+        if purchase["status"] != "paid":
 
             await pool.execute(
                 """
-                UPDATE users
+                UPDATE file_purchases
                 SET
-                    balance = balance + $1,
-                    total_sales = total_sales + 1,
-                    total_income = total_income + $1
-                WHERE telegram_id=$2
+                    status='paid',
+                    paid_at=NOW()
+                WHERE payment_id=$1
                 """,
-                income,
-                file["owner_id"]
-            )
-
-
-            logger.info(
-                "OWNER CREDITED | owner=%s amount=%s",
-                file["owner_id"],
-                income
+                invoice_id
             )
 
 
 
-            try:
+            file = await pool.fetchrow(
+                """
+                SELECT
+                    owner_id,
+                    price
+                FROM files
+                WHERE code=$1
+                """,
+                purchase["file_code"]
+            )
 
-                await bot.send_message(
-                    file["owner_id"],
-                    (
-                        "💰 <b>File Terjual</b>\n\n"
-                        f"📂 {purchase['file_code']}\n"
-                        f"💵 Saldo masuk: Rp {income:,}"
-                    ).replace(",", "."),
-                    parse_mode="HTML"
+
+
+            if file:
+
+
+                income = int(
+                    file["price"] * 0.9
                 )
 
-            except Exception:
 
-                logger.exception(
-                    "OWNER NOTIFY FAILED"
+                await pool.execute(
+                    """
+                    UPDATE users
+                    SET
+                        balance = balance + $1,
+                        total_sales = total_sales + 1,
+                        total_income = total_income + $1
+                    WHERE telegram_id=$2
+                    """,
+                    income,
+                    file["owner_id"]
                 )
+
+
+                try:
+
+                    await bot.send_message(
+                        file["owner_id"],
+                        (
+                            "💰 <b>File Terjual</b>\n\n"
+                            f"📂 File : {purchase['file_code']}\n"
+                            f"💵 Saldo : Rp {income:,}"
+                        ).replace(",", "."),
+                        parse_mode="HTML"
+                    )
+
+                except Exception:
+
+                    logger.exception(
+                        "OWNER NOTIFY FAILED"
+                    )
 
 
 
@@ -237,22 +276,16 @@ async def bayargg_webhook(request: Request):
 
 
 
-        # ================================
-        # SEND FILE
-        # ================================
+        # ==============================
+        # SEND FILE TO BUYER
+        # ==============================
+
+        user_id = purchase["user_id"]
+        code = purchase["file_code"]
+
+
 
         try:
-
-            user_id = purchase["user_id"]
-            code = purchase["file_code"]
-
-
-            logger.info(
-                "SEND FILE START | user=%s code=%s",
-                user_id,
-                code
-            )
-
 
             await bot.send_message(
                 user_id,
@@ -312,10 +345,10 @@ async def bayargg_webhook(request: Request):
 
         except Exception:
 
-
             logger.exception(
                 "SEND FILE FAILED"
             )
+
 
 
         return {
@@ -324,9 +357,11 @@ async def bayargg_webhook(request: Request):
 
 
 
-    # =====================================
+
+
+    # =====================================================
     # VIP PAYMENT
-    # =====================================
+    # =====================================================
 
 
     trx = await pool.fetchrow(
@@ -339,16 +374,20 @@ async def bayargg_webhook(request: Request):
     )
 
 
-    if not trx:
 
-        logger.error(
-            "TRANSACTION NOT FOUND %s",
-            invoice_id
-        )
+    if not trx:
 
         return {
             "success":False,
-            "message":"not found"
+            "message":"transaction not found"
+        }
+
+
+
+    if trx["status"] == "paid":
+
+        return {
+            "success":True
         }
 
 
@@ -383,23 +422,30 @@ async def bayargg_webhook(request: Request):
     )
 
 
-    vip_until = (
 
-        user["vip_until"]
-        + timedelta(
-            days=paket["days"]
-        )
-
-        if user
+    if (
+        user
         and user["vip_until"]
         and user["vip_until"] > now
+    ):
 
-        else
-
-        now + timedelta(
-            days=paket["days"]
+        vip_until = (
+            user["vip_until"]
+            +
+            timedelta(
+                days=paket["days"]
+            )
         )
-    )
+
+    else:
+
+        vip_until = (
+            now
+            +
+            timedelta(
+                days=paket["days"]
+            )
+        )
 
 
 
@@ -446,6 +492,7 @@ async def bayargg_webhook(request: Request):
         )
 
 
+
         await bot.send_message(
             CHANNEL_ID,
             (
@@ -461,6 +508,7 @@ async def bayargg_webhook(request: Request):
         logger.exception(
             "VIP NOTIFY FAILED"
         )
+
 
 
     return {
