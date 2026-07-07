@@ -11,19 +11,17 @@ router = Router()
 # =========================
 # ADMIN CONFIG
 # =========================
-
 ADMIN_IDS = {6847035364}
 
 
-def is_admin(user_id: int):
+def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
 # =========================
 # FORMAT RUPIAH
 # =========================
-
-def rupiah(value):
+def rupiah(value: int) -> str:
     value = value or 0
     return f"Rp {value:,.0f}".replace(",", ".")
 
@@ -31,56 +29,34 @@ def rupiah(value):
 # =========================
 # DASHBOARD MENU
 # =========================
-
 def dashboard_menu():
     kb = InlineKeyboardBuilder()
 
-    kb.button(text="👤 Users", callback_data="admin_users")
-    kb.button(text="📂 Files", callback_data="admin_files")
-    kb.button(text="💳 Payment", callback_data="admin_payment")
-    kb.button(text="🏧 Withdraw", callback_data="admin_withdraw")
-    kb.button(text="💰 Balance", callback_data="admin_balance")
-    kb.button(text="📊 Statistics", callback_data="admin_statistics")
-    kb.button(text="📢 Broadcast", callback_data="admin_broadcast")
-    kb.button(text="⚙ Settings", callback_data="admin_settings")
-    kb.button(text="📝 Logs", callback_data="admin_logs")
-    kb.button(text="🔐 Admin", callback_data="admin_admins")
+    buttons = [
+        ("👤 Users", "admin_users"),
+        ("📂 Files", "admin_files"),
+        ("💳 Payment", "admin_payment"),
+        ("🏧 Withdraw", "admin_withdraw"),
+        ("💰 Balance", "admin_balance"),
+        ("📊 Statistics", "admin_statistics"),
+        ("📢 Broadcast", "admin_broadcast"),
+        ("⚙ Settings", "admin_settings"),
+        ("📝 Logs", "admin_logs"),
+        ("🔐 Admin", "admin_admins"),
+    ]
+
+    for text, data in buttons:
+        kb.button(text=text, callback_data=data)
 
     kb.adjust(2)
     return kb.as_markup()
 
 
 # =========================
-# DASHBOARD TEXT (OPTIMIZED)
+# DASHBOARD DATA
 # =========================
-
-async def get_dashboard_text():
+async def get_dashboard_text() -> str:
     pool = await get_pool()
-
-    results = await asyncio.gather(
-
-        pool.fetchval("SELECT COUNT(*) FROM users"),
-        pool.fetchval("SELECT COUNT(*) FROM files"),
-
-        # FIX: media count dari JSON array
-        pool.fetchval("""
-            SELECT COALESCE(SUM(jsonb_array_length(media::jsonb)),0)
-            FROM files
-        """),
-
-        pool.fetchval("SELECT COALESCE(SUM(balance),0) FROM users"),
-
-        pool.fetchval("SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'"),
-
-        pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='pending'"),
-        pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='paid'"),
-        pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='failed'"),
-
-        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='pending'"),
-        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='processing'"),
-        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='approved'"),
-        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='rejected'"),
-    )
 
     (
         total_users,
@@ -95,7 +71,29 @@ async def get_dashboard_text():
         withdraw_processing,
         withdraw_success,
         withdraw_reject
-    ) = results
+    ) = await asyncio.gather(
+
+        pool.fetchval("SELECT COUNT(*) FROM users"),
+        pool.fetchval("SELECT COUNT(*) FROM files"),
+
+        # hitung total media dari JSON
+        pool.fetchval("""
+            SELECT COALESCE(SUM(jsonb_array_length(media::jsonb)), 0)
+            FROM files
+        """),
+
+        pool.fetchval("SELECT COALESCE(SUM(balance), 0) FROM users"),
+        pool.fetchval("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status='paid'"),
+
+        pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='pending'"),
+        pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='paid'"),
+        pool.fetchval("SELECT COUNT(*) FROM payments WHERE status='failed'"),
+
+        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='pending'"),
+        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='processing'"),
+        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='approved'"),
+        pool.fetchval("SELECT COUNT(*) FROM withdraws WHERE status='rejected'"),
+    )
 
     now = datetime.now().strftime("%d-%m-%Y %H:%M WIB")
 
@@ -134,12 +132,10 @@ async def get_dashboard_text():
 
 
 # =========================
-# /ADMIN
+# /ADMIN COMMAND
 # =========================
-
 @router.message(F.text == "/admin")
 async def admin_dashboard(message: Message):
-
     if not is_admin(message.from_user.id):
         return await message.answer("❌ Kamu bukan admin.")
 
@@ -153,12 +149,10 @@ async def admin_dashboard(message: Message):
 
 
 # =========================
-# ADMIN HOME
+# ADMIN HOME (BUTTON)
 # =========================
-
 @router.callback_query(F.data == "admin_home")
 async def admin_home(call: CallbackQuery):
-
     if not is_admin(call.from_user.id):
         return await call.answer("❌ No access", show_alert=True)
 
