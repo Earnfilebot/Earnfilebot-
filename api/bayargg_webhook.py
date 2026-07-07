@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Request
 
 from bot import bot
-from database import get_pool
+from database import fetchrow, execute
 from utils.redis_client import redis_client
 from config import BAYARGG_SECRET
 
@@ -77,13 +77,11 @@ async def webhook(request: Request):
     except Exception:
         logger.exception("Redis lock failed")
 
-    pool = await get_pool()
-
     # =========================
     # CEK VIP PAYMENT
     # =========================
 
-    vip_tx = await pool.fetchrow(
+    vip_tx = await fetchrow(
         """
         SELECT
             user_id,
@@ -98,7 +96,7 @@ async def webhook(request: Request):
 
     if vip_tx:
 
-        updated = await pool.execute(
+        updated = await execute(
             """
             UPDATE payments
             SET
@@ -130,7 +128,7 @@ async def webhook(request: Request):
 
         days = vip_days.get(paket, 30)
 
-        await pool.execute(
+        await execute(
             """
             UPDATE users
             SET
@@ -191,7 +189,7 @@ async def webhook(request: Request):
     # CEK FILE PAYMENT
     # =========================
 
-    file_tx = await pool.fetchrow(
+    file_tx = await fetchrow(
         """
         SELECT
             user_id,
@@ -222,7 +220,7 @@ async def webhook(request: Request):
             "message": "already paid"
         }
 
-    updated = await pool.execute(
+    updated = await execute(
         """
         UPDATE file_purchases
         SET
@@ -241,7 +239,7 @@ async def webhook(request: Request):
         }
 
     try:
-        updated = await pool.execute(
+        updated = await execute(
             """
             UPDATE users
             SET balance = balance + $1
