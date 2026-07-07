@@ -1,3 +1,7 @@
+import qrcode
+from io import BytesIO
+
+from aiogram.types import BufferedInputFile
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -119,6 +123,8 @@ async def buy_vip(call: CallbackQuery):
 
     payment_url = payment["payment_url"]
 
+    qr_string = payment["qris_string"]
+
 
     try:
         expires_at = datetime.fromisoformat(
@@ -187,8 +193,8 @@ async def buy_vip(call: CallbackQuery):
 
 
     kb.button(
-        text="💳 Bayar Sekarang",
-        url=payment_url
+        text="✅ Check Payment",
+        callback_data=f"checkvip:{invoice_id}"
     )
 
 
@@ -211,13 +217,39 @@ async def buy_vip(call: CallbackQuery):
 
         "⏳ Status : <b>MENUNGGU PEMBAYARAN</b>\n\n"
 
-        "Klik tombol di bawah untuk melakukan pembayaran.\n"
+        "Scan QRIS di bawah untuk melakukan pembayaran.\n"
         "VIP akan aktif otomatis setelah pembayaran berhasil."
     ).replace(",", ".")
 
 
-    await call.message.edit_text(
-        text,
+    # =========================
+    # GENERATE QR
+    # =========================
+
+    qr = qrcode.make(
+        qr_string
+    )
+
+    buf = BytesIO()
+
+    qr.save(
+        buf,
+        format="PNG"
+    )
+
+    buf.seek(0)
+
+
+    # =========================
+    # SEND QR
+    # =========================
+
+    await call.message.answer_photo(
+        BufferedInputFile(
+            buf.getvalue(),
+            filename="vip_qris.png"
+        ),
+        caption=text,
         parse_mode="HTML",
         reply_markup=kb.as_markup()
     )
