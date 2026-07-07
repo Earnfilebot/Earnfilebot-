@@ -316,67 +316,55 @@ async def bayargg_webhook(request: Request):
             )
 
 
-
             # ==========================
-            # SEND FILE
+            # SEND OPEN FILE BUTTON
             # ==========================
 
             try:
 
+                kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="📂 OPEN FILE",
+                                callback_data=f"page:{purchase['file_code']}:1"
+                            )
+                        ]
+                    ]
+                )
+
+
                 await bot.send_message(
                     purchase["user_id"],
-                    "✅ <b>Pembayaran berhasil!</b>\n\n📦 Mengirim file...",
-                    parse_mode="HTML"
+                    (
+                        "✅ <b>Pembayaran berhasil!</b>\n\n"
+                        "━━━━━━━━━━━━━━\n\n"
+                        "📦 <b>File sudah tersedia</b>\n\n"
+                        "Klik tombol di bawah untuk membuka file.\n\n"
+                        "━━━━━━━━━━━━━━"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=kb
                 )
 
 
-                result = await send_page(
-                    bot,
+                logger.info(
+                    "OPEN FILE BUTTON SENT | user=%s file=%s",
                     purchase["user_id"],
-                    purchase["user_id"],
-                    purchase["file_code"],
-                    1
+                    purchase["file_code"]
                 )
-
-
-                if result:
-
-
-                    kb = InlineKeyboardMarkup(
-                        inline_keyboard=[
-                            [
-                                InlineKeyboardButton(
-                                    text="📂 OPEN FILE",
-                                    callback_data=f"page:{purchase['file_code']}:1"
-                                )
-                            ]
-                        ]
-                    )
-
-
-                    await bot.send_message(
-                        purchase["user_id"],
-                        "📦 File berhasil dikirim.",
-                        reply_markup=kb
-                    )
 
 
             except Exception:
 
                 logger.exception(
-                    "SEND FILE ERROR"
+                    "SEND OPEN FILE BUTTON ERROR"
                 )
 
 
-
             return {
-                "success":True
+                "success": True
             }
-
-
-
-
-
         # =================================
         # VIP PAYMENT
         # =================================
