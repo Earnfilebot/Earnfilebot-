@@ -28,3 +28,4 @@ class WithdrawState(StatesGroup):
 
     input_withdraw_amount = State()
     input_instant_amount = State()
+    edit_account_name = State()
