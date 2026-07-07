@@ -22,7 +22,6 @@ from .broadcast import router as broadcast_router
 from .settings import router as settings_router
 from .logs import router as logs_router
 from .admins import router as admins_router
-from .scheduler import scheduler_loop   # ✅ TAMBAH INI
 
 router = Router()
 
