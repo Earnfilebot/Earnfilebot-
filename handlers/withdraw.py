@@ -174,7 +174,7 @@ async def withdraw_create(
     )
 
     await state.set_state(
-        WithdrawState.input_withdraw_amount
+        WithdrawState.input_amount
     )
 
     await call.message.edit_text(
@@ -206,7 +206,7 @@ async def withdraw_create(
 from aiogram.types import Message
 
 
-@router.message(WithdrawState.input_withdraw_amount)
+@router.message(WithdrawState.input_amount)
 async def input_withdraw_amount(
     message: Message,
     state: FSMContext
