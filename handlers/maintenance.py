@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery, InlineQuery
 from database import get_pool
 
 # ✅ IMPORT LANGSUNG (FIX)
-from handlers.admin.admins import is_admin ✅
+from handlers.admin.admins import is_admin
 
 router = Router()
 
