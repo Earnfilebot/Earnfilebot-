@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from bot import bot
 from database import fetchrow, execute
 from utils.redis_client import redis_client
+from handlers.page import send_page
 from config import BAYARGG_SECRET
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
@@ -196,7 +197,9 @@ async def webhook(request: Request):
             owner_id,
             paid_price,
             file_code,
-            status
+            status,
+            qr_message_id,
+            qr_chat_id
         FROM file_purchases
         WHERE payment_id=$1
         """,
@@ -239,6 +242,15 @@ async def webhook(request: Request):
         }
 
     try:
+        if file_tx["qr_message_id"]:
+            await bot.delete_message(
+                chat_id=file_tx["qr_chat_id"],
+                message_id=file_tx["qr_message_id"]
+            )
+    except Exception:
+        logger.exception("Failed delete QR message")
+
+    try:
         updated = await execute(
             """
             UPDATE users
@@ -267,6 +279,43 @@ async def webhook(request: Request):
     except Exception:
         logger.exception("user notify failed")
 
+
+    # =========================
+    # SEND FILE OTOMATIS
+    # =========================
+    try:
+        await send_page(
+            bot=bot,
+            chat_id=file_tx["user_id"],
+            user_id=file_tx["user_id"],
+            code=file_tx["file_code"],
+            page=1
+        )
+        if not sent:
+            raise Exception("send_page returned False")
+
+        logger.info(
+            "File delivered | user=%s | code=%s",
+            file_tx["user_id"],
+            file_tx["file_code"]
+        )
+
+    except Exception:
+        logger.exception(
+            "Failed deliver file | user=%s | code=%s",
+            file_tx["user_id"],
+            file_tx["file_code"]
+        )
+
+        await bot.send_message(
+            file_tx["user_id"],
+            "⚠️ Pembayaran berhasil, tetapi file gagal dikirim otomatis.\nSilakan hubungi admin."
+        )
+
+
+    # =========================
+    # ADMIN NOTIFY
+    # =========================
     try:
         await bot.send_message(
             ADMIN_CHAT_ID,
@@ -279,8 +328,10 @@ async def webhook(request: Request):
             ).replace(",", "."),
             parse_mode="HTML"
         )
+
     except Exception:
         logger.exception("admin notify failed")
+
 
     logger.info(
         "Invoice %s processed successfully",
