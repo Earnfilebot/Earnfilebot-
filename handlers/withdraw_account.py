@@ -325,3 +325,311 @@ async def input_account_name(
         parse_mode="HTML",
         reply_markup=kb.as_markup()
     )
+
+# =========================
+# DAFTAR REKENING
+# =========================
+
+@router.callback_query(F.data == "withdraw_accounts")
+async def withdraw_accounts(call: CallbackQuery):
+
+    pool = await get_pool()
+
+    accounts = await pool.fetch(
+        """
+        SELECT
+            uwa.id,
+            uwa.account_name,
+            uwa.account_number,
+            uwa.is_default,
+            wm.name AS method_name
+        FROM user_withdraw_accounts uwa
+        JOIN withdraw_methods wm
+            ON wm.id = uwa.method_id
+        WHERE uwa.user_id=$1
+        ORDER BY
+            uwa.is_default DESC,
+            uwa.id ASC
+        """,
+        call.from_user.id
+    )
+
+    if not accounts:
+
+        kb = InlineKeyboardBuilder()
+
+        kb.button(
+            text="➕ Tambah Rekening",
+            callback_data="withdraw_add_account"
+        )
+
+        kb.button(
+            text="🔙 Kembali",
+            callback_data="withdraw_account"
+        )
+
+        kb.adjust(1)
+
+        await call.message.edit_text(
+            (
+                "📋 <b>DAFTAR REKENING</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Kamu belum memiliki rekening yang tersimpan."
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
+        )
+
+        return await call.answer()
+
+    kb = InlineKeyboardBuilder()
+
+    text = (
+        "📋 <b>DAFTAR REKENING</b>\n"
+        "━━━━━━━━━━━━━━\n\n"
+    )
+
+    for acc in accounts:
+
+        status = " ⭐ Default" if acc["is_default"] else ""
+
+        text += (
+            f"🏦 <b>{acc['method_name']}</b>{status}\n"
+            f"👤 {acc['account_name']}\n"
+            f"💳 <code>{acc['account_number']}</code>\n\n"
+        )
+
+        kb.button(
+            text=f"⚙️ {acc['method_name']} • {acc['account_number']}",
+            callback_data=f"withdraw_account_detail:{acc['id']}"
+        )
+
+    kb.button(
+        text="➕ Tambah Rekening",
+        callback_data="withdraw_add_account"
+    )
+
+    kb.button(
+        text="🔙 Kembali",
+        callback_data="withdraw_account"
+    )
+
+    kb.adjust(1)
+
+    await call.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+
+# =========================
+# DETAIL REKENING
+# =========================
+
+@router.callback_query(F.data.startswith("withdraw_account_detail:"))
+async def withdraw_account_detail(call: CallbackQuery):
+
+    account_id = int(call.data.split(":")[1])
+
+    pool = await get_pool()
+
+    account = await pool.fetchrow(
+        """
+        SELECT
+            uwa.id,
+            uwa.account_name,
+            uwa.account_number,
+            uwa.is_default,
+            wm.name AS method_name
+        FROM user_withdraw_accounts uwa
+        JOIN withdraw_methods wm
+            ON wm.id = uwa.method_id
+        WHERE
+            uwa.id=$1
+            AND uwa.user_id=$2
+        """,
+        account_id,
+        call.from_user.id
+    )
+
+    if not account:
+        return await call.answer(
+            "Rekening tidak ditemukan.",
+            show_alert=True
+        )
+
+    kb = InlineKeyboardBuilder()
+
+    if not account["is_default"]:
+        kb.button(
+            text="⭐ Jadikan Utama",
+            callback_data=f"withdraw_default:{account_id}"
+        )
+
+    kb.button(
+        text="🗑 Hapus Rekening",
+        callback_data=f"withdraw_delete:{account_id}"
+    )
+
+    kb.button(
+        text="🔙 Kembali",
+        callback_data="withdraw_accounts"
+    )
+
+    kb.adjust(1)
+
+    status = "⭐ Rekening Utama" if account["is_default"] else "-"
+
+    text = (
+        "🏦 <b>DETAIL REKENING</b>\n"
+        "━━━━━━━━━━━━━━\n\n"
+        f"Metode : <b>{account['method_name']}</b>\n"
+        f"Nama : <b>{account['account_name']}</b>\n"
+        f"Nomor : <code>{account['account_number']}</code>\n"
+        f"Status : <b>{status}</b>"
+    )
+
+    await call.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+
+# =========================
+# JADIKAN DEFAULT
+# =========================
+
+@router.callback_query(F.data.startswith("withdraw_default:"))
+async def withdraw_default(call: CallbackQuery):
+
+    account_id = int(call.data.split(":")[1])
+
+    pool = await get_pool()
+
+    account = await pool.fetchrow(
+        """
+        SELECT id
+        FROM user_withdraw_accounts
+        WHERE id=$1
+          AND user_id=$2
+        """,
+        account_id,
+        call.from_user.id
+    )
+
+    if not account:
+        return await call.answer(
+            "Rekening tidak ditemukan.",
+            show_alert=True
+        )
+
+    # Hapus default lama
+    await pool.execute(
+        """
+        UPDATE user_withdraw_accounts
+        SET
+            is_default=FALSE,
+            updated_at=NOW()
+        WHERE user_id=$1
+        """,
+        call.from_user.id
+    )
+
+    # Jadikan rekening ini default
+    await pool.execute(
+        """
+        UPDATE user_withdraw_accounts
+        SET
+            is_default=TRUE,
+            updated_at=NOW()
+        WHERE id=$1
+        """,
+        account_id
+    )
+
+    await call.answer(
+        "✅ Rekening utama berhasil diubah."
+    )
+
+    # Refresh halaman detail
+    call.data = f"withdraw_account_detail:{account_id}"
+    await withdraw_account_detail(call)
+
+# =========================
+# HAPUS REKENING
+# =========================
+
+@router.callback_query(F.data.startswith("withdraw_delete:"))
+async def withdraw_delete(call: CallbackQuery):
+
+    account_id = int(call.data.split(":")[1])
+
+    pool = await get_pool()
+
+    account = await pool.fetchrow(
+        """
+        SELECT
+            id,
+            is_default
+        FROM user_withdraw_accounts
+        WHERE
+            id=$1
+            AND user_id=$2
+        """,
+        account_id,
+        call.from_user.id
+    )
+
+    if not account:
+        return await call.answer(
+            "Rekening tidak ditemukan.",
+            show_alert=True
+        )
+
+    # Hapus rekening
+    await pool.execute(
+        """
+        DELETE FROM user_withdraw_accounts
+        WHERE id=$1
+        """,
+        account_id
+    )
+
+    # Jika yang dihapus rekening utama,
+    # jadikan rekening pertama sebagai default
+    if account["is_default"]:
+
+        new_default = await pool.fetchval(
+            """
+            SELECT id
+            FROM user_withdraw_accounts
+            WHERE user_id=$1
+            ORDER BY id
+            LIMIT 1
+            """,
+            call.from_user.id
+        )
+
+        if new_default:
+
+            await pool.execute(
+                """
+                UPDATE user_withdraw_accounts
+                SET
+                    is_default=TRUE,
+                    updated_at=NOW()
+                WHERE id=$1
+                """,
+                new_default
+            )
+
+    await call.answer(
+        "✅ Rekening berhasil dihapus."
+    )
+
+    await withdraw_accounts(call)
+    
