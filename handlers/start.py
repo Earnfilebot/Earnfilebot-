@@ -105,13 +105,17 @@ async def start_cmd(message: Message, state: FSMContext):
                 f"🔑 CODE : {code}\n"
                 f"📦 FILE : {len(media)}\n"
                 f"📂 MODE : {mode}\n"
-                "━━━━━━━━━━━━━━"
+                "━━━━━━━━━━━━━━\n"
+                "Upgrade VIP atau lanjut pembayaran untuk membuka file."
             )
+
 
             # =========================
             # FILE BERBAYAR
             # =========================
+
             if is_paid and not vip and not owner and not purchased:
+
                 keyboard = InlineKeyboardMarkup(
                     inline_keyboard=[
                         [
@@ -119,22 +123,33 @@ async def start_cmd(message: Message, state: FSMContext):
                                 text=f"💳 Bayar Rp {price:,}".replace(",", "."),
                                 callback_data=f"buyfile:{code}"
                             )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="💎 Upgrade VIP",
+                                callback_data="vip_menu"
+                            )
                         ]
                     ]
                 )
+
 
                 await message.answer(
                     caption,
                     reply_markup=keyboard
                 )
+
                 return
+
 
             # =========================
             # SUDAH BELI / VIP / OWNER
             # =========================
+
             first = media[0]
             fid = first["file_id"]
             ftype = first.get("type", "document")
+
 
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
