@@ -13,7 +13,7 @@ def home_kb():
                     callback_data="upfile"
                 ),
                 InlineKeyboardButton(
-                    text="📥 Decode File",
+                    text="📥 Get File",
                     callback_data="getfile"
                 )
             ],
