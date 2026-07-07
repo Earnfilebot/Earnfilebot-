@@ -104,239 +104,6 @@ async def withdraw_menu(call: CallbackQuery):
     await call.answer()
 
 # =========================
-# DAFTAR REKENING
-# =========================
-
-@router.callback_query(F.data == "withdraw_accounts")
-async def withdraw_accounts(call: CallbackQuery):
-
-    pool = await get_pool()
-
-    rows = await pool.fetch(
-        """
-        SELECT
-            uwa.id,
-            uwa.account_name,
-            uwa.account_number,
-            uwa.is_default,
-            wm.name AS method_name
-        FROM user_withdraw_accounts uwa
-        JOIN withdraw_methods wm
-            ON wm.id = uwa.method_id
-        WHERE uwa.user_id=$1
-        ORDER BY
-            uwa.is_default DESC,
-            uwa.id ASC
-        """,
-        call.from_user.id
-    )
-
-    kb = InlineKeyboardBuilder()
-
-    if not rows:
-
-        kb.button(
-            text="➕ Tambah Rekening",
-            callback_data="withdraw_add_account"
-        )
-
-        kb.button(
-            text="🔙 Kembali",
-            callback_data="withdraw_account"
-        )
-
-        kb.adjust(1)
-
-        await call.message.edit_text(
-            (
-                "🏦 <b>DAFTAR REKENING</b>\n"
-                "━━━━━━━━━━━━━━\n\n"
-                "Kamu belum memiliki rekening atau E-Wallet."
-            ),
-            parse_mode="HTML",
-            reply_markup=kb.as_markup()
-        )
-
-        return await call.answer()
-
-    text = (
-        "🏦 <b>DAFTAR REKENING</b>\n"
-        "━━━━━━━━━━━━━━\n\n"
-    )
-
-    for i, row in enumerate(rows, start=1):
-
-        status = " ⭐ Default" if row["is_default"] else ""
-
-        text += (
-            f"<b>{i}. {row['method_name']}</b>{status}\n"
-            f"👤 {row['account_name']}\n"
-            f"💳 <code>{row['account_number']}</code>\n\n"
-        )
-
-        if not row["is_default"]:
-            kb.button(
-                text=f"⭐ Default #{i}",
-                callback_data=f"withdraw_default:{row['id']}"
-            )
-
-        kb.button(
-            text=f"🗑 Hapus #{i}",
-            callback_data=f"withdraw_delete:{row['id']}"
-        )
-
-    kb.button(
-        text="➕ Tambah Rekening",
-        callback_data="withdraw_add_account"
-    )
-
-    kb.button(
-        text="🔙 Kembali",
-        callback_data="withdraw_account"
-    )
-
-    kb.adjust(1)
-
-    await call.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=kb.as_markup()
-    )
-
-    await call.answer()
-
-# =========================
-# SET DEFAULT REKENING
-# =========================
-
-@router.callback_query(F.data.startswith("withdraw_default:"))
-async def withdraw_default(call: CallbackQuery):
-
-    account_id = int(call.data.split(":")[1])
-
-    pool = await get_pool()
-
-    account = await pool.fetchrow(
-        """
-        SELECT id
-        FROM user_withdraw_accounts
-        WHERE id=$1
-          AND user_id=$2
-        """,
-        account_id,
-        call.from_user.id
-    )
-
-    if not account:
-        return await call.answer(
-            "Rekening tidak ditemukan.",
-            show_alert=True
-        )
-
-    # Nonaktifkan semua default
-    await pool.execute(
-        """
-        UPDATE user_withdraw_accounts
-        SET
-            is_default=FALSE,
-            updated_at=NOW()
-        WHERE user_id=$1
-        """,
-        call.from_user.id
-    )
-
-    # Jadikan rekening ini default
-    await pool.execute(
-        """
-        UPDATE user_withdraw_accounts
-        SET
-            is_default=TRUE,
-            updated_at=NOW()
-        WHERE id=$1
-        """,
-        account_id
-    )
-
-    await call.answer(
-        "✅ Rekening default berhasil diubah."
-    )
-
-    # Refresh daftar rekening
-    await withdraw_accounts(call)
-
-# =========================
-# HAPUS REKENING
-# =========================
-
-@router.callback_query(F.data.startswith("withdraw_delete:"))
-async def withdraw_delete(call: CallbackQuery):
-
-    account_id = int(call.data.split(":")[1])
-
-    pool = await get_pool()
-
-    account = await pool.fetchrow(
-        """
-        SELECT
-            id,
-            is_default
-        FROM user_withdraw_accounts
-        WHERE id=$1
-          AND user_id=$2
-        """,
-        account_id,
-        call.from_user.id
-    )
-
-    if not account:
-        return await call.answer(
-            "Rekening tidak ditemukan.",
-            show_alert=True
-        )
-
-    await pool.execute(
-        """
-        DELETE FROM user_withdraw_accounts
-        WHERE id=$1
-        """,
-        account_id
-    )
-
-    # Jika yang dihapus adalah rekening default,
-    # jadikan rekening pertama sebagai default.
-    if account["is_default"]:
-
-        new_default = await pool.fetchval(
-            """
-            SELECT id
-            FROM user_withdraw_accounts
-            WHERE user_id=$1
-            ORDER BY id
-            LIMIT 1
-            """,
-            call.from_user.id
-        )
-
-        if new_default:
-            await pool.execute(
-                """
-                UPDATE user_withdraw_accounts
-                SET
-                    is_default=TRUE,
-                    updated_at=NOW()
-                WHERE id=$1
-                """,
-                new_default
-            )
-
-    await call.answer(
-        "✅ Rekening berhasil dihapus."
-    )
-
-    # Refresh daftar rekening
-    await withdraw_accounts(call)
-
-# =========================
 # WITHDRAW REGULER
 # =========================
 
@@ -427,6 +194,305 @@ async def withdraw_create(
 
             "Sekarang kirim nominal withdraw."
         ).replace(",", "."),
+        parse_mode="HTML"
+    )
+
+    await call.answer()
+
+# =========================
+# INPUT NOMINAL WITHDRAW
+# =========================
+
+from aiogram.types import Message
+
+
+@router.message(WithdrawState.input_withdraw_amount)
+async def input_withdraw_amount(
+    message: Message,
+    state: FSMContext
+):
+
+    amount_text = (
+        message.text
+        .replace(".", "")
+        .replace(",", "")
+        .strip()
+    )
+
+    if not amount_text.isdigit():
+
+        return await message.answer(
+            "❌ Nominal tidak valid.\n\n"
+            "Kirim hanya angka.\n"
+            "Contoh: 100000"
+        )
+
+
+    amount = int(amount_text)
+
+
+    if amount < 100000:
+
+        return await message.answer(
+            "❌ Minimal withdraw adalah Rp 100.000."
+        )
+
+
+    data = await state.get_data()
+
+
+    pool = await get_pool()
+
+
+    balance = await pool.fetchval(
+        """
+        SELECT balance
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        message.from_user.id
+    )
+
+
+    if balance < amount:
+
+        return await message.answer(
+            (
+                "❌ Saldo tidak mencukupi.\n\n"
+                f"Saldo kamu: Rp {balance:,}"
+            ).replace(",", ".")
+        )
+
+
+    fee = 2000
+
+    total_cut = amount + fee
+
+
+    if balance < total_cut:
+
+        return await message.answer(
+            (
+                "❌ Saldo tidak cukup untuk fee admin.\n\n"
+                f"Withdraw : Rp {amount:,}\n"
+                f"Fee : Rp {fee:,}\n"
+                f"Total : Rp {total_cut:,}"
+            ).replace(",", ".")
+        )
+
+
+    await state.update_data(
+        withdraw_amount=amount,
+        withdraw_fee=fee
+    )
+
+
+    await state.set_state(
+        WithdrawState.confirm_withdraw
+    )
+
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="✅ Konfirmasi",
+        callback_data="withdraw_confirm"
+    )
+
+    kb.button(
+        text="❌ Batal",
+        callback_data="withdraw_cancel"
+    )
+
+    kb.adjust(1)
+
+
+    await message.answer(
+        (
+            "💸 <b>KONFIRMASI WITHDRAW</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+
+            f"💰 Nominal : <b>Rp {amount:,}</b>\n"
+            f"💸 Fee Admin : <b>Rp {fee:,}</b>\n"
+            f"📉 Total Potong : <b>Rp {total_cut:,}</b>\n\n"
+
+            "Pastikan data sudah benar."
+        ).replace(",", "."),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+# =========================
+# KONFIRMASI WITHDRAW
+# =========================
+
+@router.callback_query(F.data == "withdraw_confirm")
+async def withdraw_confirm(
+    call: CallbackQuery,
+    state: FSMContext
+):
+
+    data = await state.get_data()
+
+    if not data.get("withdraw_amount"):
+        return await call.answer(
+            "Data withdraw tidak ditemukan.",
+            show_alert=True
+        )
+
+
+    pool = await get_pool()
+
+
+    account = await pool.fetchrow(
+        """
+        SELECT
+            uwa.account_name,
+            uwa.account_number,
+            wm.name AS method_name
+        FROM user_withdraw_accounts uwa
+        JOIN withdraw_methods wm
+            ON wm.id = uwa.method_id
+        WHERE uwa.id=$1
+          AND uwa.user_id=$2
+        """,
+        data["withdraw_account_id"],
+        call.from_user.id
+    )
+
+
+    if not account:
+
+        await state.clear()
+
+        return await call.answer(
+            "Rekening tidak ditemukan.",
+            show_alert=True
+        )
+
+
+    amount = data["withdraw_amount"]
+    fee = data["withdraw_fee"]
+
+
+    # cek saldo terakhir
+    balance = await pool.fetchval(
+        """
+        SELECT balance
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        call.from_user.id
+    )
+
+
+    if balance < amount + fee:
+
+        await state.clear()
+
+        return await call.answer(
+            "Saldo tidak mencukupi.",
+            show_alert=True
+        )
+
+
+    # =========================
+    # POTONG SALDO
+    # =========================
+
+    await pool.execute(
+        """
+        UPDATE users
+        SET balance = balance - $1
+        WHERE telegram_id=$2
+        """,
+        amount + fee,
+        call.from_user.id
+    )
+
+
+    # =========================
+    # SIMPAN REQUEST WITHDRAW
+    # =========================
+
+    await pool.execute(
+        """
+        INSERT INTO withdrawals
+        (
+            user_id,
+            account_id,
+            amount,
+            fee,
+            status,
+            created_at
+        )
+        VALUES
+        ($1,$2,$3,$4,'pending',NOW())
+        """,
+        call.from_user.id,
+        data["withdraw_account_id"],
+        amount,
+        fee
+    )
+
+
+    await state.clear()
+
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="📜 Riwayat Withdraw",
+        callback_data="withdraw_history"
+    )
+
+    kb.button(
+        text="🔙 Menu Withdraw",
+        callback_data="withdraw"
+    )
+
+    kb.adjust(1)
+
+
+    await call.message.edit_text(
+        (
+            "✅ <b>WITHDRAW BERHASIL DIBUAT</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+
+            f"🏦 {account['method_name']}\n"
+            f"👤 {account['account_name']}\n"
+            f"💳 <code>{account['account_number']}</code>\n\n"
+
+            f"💰 Nominal : <b>Rp {amount:,}</b>\n"
+            f"💸 Fee : <b>Rp {fee:,}</b>\n\n"
+
+            "⏳ Status : <b>MENUNGGU PROSES</b>\n\n"
+
+            "Withdraw akan diproses oleh admin."
+        ).replace(",", "."),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+
+    await call.answer()
+
+# =========================
+# BATAL WITHDRAW
+# =========================
+
+@router.callback_query(F.data == "withdraw_cancel")
+async def withdraw_cancel(
+    call: CallbackQuery,
+    state: FSMContext
+):
+
+    await state.clear()
+
+    await call.message.edit_text(
+        (
+            "❌ <b>Withdraw dibatalkan.</b>\n\n"
+            "Kamu kembali ke menu withdraw."
+        ),
         parse_mode="HTML"
     )
 
