@@ -54,7 +54,7 @@ dp.include_router(account_router)
 dp.include_router(my_code_router)
 dp.include_router(vvip_router)
 dp.include_router(help_router)
-dp.include_router(account_withdraw_router
+dp.include_router(account_withdraw_router)
 dp.include_router(withdraw_router)
 dp.include_router(admin_router)
 dp.include_router(notify_router)
