@@ -1,303 +1,451 @@
-from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Router, F
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramForbiddenError,
+    TelegramRetryAfter
+)
 
 import asyncio
-from datetime import datetime
 
 from database import get_pool
+from config import ADMIN_IDS
+
 
 router = Router()
+
 
 # =========================
 # CONFIG
 # =========================
-ADMIN_IDS = {6847035364}
 
-MAX_CONCURRENT = 15
-BASE_DELAY = 0.03
+BATCH_SIZE = 20
+BASE_DELAY = 0.1
 
 
-def is_admin(user_id: int) -> bool:
+def is_admin(user_id: int):
     return user_id in ADMIN_IDS
+
 
 
 # =========================
 # FSM
 # =========================
+
 class BroadcastState(StatesGroup):
     waiting_message = State()
     choose_target = State()
     confirm = State()
 
 
+
 # =========================
-# START
+# START BROADCAST
 # =========================
+
 @router.callback_query(F.data == "admin_broadcast")
 async def start(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return await call.answer("❌ No access", show_alert=True)
 
-    await state.set_state(BroadcastState.waiting_message)
+    if not is_admin(call.from_user.id):
+        return await call.answer(
+            "❌ Tidak punya akses",
+            show_alert=True
+        )
+
+
+    await state.set_state(
+        BroadcastState.waiting_message
+    )
+
 
     await call.message.edit_text(
-        "📢 <b>BROADCAST PRO+</b>\n\n"
-        "Kirim pesan untuk broadcast.\n\n"
-        "Support semua tipe (text/media/forward).\n"
+        "📢 <b>BROADCAST</b>\n\n"
+        "Kirim pesan yang ingin dikirim.\n\n"
+        "Support:\n"
+        "✅ Text\n"
+        "✅ Foto\n"
+        "✅ Video\n"
+        "✅ Dokumen\n"
+        "✅ Forward\n\n"
         "Ketik /cancel untuk batal.",
         parse_mode="HTML"
     )
 
 
+
 # =========================
 # CANCEL
 # =========================
+
 @router.message(F.text == "/cancel")
-async def cancel(message: Message, state: FSMContext):
-    if await state.get_state():
-        await state.clear()
-        await message.answer("❌ Broadcast dibatalkan.")
+async def cancel(
+    message: Message,
+    state: FSMContext
+):
 
+    await state.clear()
 
-# =========================
-# STEP 1: SIMPAN PESAN
-# =========================
-@router.message(BroadcastState.waiting_message)
-async def save_message(message: Message, state: FSMContext):
-    await state.update_data(msg=message)
+    await message.answer(
+        "❌ Broadcast dibatalkan"
+    )
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 User", callback_data="target_user")],
-        [InlineKeyboardButton(text="👥 Group", callback_data="target_group")],
-        [InlineKeyboardButton(text="📢 Channel", callback_data="target_channel")],
-        [InlineKeyboardButton(text="🌍 Semua", callback_data="target_all")],
-    ])
-
-    await message.answer("🎯 Pilih target broadcast:", reply_markup=kb)
-
-    await state.set_state(BroadcastState.choose_target)
 
 
 # =========================
-# STEP 2: PILIH TARGET
+# SAVE MESSAGE
 # =========================
-@router.callback_query(F.data.startswith("target_"))
-async def choose_target(call: CallbackQuery, state: FSMContext):
-    target = call.data.split("_")[1]
 
-    await state.update_data(target=target)
+@router.message(
+    BroadcastState.waiting_message
+)
+async def save_message(
+    message: Message,
+    state: FSMContext
+):
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Kirim Sekarang", callback_data="bc_send")],
-        [InlineKeyboardButton(text="⏳ Delay 1 Menit", callback_data="bc_delay")],
-        [InlineKeyboardButton(text="❌ Batal", callback_data="bc_cancel")]
-    ])
+    await state.update_data(
+        msg=message
+    )
 
-    await call.message.edit_text("👀 Preview broadcast:")
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👥 Semua User",
+                    callback_data="target_all"
+                )
+            ]
+        ]
+    )
+
+
+    await message.answer(
+        "🎯 Target:",
+        reply_markup=kb
+    )
+
+
+    await state.set_state(
+        BroadcastState.choose_target
+    )
+
+
+
+# =========================
+# TARGET
+# =========================
+
+@router.callback_query(
+    F.data == "target_all"
+)
+async def choose_target(
+    call: CallbackQuery,
+    state: FSMContext
+):
+
+    await state.update_data(
+        target="all"
+    )
+
+
     data = await state.get_data()
-    msg: Message = data["msg"]
 
-    await msg.copy_to(call.message.chat.id, reply_markup=kb)
+    msg = data["msg"]
 
-    await state.set_state(BroadcastState.confirm)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Kirim",
+                    callback_data="bc_send"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Batal",
+                    callback_data="bc_cancel"
+                )
+            ]
+        ]
+    )
+
+
+    await call.message.edit_text(
+        "👀 Preview broadcast:"
+    )
+
+
+    await msg.copy_to(
+        call.message.chat.id,
+        reply_markup=kb
+    )
+
+
+    await state.set_state(
+        BroadcastState.confirm
+    )
+
 
 
 # =========================
-# SEND SAFE
+# GET USERS
 # =========================
-async def send_safe(msg: Message, chat_id: int):
-    try:
-        await msg.copy_to(chat_id)
-        return "ok"
 
-    except TelegramForbiddenError:
-        return "blocked"
+async def get_targets(pool):
 
-    except TelegramRetryAfter as e:
-        await asyncio.sleep(e.retry_after)
-        return "retry"
+    rows = await pool.fetch(
+        """
+        SELECT user_id
+        FROM users
+        """
+    )
 
-    except:
-        return "fail"
+    return [
+        {
+            "chat_id": row["user_id"]
+        }
+        for row in rows
+    ]
+
 
 
 # =========================
-# CORE ENGINE (SAFE VERSION)
+# SEND ENGINE
 # =========================
-async def run_broadcast(msg: Message, chats, pool, progress_msg):
-    total = len(chats)
+
+async def run_broadcast(
+    msg: Message,
+    users,
+    pool,
+    progress
+):
+
+    total = len(users)
 
     success = 0
     failed = 0
     blocked = 0
 
+
     lock = asyncio.Lock()
 
-    BATCH_SIZE = 30  # kirim per gelombang
-    dynamic_delay = BASE_DELAY
 
-    async def send_with_retry(chat_id: int):
-        retries = 0
 
-        while retries < 3:
+    async def send_one(uid):
+
+        nonlocal success
+        nonlocal failed
+        nonlocal blocked
+
+
+        retry = 0
+
+
+        while retry < 3:
+
             try:
-                await msg.copy_to(chat_id)
-                return "ok"
 
-            except TelegramForbiddenError:
-                return "blocked"
+                await msg.copy_to(
+                    uid,
+                    protect_content=False
+                )
 
-            except TelegramRetryAfter as e:
-                await asyncio.sleep(e.retry_after + 0.5)
-                retries += 1
-
-            except:
-                retries += 1
-                await asyncio.sleep(0.5)
-
-        return "fail"
-
-    for i in range(0, total, BATCH_SIZE):
-        batch = chats[i:i + BATCH_SIZE]
-
-        tasks = []
-        for chat in batch:
-            cid = chat["chat_id"]
-
-            async def worker(c=cid):
-                nonlocal success, failed, blocked, dynamic_delay
-
-                result = await send_with_retry(c)
 
                 async with lock:
-                    if result == "ok":
-                        success += 1
+                    success += 1
 
-                    elif result == "blocked":
-                        blocked += 1
-                        await pool.execute(
-                            "DELETE FROM chats WHERE chat_id=$1", c
-                        )
 
-                    else:
-                        failed += 1
-                        dynamic_delay += 0.005  # pelan otomatis
+                return
 
-            tasks.append(worker())
 
-        await asyncio.gather(*tasks)
 
-        # update progress tiap batch
+            except TelegramForbiddenError:
+
+
+                async with lock:
+                    blocked += 1
+
+
+                await pool.execute(
+                    """
+                    DELETE FROM users
+                    WHERE user_id=$1
+                    """,
+                    uid
+                )
+
+
+                return
+
+
+
+            except TelegramRetryAfter as e:
+
+                await asyncio.sleep(
+                    e.retry_after + 1
+                )
+
+                retry += 1
+
+
+
+            except Exception as e:
+
+                print(
+                    "Broadcast error:",
+                    e
+                )
+
+                retry += 1
+                await asyncio.sleep(1)
+
+
+
+        async with lock:
+            failed += 1
+
+
+
+    for i in range(
+        0,
+        total,
+        BATCH_SIZE
+    ):
+
+
+        batch = users[
+            i:i+BATCH_SIZE
+        ]
+
+
+        await asyncio.gather(
+            *[
+                send_one(
+                    x["chat_id"]
+                )
+                for x in batch
+            ]
+        )
+
+
         try:
-            await progress_msg.edit_text(
-                f"🚀 Broadcasting...\n\n"
-                f"👥 {total}\n"
-                f"✅ {success} | ❌ {failed} | 🚫 {blocked}\n"
-                f"⚡ Delay: {round(dynamic_delay,3)}\n\n"
-                f"{min(i + BATCH_SIZE, total)}/{total}"
+
+            await progress.edit_text(
+                "🚀 <b>Broadcast berjalan</b>\n\n"
+                f"👥 Total : {total}\n"
+                f"✅ Berhasil : {success}\n"
+                f"🚫 Block : {blocked}\n"
+                f"❌ Gagal : {failed}\n\n"
+                f"Progress {min(i+BATCH_SIZE,total)}/{total}",
+                parse_mode="HTML"
             )
+
         except:
             pass
 
-        # jeda antar batch (WAJIB biar aman)
-        await asyncio.sleep(dynamic_delay + 0.2)
-
-    return total, success, failed, blocked
 
 
-# =========================
-# GET TARGET DATA
-# =========================
-async def get_targets(pool, target: str):
-    if target == "user":
-        return await pool.fetch("SELECT chat_id FROM chats WHERE type='private'")
+        await asyncio.sleep(
+            BASE_DELAY
+        )
 
-    elif target == "group":
-        return await pool.fetch("SELECT chat_id FROM chats WHERE type IN ('group','supergroup')")
 
-    elif target == "channel":
-        return await pool.fetch("SELECT chat_id FROM chats WHERE type='channel'")
+    return (
+        total,
+        success,
+        failed,
+        blocked
+    )
 
-    else:
-        return await pool.fetch("SELECT chat_id FROM chats")
 
 
 # =========================
 # SEND NOW
 # =========================
-@router.callback_query(F.data == "bc_send")
-async def send_now(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
+
+@router.callback_query(
+    F.data == "bc_send"
+)
+async def send_now(
+    call: CallbackQuery,
+    state: FSMContext
+):
+
+    if not is_admin(
+        call.from_user.id
+    ):
         return
 
+
     data = await state.get_data()
-    msg: Message = data["msg"]
-    target = data["target"]
+
+    msg = data["msg"]
+
 
     pool = await get_pool()
-    chats = await get_targets(pool, target)
 
-    progress = await call.message.edit_text("🚀 Starting broadcast...")
+
+    users = await get_targets(
+        pool
+    )
+
+
+    if not users:
+
+        return await call.message.edit_text(
+            "❌ Belum ada user"
+        )
+
+
+    progress = await call.message.edit_text(
+        "🚀 Memulai broadcast..."
+    )
+
 
     total, success, failed, blocked = await run_broadcast(
-        msg, chats, pool, progress
+        msg,
+        users,
+        pool,
+        progress
     )
+
 
     await state.clear()
 
+
     await progress.edit_text(
-        "✅ <b>SELESAI</b>\n\n"
-        f"👥 {total}\n"
-        f"✅ {success}\n"
-        f"❌ {failed}\n"
-        f"🚫 {blocked}",
+        "✅ <b>BROADCAST SELESAI</b>\n\n"
+        f"👥 Total : {total}\n"
+        f"✅ Terkirim : {success}\n"
+        f"🚫 Block : {blocked}\n"
+        f"❌ Gagal : {failed}",
         parse_mode="HTML"
     )
 
 
+
 # =========================
-# DELAY SEND
+# CANCEL BUTTON
 # =========================
-@router.callback_query(F.data == "bc_delay")
-async def delay_send(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return
 
-    await call.message.edit_text("⏳ Mengirim dalam 1 menit...")
-    await asyncio.sleep(60)
-
-    data = await state.get_data()
-    msg: Message = data["msg"]
-    target = data["target"]
-
-    pool = await get_pool()
-    chats = await get_targets(pool, target)
-
-    progress = await call.message.answer("🚀 Broadcast dimulai...")
-
-    total, success, failed, blocked = await run_broadcast(
-        msg, chats, pool, progress
-    )
+@router.callback_query(
+    F.data == "bc_cancel"
+)
+async def cancel_btn(
+    call: CallbackQuery,
+    state: FSMContext
+):
 
     await state.clear()
 
-    await progress.edit_text(
-        "✅ <b>SELESAI (DELAY)</b>\n\n"
-        f"👥 {total}\n"
-        f"✅ {success}\n"
-        f"❌ {failed}\n"
-        f"🚫 {blocked}",
-        parse_mode="HTML"
+    await call.message.edit_text(
+        "❌ Broadcast dibatalkan"
     )
-
-
-# =========================
-# CANCEL BTN
-# =========================
-@router.callback_query(F.data == "bc_cancel")
-async def cancel_btn(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await call.message.edit_text("❌ Broadcast dibatalkan.")
