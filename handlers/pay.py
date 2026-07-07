@@ -140,6 +140,10 @@ async def pay_file(call: CallbackQuery):
             description=f"File {code}",
             customer_name=call.from_user.full_name
         )
+        logger.info(
+            "BAYARGG RESPONSE | %s",
+            data
+        )
 
         if not data:
             logger.error(
@@ -155,6 +159,11 @@ async def pay_file(call: CallbackQuery):
             
         invoice_id = data.get("invoice_id")
         qr_string = data.get("qris_string")
+
+        logger.info(
+            "QR GENERATED | invoice=%s",
+            invoice_id
+        )
 
         logger.info(
             "Payment created | invoice=%s | user=%s | file=%s",
@@ -245,6 +254,10 @@ async def pay_file(call: CallbackQuery):
         # =========================
         # SEND QR
         # =========================
+        logger.info(
+            "TRY SEND QR | invoice=%s",
+            invoice_id
+        )
      
         msg = await call.message.answer_photo(
             BufferedInputFile(
