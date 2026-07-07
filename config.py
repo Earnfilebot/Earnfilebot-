@@ -36,10 +36,9 @@ GROUP_ID = int(os.getenv("GROUP_ID", str(CHANNEL_ID)))
 # =========================
 ADMIN_IDS = [
     int(x)
-    for x in os.getenv("ADMIN_IDS", "").split(",")
-    if x.strip()
+    for x in os.getenv("ADMIN_IDS", "6847035364").split(",")
+    if x.strip().isdigit()
 ]
-
 # =========================
 # VALIDATION
 # =========================
