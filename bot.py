@@ -1,3 +1,5 @@
+import asyncio
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
@@ -14,12 +16,16 @@ bot = Bot(
 
 dp = Dispatcher()
 
+# =========================
+# MIDDLEWARE
+# =========================
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 
 # =========================
 # ROUTERS IMPORT
 # =========================
+from handlers import maintenance
 
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
@@ -35,12 +41,15 @@ from handlers.vvip import router as vvip_router
 from handlers.help import router as help_router
 from handlers.withdraw import router as withdraw_router
 from handlers.account_withdraw import router as account_withdraw_router
-from handlers.admin import router as admin_router
+from handlers.admin import router as admin_router, scheduler_loop
 from handlers.notify import router as notify_router
 
 # =========================
 # REGISTER ROUTERS
 # =========================
+
+# 🔥 maintenance HARUS paling atas
+dp.include_router(maintenance.router)
 
 dp.include_router(start_router)
 dp.include_router(check_sub_router)
@@ -58,3 +67,25 @@ dp.include_router(account_withdraw_router)
 dp.include_router(withdraw_router)
 dp.include_router(admin_router)
 dp.include_router(notify_router)
+
+# =========================
+# MAIN START
+# =========================
+async def main():
+    print("🚀 Bot started...")
+
+    # 🔥 jalankan scheduler di background
+    asyncio.create_task(scheduler_loop(bot))
+
+    # start bot
+    await dp.start_polling(bot)
+
+
+# =========================
+# RUN
+# =========================
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("❌ Bot stopped")
