@@ -60,27 +60,20 @@ async def my_code(call: CallbackQuery):
     rows = await pool.fetch(
         """
         SELECT
-            f.code,
-            f.price,
+            code,
+            price,
+            sold_count,
+            total_income,
+            is_paid
 
-            COUNT(fp.id) FILTER (
-                WHERE fp.status='paid'
-            ) AS total_sold
-
-        FROM files f
-
-        LEFT JOIN file_purchases fp
-            ON fp.file_code = f.code
+        FROM files
 
         WHERE
-            f.owner_id=$1
-            AND f.code IS NOT NULL
-
-        GROUP BY
-            f.id
+            owner_id=$1
+            AND code IS NOT NULL
 
         ORDER BY
-            f.id DESC
+            created_at DESC
 
         LIMIT $2 OFFSET $3
         """,
@@ -100,15 +93,18 @@ async def my_code(call: CallbackQuery):
 
         text += "❌ Belum ada code."
 
+
     else:
 
         for i, row in enumerate(rows, start=1):
 
             code = mask_code(row["code"])
 
-            price = row["price"]
+            price = row["price"] or 0
 
-            total_sold = row["total_sold"]
+            sold = row["sold_count"] or 0
+
+            income = row["total_income"] or 0
 
 
             text += (
@@ -116,12 +112,14 @@ async def my_code(call: CallbackQuery):
             )
 
 
-            if price and price > 0:
+            if price > 0:
 
                 text += (
                     f"💰 Harga : Rp {price:,}\n"
-                    f"🛒 Terjual : {total_sold}x\n\n"
+                    f"🛒 Terjual : {sold}x\n"
+                    f"💵 Pendapatan : Rp {income:,}\n\n"
                 ).replace(",", ".")
+
 
             else:
 
@@ -132,6 +130,7 @@ async def my_code(call: CallbackQuery):
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
+
             [
                 InlineKeyboardButton(
                     text="⬅️ Prev",
@@ -164,6 +163,7 @@ async def my_code(call: CallbackQuery):
         parse_mode="HTML",
         reply_markup=kb
     )
+
 
     await call.answer()
 
