@@ -6,7 +6,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from database import get_pool
 from utils.bayargg import BayarGG
@@ -256,3 +256,138 @@ async def buy_vip(call: CallbackQuery):
 
 
     await call.answer()
+
+@router.callback_query(F.data.startswith("checkvip:"))
+async def check_vip_payment(call: CallbackQuery):
+
+    invoice_id = call.data.split(":")[1]
+
+    await call.answer(
+        "⏳ Mengecek pembayaran..."
+    )
+
+
+    payment = await BayarGG.check_payment(
+        invoice_id
+    )
+
+
+    if not payment:
+        return await call.message.answer(
+            "❌ Gagal mengecek pembayaran."
+        )
+
+
+    status = (
+        payment.get("status")
+        or ""
+    ).lower()
+
+
+    if status != "paid":
+
+        return await call.message.answer(
+            "⏳ Pembayaran belum masuk."
+        )
+
+
+    pool = await get_pool()
+
+
+    trx = await pool.fetchrow(
+        """
+        SELECT *
+        FROM payments
+        WHERE invoice_id=$1
+        """,
+        invoice_id
+    )
+
+
+    if not trx:
+        return await call.message.answer(
+            "❌ Data transaksi tidak ditemukan."
+        )
+
+
+    paket = VIP_PACKAGES.get(
+        trx["code"]
+    )
+
+
+    if not paket:
+        return await call.message.answer(
+            "❌ Paket VIP tidak ditemukan."
+        )
+
+
+    now = datetime.now(timezone.utc)
+
+
+    user = await pool.fetchrow(
+        """
+        SELECT vip_until
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        trx["user_id"]
+    )
+
+
+    if user["vip_until"]:
+
+        vip_until = (
+            user["vip_until"]
+            +
+            timedelta(
+                days=paket["days"]
+            )
+        )
+
+    else:
+
+        vip_until = (
+            now
+            +
+            timedelta(
+                days=paket["days"]
+            )
+        )
+
+
+    async with pool.acquire() as conn:
+
+        async with conn.transaction():
+
+            await conn.execute(
+                """
+                UPDATE payments
+                SET status='paid'
+                WHERE invoice_id=$1
+                """,
+                invoice_id
+            )
+
+
+            await conn.execute(
+                """
+                UPDATE users
+                SET
+                    vip=TRUE,
+                    vip_started_at=NOW(),
+                    vip_until=$1
+                WHERE telegram_id=$2
+                """,
+                vip_until,
+                trx["user_id"]
+            )
+
+
+    await call.message.answer(
+        (
+            "🎉 <b>VIP AKTIF</b>\n\n"
+            f"💎 Paket : {paket['name']}\n"
+            f"⏳ Aktif sampai : {vip_until:%d-%m-%Y %H:%M UTC}"
+        ),
+        parse_mode="HTML"
+    )
