@@ -1,5 +1,6 @@
 import qrcode
 from io import BytesIO
+import logging
 
 from aiogram import Router, F
 from aiogram.types import (
@@ -8,11 +9,11 @@ from aiogram.types import (
     InlineKeyboardButton,
     BufferedInputFile
 )
-import logging
 
 from database import fetchrow, execute
 from utils.bayargg import BayarGG
 from utils.redis_client import safe_set, safe_delete
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,9 @@ async def pay_file(call: CallbackQuery):
 
     lock_key = f"paylock:{user_id}:{code}"
 
+
     # =========================
-    # REDIS LOCK (SAFE MODE)
+    # REDIS LOCK
     # =========================
     try:
         lock_ok = await safe_set(
@@ -52,31 +54,42 @@ async def pay_file(call: CallbackQuery):
             ex=PAY_LOCK_TTL,
             nx=True
         )
+
     except Exception:
+        logger.exception("Redis lock error")
         lock_ok = True
 
+
     if not lock_ok:
+
         try:
-           await loading.delete()
+            await loading.delete()
         except Exception:
-           pass
+            pass
 
         return await call.answer(
             "⏳ Tunggu sebentar...",
             show_alert=True
         )
+
+
     try:
+
         # =========================
         # GET FILE
         # =========================
         file = await fetchrow(
             """
-            SELECT owner_id, price, is_paid
+            SELECT
+                owner_id,
+                price,
+                is_paid
             FROM files
             WHERE code=$1
             """,
             code
         )
+
 
         if not file:
             return await call.answer(
@@ -84,11 +97,13 @@ async def pay_file(call: CallbackQuery):
                 show_alert=True
             )
 
+
         if not file["is_paid"]:
             return await call.answer(
                 "File gratis",
                 show_alert=True
             )
+
 
         if file["owner_id"] == user_id:
             return await call.answer(
@@ -96,14 +111,19 @@ async def pay_file(call: CallbackQuery):
                 show_alert=True
             )
 
+
         price = file["price"] or 0
 
+
+
         # =========================
-        # CHECK EXISTING TX
+        # CHECK EXISTING PAYMENT
         # =========================
         existing = await fetchrow(
             """
-            SELECT payment_id, status
+            SELECT
+                payment_id,
+                status
             FROM file_purchases
             WHERE user_id=$1
               AND file_code=$2
@@ -114,18 +134,23 @@ async def pay_file(call: CallbackQuery):
             code
         )
 
+
         if existing:
+
             if existing["status"] == "paid":
                 return await call.answer(
                     "Sudah dibeli",
                     show_alert=True
                 )
 
+
             if existing["status"] == "pending":
                 return await call.answer(
                     "⏳ Invoice masih aktif",
                     show_alert=True
                 )
+
+
 
         # =========================
         # CREATE PAYMENT
@@ -135,50 +160,48 @@ async def pay_file(call: CallbackQuery):
             description=f"File {code}",
             customer_name=call.from_user.full_name
         )
+
+
         logger.info(
             "BAYARGG RESPONSE | %s",
             data
         )
 
+
         if not data:
-            logger.error(
-                "Create payment failed | user=%s | file=%s",
-                user_id,
-                code
-            )
 
             return await call.answer(
-                "❌ Gagal membuat pembayaran.",
+                "❌ Gagal membuat pembayaran",
                 show_alert=True
             )
-            
+
+
         invoice_id = data.get("invoice_id")
         qr_string = data.get("qris_string")
 
-        logger.info(
-            "QR GENERATED | invoice=%s",
-            invoice_id
-        )
-
-        logger.info(
-            "Payment created | invoice=%s | user=%s | file=%s",
-            invoice_id,
-            user_id,
-            code
-        )
-
-        logger.debug("BayarGG response: %s", data)
 
         if not invoice_id or not qr_string:
-            logger.error("Invalid payment response: %s", data)
+
+            logger.error(
+                "QR DATA INVALID | %s",
+                data
+            )
 
             return await call.answer(
-                "❌ Response pembayaran tidak valid.",
+                "❌ QRIS tidak tersedia",
                 show_alert=True
             )
 
+
+        logger.info(
+            "PAYMENT CREATED | invoice=%s",
+            invoice_id
+        )
+
+
+
         # =========================
-        # SAVE DB
+        # SAVE PAYMENT
         # =========================
         await execute(
             """
@@ -192,14 +215,12 @@ async def pay_file(call: CallbackQuery):
                 status,
                 created_at
             )
-            VALUES (
+            VALUES
+            (
                 $1,$2,$3,$4,$5,
                 'pending',
                 NOW()
             )
-            ON CONFLICT (payment_id)
-            DO UPDATE
-            SET status='pending'
             """,
             user_id,
             code,
@@ -208,81 +229,111 @@ async def pay_file(call: CallbackQuery):
             invoice_id
         )
 
+
+
         # =========================
-        # REDIS INVOICE TRACK
+        # REDIS TRACK
         # =========================
         try:
+
             await safe_set(
                 f"invoice:{invoice_id}",
                 f"{user_id}:{code}:pending",
                 ex=INVOICE_TTL
             )
+
         except Exception:
-            pass
+
+            logger.exception(
+                "Invoice redis failed"
+            )
+
+
 
         # =========================
         # GENERATE QR
         # =========================
-        qr = qrcode.make(qr_string)
+        qr = qrcode.make(
+            qr_string
+        )
 
         buf = BytesIO()
-        qr.save(buf, format="PNG")
+
+        qr.save(
+            buf,
+            format="PNG"
+        )
+
         buf.seek(0)
 
-        if not buf.getbuffer().nbytes:
-            logger.error("QR buffer kosong")
+
+        if buf.getbuffer().nbytes == 0:
+
             return await call.answer(
                 "❌ QR gagal dibuat",
                 show_alert=True
             )
 
+
+
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
+
                 [
                     InlineKeyboardButton(
                         text="✅ Check Payment",
                         callback_data=f"check:{invoice_id}"
                     )
                 ],
+
                 [
                     InlineKeyboardButton(
                         text="❌ Cancel",
                         callback_data=f"cancel:{invoice_id}"
                     )
                 ]
+
             ]
         )
+
+
 
         # =========================
         # SEND QR
         # =========================
         logger.info(
-            "TRY SEND QR | invoice=%s",
+            "TRY SEND QR | %s",
             invoice_id
         )
-     
+
+
         msg = await call.message.answer_photo(
             BufferedInputFile(
-                buf.read(),
+                buf.getvalue(),
                 filename="qris.png"
             ),
+
             caption=(
                 "💳 <b>PAYMENT QRIS</b>\n\n"
-                f"🧾 Invoice: <code>{invoice_id}</code>\n"
-                f"💰 Rp {price:,}\n\n"
-                "Scan untuk bayar"
+                f"🧾 Invoice : <code>{invoice_id}</code>\n"
+                f"💰 Harga : Rp {price:,}\n\n"
+                "Scan QR untuk melakukan pembayaran."
             ).replace(",", "."),
+
             parse_mode="HTML",
             reply_markup=kb
         )
 
+
+
         # =========================
-        # SAVE MESSAGE ID
+        # SAVE QR MESSAGE
         # =========================
         await execute(
             """
             UPDATE file_purchases
-            SET qr_message_id=$1,
+            SET
+                qr_message_id=$1,
                 qr_chat_id=$2
             WHERE payment_id=$3
             """,
@@ -290,33 +341,40 @@ async def pay_file(call: CallbackQuery):
             msg.chat.id,
             invoice_id
         )
+
+
         logger.info(
-            "QR sent | invoice=%s | chat=%s | message=%s",
+            "QR SENT | invoice=%s | message=%s",
             invoice_id,
-            msg.chat.id,
             msg.message_id
         )
 
-    try:
-        await call.message.delete()
-    except Exception:
-        pass
 
     except Exception:
+
         logger.exception(
-            "Pay file failed | user=%s | file=%s",
+            "PAY FILE ERROR | user=%s | file=%s",
             user_id,
             code
         )
+
         raise
 
+
+
     finally:
+
         try:
             await loading.delete()
+
         except Exception:
             pass
 
+
         try:
-            await safe_delete(lock_key)
+            await safe_delete(
+                lock_key
+            )
+
         except Exception:
             pass
