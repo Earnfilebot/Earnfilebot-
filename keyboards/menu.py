@@ -29,8 +29,8 @@ def home_kb():
             ],
             [
                 InlineKeyboardButton(
-                    text="❓ Help",
-                    callback_data="help"
+                    text="💸 Withdraw",
+                    callback_data="withdraw"
                 )
             ],
             [
