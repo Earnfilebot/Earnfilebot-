@@ -2,6 +2,8 @@ import hmac
 import hashlib
 import logging
 
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, Request
 
 from bot import bot
@@ -11,7 +13,7 @@ from config import BAYARGG_SECRET
 
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
-BAYARGG_SECRET = BAYARGG_SECRET.encode()
+SECRET_KEY = BAYARGG_SECRET.encode()
 ADMIN_CHAT_ID = -1004395938795
 
 
@@ -25,7 +27,7 @@ async def webhook(request: Request):
     signature = request.headers.get("X-Callback-Signature", "")
 
     expected = hmac.new(
-        BAYARGG_SECRET,
+        SECRET_KEY,
         body,
         hashlib.sha256
     ).hexdigest()
@@ -38,13 +40,16 @@ async def webhook(request: Request):
     except Exception:
         return {"success": False, "message": "invalid json"}
 
-    invoice_id = data.get("invoice_id")
+    invoice_id = str(data.get("invoice_id", "")).strip()
     status = str(data.get("status", "")).strip().lower()
 
     if not invoice_id:
-        return {"success": False, "message": "missing invoice"}
+        return {
+            "success": False,
+            "message": "missing invoice"
+        }
 
-    logging.info(
+    logger.info(
         "BayarGG webhook | invoice=%s | status=%s",
         invoice_id,
         status
@@ -70,7 +75,7 @@ async def webhook(request: Request):
             }
 
     except Exception:
-        logging.exception("Redis lock failed")
+        logger.exception("Redis lock failed")
 
     pool = await get_pool()
 
@@ -80,7 +85,11 @@ async def webhook(request: Request):
 
     vip_tx = await pool.fetchrow(
         """
-        SELECT *
+        SELECT
+            user_id,
+            amount,
+            code,
+            status
         FROM payments
         WHERE invoice_id=$1
         """,
@@ -89,13 +98,7 @@ async def webhook(request: Request):
 
     if vip_tx:
 
-        if vip_tx["status"] == "paid":
-            return {
-                "success": True,
-                "message": "vip already processed"
-            }
-
-        await pool.execute(
+        updated = await pool.execute(
             """
             UPDATE payments
             SET
@@ -106,6 +109,12 @@ async def webhook(request: Request):
             """,
             invoice_id
         )
+
+        if updated == "UPDATE 0":
+            return {
+                "success": True,
+                "message": "vip already processed"
+            }
 
         paket = vip_tx["code"]
 
@@ -125,17 +134,24 @@ async def webhook(request: Request):
             """
             UPDATE users
             SET
-                vip=TRUE,
-                vip_until=
+                vip = TRUE,
+                vip_until =
                 CASE
                     WHEN vip_until IS NULL
                          OR vip_until < NOW()
                     THEN NOW() + ($2 || ' days')::interval
                     ELSE vip_until + ($2 || ' days')::interval
                 END
-            WHERE telegram_id=$1
+            WHERE telegram_id = $1
             """,
             vip_tx["user_id"],
+            days
+        )
+
+        logger.info(
+            "VIP activated | user=%s | package=%s | days=%s",
+            vip_tx["user_id"],
+            paket,
             days
         )
 
@@ -149,7 +165,7 @@ async def webhook(request: Request):
                 parse_mode="HTML"
             )
         except Exception:
-            logging.exception("vip notify failed")
+            logger.exception("vip notify failed")
 
         try:
             await bot.send_message(
@@ -164,7 +180,7 @@ async def webhook(request: Request):
                 parse_mode="HTML"
             )
         except Exception:
-            logging.exception("vip admin notify failed")
+            logger.exception("vip admin notify failed")
 
         return {
             "success": True,
@@ -190,7 +206,7 @@ async def webhook(request: Request):
     )
 
     if not file_tx:
-        logging.warning(
+        logger.warning(
             "Invoice %s tidak ditemukan",
             invoice_id
         )
@@ -225,7 +241,7 @@ async def webhook(request: Request):
         }
 
     try:
-        await pool.execute(
+        updated = await pool.execute(
             """
             UPDATE users
             SET balance = balance + $1
@@ -234,8 +250,15 @@ async def webhook(request: Request):
             file_tx["paid_price"],
             file_tx["owner_id"]
         )
+
+        if updated == "UPDATE 0":
+            logger.warning(
+                "Owner %s tidak ditemukan",
+                file_tx["owner_id"]
+            )
+
     except Exception:
-        logging.exception("failed update owner balance")
+        logger.exception("failed update owner balance")
 
     try:
         await bot.send_message(
@@ -244,7 +267,7 @@ async def webhook(request: Request):
             parse_mode="HTML"
         )
     except Exception:
-        logging.exception("user notify failed")
+        logger.exception("user notify failed")
 
     try:
         await bot.send_message(
@@ -259,9 +282,9 @@ async def webhook(request: Request):
             parse_mode="HTML"
         )
     except Exception:
-        logging.exception("admin notify failed")
+        logger.exception("admin notify failed")
 
-    logging.info(
+    logger.info(
         "Invoice %s processed successfully",
         invoice_id
     )
