@@ -16,7 +16,7 @@ from handlers.bayargg import router as bayargg_router
 # workers
 from tasks.auto_delete import auto_delete_worker
 from tasks.payment_worker import payment_worker
-from handlers.admin.admin import scheduler_loop
+
 
 # =========================
 # TIMEZONE
