@@ -100,7 +100,11 @@ class BayarGG:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(
+                timeout=30,
+                follow_redirects=True,
+                verify=False
+            ) as client:
                 response = await client.get(
                     f"{BASE_URL}/check-payment.php",
                     headers=headers,
