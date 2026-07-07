@@ -98,3 +98,107 @@ async def withdraw_menu(call: CallbackQuery):
     )
 
     await call.answer()
+
+# =========================
+# DAFTAR REKENING
+# =========================
+
+@router.callback_query(F.data == "withdraw_accounts")
+async def withdraw_accounts(call: CallbackQuery):
+
+    pool = await get_pool()
+
+    rows = await pool.fetch(
+        """
+        SELECT
+            uwa.id,
+            uwa.account_name,
+            uwa.account_number,
+            uwa.is_default,
+            wm.name AS method_name
+        FROM user_withdraw_accounts uwa
+        JOIN withdraw_methods wm
+            ON wm.id = uwa.method_id
+        WHERE uwa.user_id=$1
+        ORDER BY
+            uwa.is_default DESC,
+            uwa.id ASC
+        """,
+        call.from_user.id
+    )
+
+    kb = InlineKeyboardBuilder()
+
+    if not rows:
+
+        kb.button(
+            text="➕ Tambah Rekening",
+            callback_data="withdraw_add_account"
+        )
+
+        kb.button(
+            text="🔙 Kembali",
+            callback_data="withdraw_account"
+        )
+
+        kb.adjust(1)
+
+        await call.message.edit_text(
+            (
+                "🏦 <b>DAFTAR REKENING</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+                "Kamu belum memiliki rekening atau E-Wallet."
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
+        )
+
+        return await call.answer()
+
+    text = (
+        "🏦 <b>DAFTAR REKENING</b>\n"
+        "━━━━━━━━━━━━━━\n\n"
+    )
+
+    for i, row in enumerate(rows, start=1):
+
+        status = " ⭐ Default" if row["is_default"] else ""
+
+        text += (
+            f"<b>{i}. {row['method_name']}</b>{status}\n"
+            f"👤 {row['account_name']}\n"
+            f"💳 <code>{row['account_number']}</code>\n\n"
+        )
+
+        if not row["is_default"]:
+            kb.button(
+                text=f"⭐ Default #{i}",
+                callback_data=f"withdraw_default:{row['id']}"
+            )
+
+        kb.button(
+            text=f"🗑 Hapus #{i}",
+            callback_data=f"withdraw_delete:{row['id']}"
+        )
+
+    kb.button(
+        text="➕ Tambah Rekening",
+        callback_data="withdraw_add_account"
+    )
+
+    kb.button(
+        text="🔙 Kembali",
+        callback_data="withdraw_account"
+    )
+
+    kb.adjust(1)
+
+    await call.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+    await call.answer()
+
+
