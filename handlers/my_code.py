@@ -4,24 +4,24 @@ from database import get_pool
 
 router = Router()
 
-# =========================
-# CONFIG
-# =========================
-LIMIT = 10  # ubah ke 20 kalau mau
-MAX_SHOW = 6  # anti leak (potong tampilan code)
+LIMIT = 10
 
 
 # =========================
 # LOADING
 # =========================
 async def loading(call: CallbackQuery):
-    await call.message.edit_text("⏳ Loading...")
+    try:
+        await call.message.edit_text("⏳ Loading...")
+    except:
+        pass
 
 
 # =========================
-# MASK CODE (ANTI LEAK)
+# MASK CODE
 # =========================
 def mask_code(code: str):
+
     if len(code) <= 8:
         return "*" * len(code)
 
@@ -29,7 +29,7 @@ def mask_code(code: str):
 
 
 # =========================
-# MY CODE (PAGINATION)
+# MY CODE
 # =========================
 @router.callback_query(F.data.startswith("my_code"))
 async def my_code(call: CallbackQuery):
@@ -37,24 +37,51 @@ async def my_code(call: CallbackQuery):
     await loading(call)
 
     page = 1
+
     parts = call.data.split(":")
+
     if len(parts) > 1:
         try:
             page = int(parts[1])
         except:
             page = 1
 
+
+    if page < 1:
+        page = 1
+
+
     offset = (page - 1) * LIMIT
+
 
     pool = await get_pool()
 
+
     rows = await pool.fetch(
         """
-        SELECT code
-        FROM transactions
-        WHERE user_id = $1
-        AND code IS NOT NULL
-        ORDER BY id DESC
+        SELECT
+            f.code,
+            f.price,
+
+            COUNT(fp.id) FILTER (
+                WHERE fp.status='paid'
+            ) AS total_sold
+
+        FROM files f
+
+        LEFT JOIN file_purchases fp
+            ON fp.file_code = f.code
+
+        WHERE
+            f.owner_id=$1
+            AND f.code IS NOT NULL
+
+        GROUP BY
+            f.id
+
+        ORDER BY
+            f.id DESC
+
         LIMIT $2 OFFSET $3
         """,
         call.from_user.id,
@@ -62,37 +89,66 @@ async def my_code(call: CallbackQuery):
         offset
     )
 
+
     text = (
         "📦 <b>MY CODE</b>\n"
         "━━━━━━━━━━━━━━\n\n"
     )
 
-    if not rows:
-        text += "❌ Belum ada code."
-    else:
-        for i, row in enumerate(rows, start=1):
-            code = mask_code(row["code"])
-            text += f"{i + offset}. <code>{code}</code>\n"
 
-    # =========================
-    # PAGINATION BUTTON
-    # =========================
+    if not rows:
+
+        text += "❌ Belum ada code."
+
+    else:
+
+        for i, row in enumerate(rows, start=1):
+
+            code = mask_code(row["code"])
+
+            price = row["price"]
+
+            total_sold = row["total_sold"]
+
+
+            text += (
+                f"<b>{i + offset}. <code>{code}</code></b>\n"
+            )
+
+
+            if price and price > 0:
+
+                text += (
+                    f"💰 Harga : Rp {price:,}\n"
+                    f"🛒 Terjual : {total_sold}x\n\n"
+                ).replace(",", ".")
+
+            else:
+
+                text += (
+                    "🆓 Gratis\n\n"
+                )
+
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="⬅️ Prev",
-                    callback_data=f"my_code:{page-1 if page > 1 else 1}"
+                    callback_data=f"my_code:{max(1,page-1)}"
                 ),
+
                 InlineKeyboardButton(
                     text=f"📄 {page}",
                     callback_data="noop"
                 ),
+
                 InlineKeyboardButton(
                     text="Next ➡️",
                     callback_data=f"my_code:{page+1}"
-                ),
+                )
             ],
+
             [
                 InlineKeyboardButton(
                     text="🔙 Kembali",
@@ -102,13 +158,21 @@ async def my_code(call: CallbackQuery):
         ]
     )
 
-    await call.message.edit_text(text, reply_markup=kb)
+
+    await call.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
     await call.answer()
 
 
+
 # =========================
-# NOOP (biar tombol page tidak error)
+# NOOP
 # =========================
 @router.callback_query(F.data == "noop")
 async def noop(call: CallbackQuery):
+
     await call.answer()
