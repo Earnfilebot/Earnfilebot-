@@ -109,15 +109,23 @@ async def buy_vip(call: CallbackQuery):
             parse_mode="HTML"
         )
 
+    if not payment:
+        return await call.message.edit_text(
+            "❌ Gagal membuat invoice pembayaran.\nSilakan coba lagi."
+        )
+
 
     invoice_id = payment["invoice_id"]
 
     payment_url = payment["payment_url"]
 
 
-    expires_at = datetime.fromisoformat(
-        payment["expires_at"]
-    )
+    try:
+        expires_at = datetime.fromisoformat(
+            payment.get("expires_at")
+        )
+    except Exception:
+        expires_at = None
 
 
     pool = await get_pool()
@@ -127,45 +135,52 @@ async def buy_vip(call: CallbackQuery):
     # SIMPAN TRANSAKSI VIP
     # =========================
 
-    await pool.execute(
-        """
-        INSERT INTO payments
-        (
-            user_id,
-            code,
-            reference,
-            amount,
-            status,
-            provider,
+    try:
+        await pool.execute(
+            """
+            INSERT INTO payments
+            (
+                user_id,
+                code,
+                reference,
+                amount,
+                status,
+                provider,
+                invoice_id,
+                payment_url,
+                expires_at,
+                type
+            )
+            VALUES
+            (
+                $1,
+                $2,
+                $3,
+                $4,
+                'pending',
+                'bayargg',
+                $5,
+                $6,
+                $7,
+                'vip'
+            )
+            """,
+
+            call.from_user.id,
+            paket_id,
+            invoice_id,
+            paket["price"],
             invoice_id,
             payment_url,
-            expires_at,
-            type
+            expires_at
         )
-        VALUES
-        (
-            $1,
-            $2,
-            $3,
-            $4,
-            'pending',
-            'bayargg',
-            $5,
-            $6,
-            $7,
-            'vip'
+
+    except Exception as e:
+
+        return await call.message.edit_text(
+            f"❌ Gagal menyimpan transaksi.\n\n<code>{e}</code>",
+            parse_mode="HTML"
         )
-        """,
-
-        call.from_user.id,
-        paket_id,
-        invoice_id,
-        paket["price"],
-        invoice_id,
-        payment_url,
-        expires_at
-    )
-
 
 
     kb = InlineKeyboardBuilder()
@@ -186,7 +201,6 @@ async def buy_vip(call: CallbackQuery):
     kb.adjust(1)
 
 
-
     text = (
         "💎 <b>INVOICE VIP BERHASIL DIBUAT</b>\n"
         "━━━━━━━━━━━━━━\n\n"
@@ -200,7 +214,6 @@ async def buy_vip(call: CallbackQuery):
         "Klik tombol di bawah untuk melakukan pembayaran.\n"
         "VIP akan aktif otomatis setelah pembayaran berhasil."
     ).replace(",", ".")
-
 
 
     await call.message.edit_text(
