@@ -44,15 +44,6 @@ async def vvip_menu(call: CallbackQuery):
         "• 🛡 Tanpa Batas Selama VIP Aktif\n\n"
 
         "━━━━━━━━━━━━━━━━━━\n"
-        "<b>📦 Daftar Paket VIP</b>\n\n"
-
-        "💎 VIP 1 Hari  — Rp15.000\n"
-        "💎 VIP 3 Hari  — Rp25.000\n"
-        "💎 VIP 5 Hari  — Rp35.000\n"
-        "💎 VIP 7 Hari  — Rp45.000\n"
-        "💎 VIP 10 Hari — Rp50.000\n"
-        "💎 VIP 20 Hari — Rp70.000\n"
-        "💎 VIP 30 Hari — Rp100.000\n\n"
 
         "👇 Silakan pilih paket di bawah."
     )
