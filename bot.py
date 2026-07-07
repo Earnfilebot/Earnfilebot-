@@ -2,7 +2,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
+
 from middlewares.ban import BanMiddleware
+from middlewares.maintenance import MaintenanceMiddleware
+
 
 # =========================
 # BOT INIT
@@ -14,15 +17,22 @@ bot = Bot(
 
 dp = Dispatcher()
 
+
 # =========================
 # MIDDLEWARE
 # =========================
+
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
+
+dp.message.middleware(MaintenanceMiddleware())
+dp.callback_query.middleware(MaintenanceMiddleware())
+
 
 # =========================
 # ROUTERS IMPORT
 # =========================
+
 from handlers.start import router as start_router
 from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
@@ -39,6 +49,7 @@ from handlers.withdraw import router as withdraw_router
 from handlers.account_withdraw import router as account_withdraw_router
 from handlers.admin import router as admin_router
 from handlers.notify import router as notify_router
+
 
 # =========================
 # REGISTER ROUTERS
