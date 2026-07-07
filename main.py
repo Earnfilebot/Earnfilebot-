@@ -71,9 +71,8 @@ async def stop_task(name):
 async def start_workers():
     create_task("AUTO_DELETE", auto_delete_worker())
     create_task("PAYMENT", payment_worker())
-    create_task("SCHEDULER", scheduler_loop(bot))
 
-    # polling bot
+    # ✅ polling bot (SATU-SATUNYA)
     create_task(
         "POLLING",
         dp.start_polling(
