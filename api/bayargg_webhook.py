@@ -91,6 +91,7 @@ async def webhook(request: Request):
             status
         FROM payments
         WHERE invoice_id=$1
+          AND type='vip'
         """,
         invoice_id
     )
@@ -104,6 +105,7 @@ async def webhook(request: Request):
                 status='paid',
                 updated_at=NOW()
             WHERE invoice_id=$1
+              AND type='vip'
               AND status!='paid'
             """,
             invoice_id
