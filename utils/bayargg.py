@@ -7,7 +7,7 @@ from config import BAYARGG_API_KEY
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://bayar.gg/api"
+BASE_URL = "https://www.bayar.gg/api"
 
 
 class BayarGG:
@@ -16,7 +16,7 @@ class BayarGG:
     async def create_payment(
         amount: int,
         description: str,
-        payment_url: str = "https://bayar.gg/pay",
+        payment_url: str = "https://www.bayar.gg/pay",
         callback_url: str | None = None,
         redirect_url: str | None = None,
         customer_name: str | None = None,
