@@ -9,7 +9,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import (
     TelegramForbiddenError,
-    TelegramRetryAfter
+    TelegramRetryAfter,
+    TelegramBadRequest
 )
 
 import asyncio
@@ -21,16 +22,13 @@ from config import ADMIN_IDS
 router = Router()
 
 
-# =========================
-# CONFIG
-# =========================
-
 BATCH_SIZE = 20
-BASE_DELAY = 0.1
+BASE_DELAY = 0.2
 
 
-def is_admin(user_id: int):
-    return user_id in ADMIN_IDS
+
+def is_admin(uid):
+    return uid in ADMIN_IDS
 
 
 
@@ -39,6 +37,7 @@ def is_admin(user_id: int):
 # =========================
 
 class BroadcastState(StatesGroup):
+
     waiting_message = State()
     choose_target = State()
     confirm = State()
@@ -46,15 +45,15 @@ class BroadcastState(StatesGroup):
 
 
 # =========================
-# START BROADCAST
+# START
 # =========================
 
-@router.callback_query(F.data == "admin_broadcast")
-async def start(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data=="admin_broadcast")
+async def start(call:CallbackQuery,state:FSMContext):
 
     if not is_admin(call.from_user.id):
         return await call.answer(
-            "❌ Tidak punya akses",
+            "❌ No access",
             show_alert=True
         )
 
@@ -65,34 +64,16 @@ async def start(call: CallbackQuery, state: FSMContext):
 
 
     await call.message.edit_text(
-        "📢 <b>BROADCAST</b>\n\n"
-        "Kirim pesan yang ingin dikirim.\n\n"
+        "📢 <b>BROADCAST CENTER</b>\n\n"
+        "Kirim pesan broadcast.\n\n"
         "Support:\n"
         "✅ Text\n"
         "✅ Foto\n"
         "✅ Video\n"
-        "✅ Dokumen\n"
+        "✅ Document\n"
         "✅ Forward\n\n"
-        "Ketik /cancel untuk batal.",
+        "/cancel untuk batal",
         parse_mode="HTML"
-    )
-
-
-
-# =========================
-# CANCEL
-# =========================
-
-@router.message(F.text == "/cancel")
-async def cancel(
-    message: Message,
-    state: FSMContext
-):
-
-    await state.clear()
-
-    await message.answer(
-        "❌ Broadcast dibatalkan"
     )
 
 
@@ -105,8 +86,8 @@ async def cancel(
     BroadcastState.waiting_message
 )
 async def save_message(
-    message: Message,
-    state: FSMContext
+    message:Message,
+    state:FSMContext
 ):
 
     await state.update_data(
@@ -114,20 +95,36 @@ async def save_message(
     )
 
 
-    kb = InlineKeyboardMarkup(
+    kb=InlineKeyboardMarkup(
         inline_keyboard=[
+
             [
                 InlineKeyboardButton(
-                    text="👥 Semua User",
-                    callback_data="target_all"
+                    text="👤 User",
+                    callback_data="bc_user"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    text="📢 Channel / Group",
+                    callback_data="bc_chat"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    text="🌍 Semua",
+                    callback_data="bc_all"
                 )
             ]
+
         ]
     )
 
 
     await message.answer(
-        "🎯 Target:",
+        "🎯 Pilih target:",
         reply_markup=kb
     )
 
@@ -139,47 +136,149 @@ async def save_message(
 
 
 # =========================
-# TARGET
+# GET TARGET
 # =========================
 
-@router.callback_query(
-    F.data == "target_all"
-)
-async def choose_target(
-    call: CallbackQuery,
-    state: FSMContext
+
+async def get_targets(
+    pool,
+    target
 ):
 
-    await state.update_data(
-        target="all"
+    result=[]
+
+
+    # USER TELEGRAM
+    if target in ("user","all"):
+
+        rows=await pool.fetch(
+            """
+            SELECT telegram_id
+            FROM users
+            WHERE telegram_id IS NOT NULL
+            """
+        )
+
+
+        for r in rows:
+
+            result.append(
+                {
+                    "chat_id":r["telegram_id"],
+                    "type":"user"
+                }
+            )
+
+
+
+    # CHANNEL / GROUP
+    if target in ("chat","all"):
+
+
+        rows=await pool.fetch(
+            """
+            SELECT chat_id
+            FROM chats
+            """
+        )
+
+
+        for r in rows:
+
+            result.append(
+                {
+                    "chat_id":r["chat_id"],
+                    "type":"chat"
+                }
+            )
+
+
+
+    # remove duplicate
+
+    seen=set()
+    clean=[]
+
+    for x in result:
+
+        if x["chat_id"] not in seen:
+
+            clean.append(x)
+            seen.add(x["chat_id"])
+
+
+    return clean
+
+
+
+
+# =========================
+# TARGET BUTTON
+# =========================
+
+
+@router.callback_query(
+    F.data.startswith("bc_")
+)
+async def target_select(
+    call:CallbackQuery,
+    state:FSMContext
+):
+
+    target=call.data.replace(
+        "bc_",
+        ""
     )
 
 
-    data = await state.get_data()
+    if target=="all":
+        target="all"
 
-    msg = data["msg"]
+    elif target=="user":
+        target="user"
+
+    elif target=="chat":
+        target="chat"
+
+    else:
+        return
 
 
-    kb = InlineKeyboardMarkup(
+    await state.update_data(
+        target=target
+    )
+
+
+    data=await state.get_data()
+
+    msg=data["msg"]
+
+
+
+    kb=InlineKeyboardMarkup(
         inline_keyboard=[
+
             [
                 InlineKeyboardButton(
-                    text="✅ Kirim",
-                    callback_data="bc_send"
+                    text="🚀 Kirim",
+                    callback_data="broadcast_send"
                 )
             ],
+
             [
                 InlineKeyboardButton(
-                    text="❌ Batal",
+                    text="❌ Cancel",
                     callback_data="bc_cancel"
                 )
             ]
+
         ]
     )
 
 
-    await call.message.edit_text(
-        "👀 Preview broadcast:"
+
+    await call.message.answer(
+        "👀 Preview:"
     )
 
 
@@ -196,71 +295,49 @@ async def choose_target(
 
 
 # =========================
-# GET USERS
-# =========================
-
-async def get_targets(pool):
-
-    rows = await pool.fetch(
-        """
-        SELECT user_id
-        FROM users
-        """
-    )
-
-    return [
-        {
-            "chat_id": row["user_id"]
-        }
-        for row in rows
-    ]
-
-
-
-# =========================
 # SEND ENGINE
 # =========================
 
-async def run_broadcast(
-    msg: Message,
-    users,
+
+async def send_engine(
+    msg,
+    targets,
     pool,
     progress
 ):
 
-    total = len(users)
 
-    success = 0
-    failed = 0
-    blocked = 0
+    total=len(targets)
 
-
-    lock = asyncio.Lock()
+    success=0
+    failed=0
+    blocked=0
 
 
-
-    async def send_one(uid):
-
-        nonlocal success
-        nonlocal failed
-        nonlocal blocked
+    lock=asyncio.Lock()
 
 
-        retry = 0
+
+    async def worker(item):
+
+        nonlocal success,failed,blocked
 
 
-        while retry < 3:
+        cid=item["chat_id"]
+
+
+        for retry in range(3):
 
             try:
 
+
                 await msg.copy_to(
-                    uid,
-                    protect_content=False
+                    cid
                 )
 
 
                 async with lock:
-                    success += 1
+                    success+=1
 
 
                 return
@@ -271,16 +348,7 @@ async def run_broadcast(
 
 
                 async with lock:
-                    blocked += 1
-
-
-                await pool.execute(
-                    """
-                    DELETE FROM users
-                    WHERE user_id=$1
-                    """,
-                    uid
-                )
+                    blocked+=1
 
 
                 return
@@ -289,28 +357,28 @@ async def run_broadcast(
 
             except TelegramRetryAfter as e:
 
-                await asyncio.sleep(
-                    e.retry_after + 1
-                )
 
-                retry += 1
+                await asyncio.sleep(
+                    e.retry_after
+                )
 
 
 
             except Exception as e:
 
                 print(
-                    "Broadcast error:",
+                    "SEND ERROR",
+                    cid,
                     e
                 )
 
-                retry += 1
                 await asyncio.sleep(1)
 
 
 
         async with lock:
-            failed += 1
+            failed+=1
+
 
 
 
@@ -321,16 +389,14 @@ async def run_broadcast(
     ):
 
 
-        batch = users[
+        batch=targets[
             i:i+BATCH_SIZE
         ]
 
 
         await asyncio.gather(
             *[
-                send_one(
-                    x["chat_id"]
-                )
+                worker(x)
                 for x in batch
             ]
         )
@@ -339,12 +405,12 @@ async def run_broadcast(
         try:
 
             await progress.edit_text(
-                "🚀 <b>Broadcast berjalan</b>\n\n"
+                "🚀 <b>Broadcast Running</b>\n\n"
                 f"👥 Total : {total}\n"
-                f"✅ Berhasil : {success}\n"
+                f"✅ Sent : {success}\n"
                 f"🚫 Block : {blocked}\n"
-                f"❌ Gagal : {failed}\n\n"
-                f"Progress {min(i+BATCH_SIZE,total)}/{total}",
+                f"❌ Failed : {failed}\n\n"
+                f"{min(i+BATCH_SIZE,total)}/{total}",
                 parse_mode="HTML"
             )
 
@@ -358,6 +424,7 @@ async def run_broadcast(
         )
 
 
+
     return (
         total,
         success,
@@ -368,51 +435,48 @@ async def run_broadcast(
 
 
 # =========================
-# SEND NOW
+# SEND
 # =========================
 
+
 @router.callback_query(
-    F.data == "bc_send"
+    F.data=="broadcast_send"
 )
 async def send_now(
-    call: CallbackQuery,
-    state: FSMContext
+    call:CallbackQuery,
+    state:FSMContext
 ):
 
-    if not is_admin(
-        call.from_user.id
-    ):
-        return
+
+    data=await state.get_data()
 
 
-    data = await state.get_data()
-
-    msg = data["msg"]
+    pool=await get_pool()
 
 
-    pool = await get_pool()
-
-
-    users = await get_targets(
-        pool
+    targets=await get_targets(
+        pool,
+        data["target"]
     )
 
 
-    if not users:
+    if not targets:
 
         return await call.message.edit_text(
-            "❌ Belum ada user"
+            "❌ Target kosong"
         )
 
 
-    progress = await call.message.edit_text(
-        "🚀 Memulai broadcast..."
+
+    progress=await call.message.edit_text(
+        "🚀 Starting..."
     )
 
 
-    total, success, failed, blocked = await run_broadcast(
-        msg,
-        users,
+
+    result=await send_engine(
+        data["msg"],
+        targets,
         pool,
         progress
     )
@@ -423,25 +487,26 @@ async def send_now(
 
     await progress.edit_text(
         "✅ <b>BROADCAST SELESAI</b>\n\n"
-        f"👥 Total : {total}\n"
-        f"✅ Terkirim : {success}\n"
-        f"🚫 Block : {blocked}\n"
-        f"❌ Gagal : {failed}",
+        f"👥 Total : {result[0]}\n"
+        f"✅ Sent : {result[1]}\n"
+        f"🚫 Block : {result[3]}\n"
+        f"❌ Failed : {result[2]}",
         parse_mode="HTML"
     )
 
 
 
 # =========================
-# CANCEL BUTTON
+# CANCEL
 # =========================
 
+
 @router.callback_query(
-    F.data == "bc_cancel"
+    F.data=="bc_cancel"
 )
-async def cancel_btn(
-    call: CallbackQuery,
-    state: FSMContext
+async def cancel(
+    call:CallbackQuery,
+    state:FSMContext
 ):
 
     await state.clear()
