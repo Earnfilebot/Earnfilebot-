@@ -22,3 +22,9 @@ class WithdrawState(StatesGroup):
     # =========================
     instant_select_account = State()
     instant_confirm = State()
+
+    input_account_number = State()
+    input_account_name = State()
+
+    input_withdraw_amount = State()
+    input_instant_amount = State()
