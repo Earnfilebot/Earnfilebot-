@@ -3,10 +3,22 @@ from aiogram.fsm.state import State, StatesGroup
 
 class WithdrawState(StatesGroup):
 
-    method = State()
+    # =========================
+    # SET REKENING / E-WALLET
+    # =========================
+    select_method = State()
+    input_account_number = State()
+    input_account_name = State()
 
-    account_number = State()
+    # =========================
+    # WITHDRAW REGULER
+    # =========================
+    select_account = State()
+    input_amount = State()
+    confirm = State()
 
-    account_name = State()
-
-    amount = State()
+    # =========================
+    # WITHDRAW INSTANT
+    # =========================
+    instant_select_account = State()
+    instant_confirm = State()
