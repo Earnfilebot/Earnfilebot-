@@ -58,7 +58,11 @@ class BayarGG:
                 )
             )
 
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(
+                timeout=30,
+                follow_redirects=True,
+                verify=False
+            ) as client:
                 response = await client.post(
                     f"{BASE_URL}/create-payment.php",
                     headers=headers,
