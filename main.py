@@ -5,13 +5,17 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from handlers.bayargg import router as bayargg_router
-from tasks.payment_worker import payment_worker
 
 from config import TIMEZONE
 from bot import bot, dp
 from database import get_pool, close_db
+
+# routers
+from handlers.bayargg import router as bayargg_router
+
+# workers
 from tasks.auto_delete import auto_delete_worker
+from tasks.payment_worker import payment_worker
 from handlers.admin import scheduler_loop
 
 # =========================
@@ -32,47 +36,51 @@ logging.basicConfig(
 # =========================
 # GLOBAL TASKS
 # =========================
-polling_task = None
-auto_delete_task = None
-payment_task = None
-scheduler_task = None
-
-# =========================
-# WORKERS
-# =========================
-async def start_workers():
-    global auto_delete_task, payment_task, polling_task, scheduler_task
-
-    auto_delete_task = asyncio.create_task(auto_delete_worker())
-    logging.info("🧹 AUTO DELETE WORKER STARTED")
-
-    payment_task = asyncio.create_task(payment_worker())
-    logging.info("💳 PAYMENT WORKER STARTED")
-
-    # ✅ Anti double start scheduler
-    if scheduler_task is None:
-        scheduler_task = asyncio.create_task(scheduler_loop(bot))
-        logging.info("⏰ SCHEDULER STARTED")
-
-    polling_task = asyncio.create_task(
-        dp.start_polling(
-            bot,
-            allowed_updates=dp.resolve_used_update_types(),
-        )
-    )
-    logging.info("🤖 BOT POLLING STARTED")
+tasks = {}
 
 
 # =========================
-# HELPER STOP TASK
+# SAFE CREATE TASK
 # =========================
-async def stop_task(task, name):
+def create_task(name, coro):
+    if name in tasks and not tasks[name].done():
+        logging.warning(f"⚠️ {name} already running")
+        return
+
+    task = asyncio.create_task(coro)
+    tasks[name] = task
+    logging.info(f"✅ {name} started")
+
+
+# =========================
+# SAFE STOP TASK
+# =========================
+async def stop_task(name):
+    task = tasks.get(name)
     if task:
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
-            logging.info(f"❌ {name} STOPPED")
+            logging.info(f"❌ {name} stopped")
+
+
+# =========================
+# START WORKERS
+# =========================
+async def start_workers():
+    create_task("AUTO_DELETE", auto_delete_worker())
+    create_task("PAYMENT", payment_worker())
+    create_task("SCHEDULER", scheduler_loop(bot))
+
+    # polling bot
+    create_task(
+        "POLLING",
+        dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+        )
+    )
 
 
 # =========================
@@ -80,15 +88,18 @@ async def stop_task(task, name):
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.info("🚀 APP STARTING...")
 
-    logging.info("🚀 START APP")
-
+    # init DB
     await get_pool()
+
+    # reset webhook
     await bot.delete_webhook(drop_pending_updates=True)
 
     me = await bot.get_me()
-    logging.info(f"🤖 Login sebagai @{me.username}")
+    logging.info(f"🤖 Logged in as @{me.username}")
 
+    # start all workers
     await start_workers()
 
     yield
@@ -96,12 +107,10 @@ async def lifespan(app: FastAPI):
     # =========================
     # SHUTDOWN
     # =========================
-    logging.info("🛑 STOPPING...")
+    logging.info("🛑 SHUTDOWN...")
 
-    await stop_task(polling_task, "Polling")
-    await stop_task(auto_delete_task, "Auto Delete")
-    await stop_task(payment_task, "Payment")
-    await stop_task(scheduler_task, "Scheduler")  # ✅ FIX UTAMA
+    for name in list(tasks.keys()):
+        await stop_task(name)
 
     await close_db()
     await bot.session.close()
@@ -110,11 +119,12 @@ async def lifespan(app: FastAPI):
 
 
 # =========================
-# APP
+# APP INIT
 # =========================
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(bayargg_router)
+
 
 # =========================
 # ROUTES
