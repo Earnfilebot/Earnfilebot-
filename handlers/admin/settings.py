@@ -21,8 +21,14 @@ def is_admin(user_id: int):
     return user_id in ADMIN_IDS
 
 
+def back_btn():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Kembali", callback_data="admin_settings")]
+    ])
+
+
 # =========================
-# AUTO SPEED
+# AUTO SPEED + FLOOD DETECT
 # =========================
 def get_auto_settings(total_users: int):
     if total_users < 1000:
@@ -36,7 +42,7 @@ def get_auto_settings(total_users: int):
 
 
 # =========================
-# DB SETTINGS HELPER
+# DB SETTINGS
 # =========================
 async def get_setting(pool, key, default=None):
     val = await pool.fetchval("SELECT value FROM settings WHERE key=$1", key)
@@ -65,6 +71,10 @@ class SchedulerState(StatesGroup):
     waiting_text = State()
 
 
+class MaintenanceState(StatesGroup):
+    waiting_text = State()
+
+
 # =========================
 # ADMIN PANEL
 # =========================
@@ -77,18 +87,14 @@ async def admin_settings(call: CallbackQuery):
         [InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🛠 Maintenance", callback_data="set_maintenance")],
         [InlineKeyboardButton(text="⏰ Scheduler", callback_data="set_scheduler")],
-        [InlineKeyboardButton(text="⚡ Auto Speed Info", callback_data="speed_info")]
+        [InlineKeyboardButton(text="⚡ Speed Info", callback_data="speed_info")]
     ])
 
-    await call.message.edit_text(
-        "⚙️ <b>ADMIN PANEL</b>",
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
+    await call.message.edit_text("⚙️ <b>ADMIN PANEL</b>", reply_markup=kb, parse_mode="HTML")
 
 
 # =========================
-# MAINTENANCE
+# MAINTENANCE + CUSTOM MSG
 # =========================
 @router.callback_query(F.data == "set_maintenance")
 async def maintenance_menu(call: CallbackQuery):
@@ -96,14 +102,13 @@ async def maintenance_menu(call: CallbackQuery):
     status = await get_setting(pool, "maintenance", "off")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{'✅ ON' if status=='on' else '❌ OFF'}",
-            callback_data="toggle_maintenance"
-        )]
+        [InlineKeyboardButton(text=f"{'🟢 ON' if status=='on' else '🔴 OFF'}", callback_data="toggle_maintenance")],
+        [InlineKeyboardButton(text="✏️ Set Pesan", callback_data="set_maint_text")],
+        [InlineKeyboardButton(text="⬅️ Kembali", callback_data="admin_settings")]
     ])
 
     await call.message.edit_text(
-        f"🛠 Maintenance Mode\n\nStatus: <b>{status.upper()}</b>",
+        f"🛠 <b>Maintenance</b>\nStatus: {status.upper()}",
         reply_markup=kb,
         parse_mode="HTML"
     )
@@ -113,40 +118,63 @@ async def maintenance_menu(call: CallbackQuery):
 async def toggle_maintenance(call: CallbackQuery):
     pool = await get_pool()
     current = await get_setting(pool, "maintenance", "off")
-
     new = "off" if current == "on" else "on"
+
     await set_setting(pool, "maintenance", new)
 
-    await call.answer(f"Maintenance: {new.upper()}")
+    await call.answer(f"Maintenance {new}")
     await maintenance_menu(call)
 
 
-# =========================
-# BLOCK USER IF MAINTENANCE
-# =========================
-async def is_maintenance():
+@router.callback_query(F.data == "set_maint_text")
+async def set_maint_text(call: CallbackQuery, state: FSMContext):
+    await state.set_state(MaintenanceState.waiting_text)
+    await call.message.answer("Kirim pesan maintenance")
+
+
+@router.message(MaintenanceState.waiting_text)
+async def save_maint_text(message: Message, state: FSMContext):
     pool = await get_pool()
-    return await get_setting(pool, "maintenance", "off") == "on"
+    await set_setting(pool, "maintenance_text", message.text)
+
+    await message.answer("✅ Pesan maintenance disimpan")
+    await state.clear()
 
 
 # =========================
-# SCHEDULER MENU
+# CHECK MAINTENANCE (PAKAI DI HANDLER USER)
+# =========================
+async def check_maintenance(message: Message):
+    pool = await get_pool()
+    status = await get_setting(pool, "maintenance", "off")
+
+    if status == "on" and message.from_user.id not in ADMIN_IDS:
+        text = await get_setting(pool, "maintenance_text", "🚧 Bot sedang maintenance")
+        await message.answer(text)
+        return True
+
+    return False
+
+
+# =========================
+# SCHEDULER
 # =========================
 @router.callback_query(F.data == "set_scheduler")
 async def scheduler_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Set Jam", callback_data="set_time")],
-        [InlineKeyboardButton(text="Set Pesan", callback_data="set_text")],
-        [InlineKeyboardButton(text="ON/OFF", callback_data="toggle_scheduler")]
+        [InlineKeyboardButton(text="🕒 Set Jam", callback_data="set_time")],
+        [InlineKeyboardButton(text="📝 Set Pesan", callback_data="set_text")],
+        [InlineKeyboardButton(text="🔁 ON/OFF", callback_data="toggle_scheduler")],
+        [InlineKeyboardButton(text="⬅️ Kembali", callback_data="admin_settings")]
     ])
 
     await call.message.edit_text("⏰ Scheduler", reply_markup=kb)
 
 
 @router.callback_query(F.data == "set_time")
-async def input_time(call: CallbackQuery, state: FSMContext):
+async def set_time(call: CallbackQuery, state: FSMContext):
     await state.set_state(SchedulerState.waiting_time)
-    await call.message.answer("Masukkan jam (HH:MM)")
+    await call.message.answer("Masukkan jam HH:MM")
 
 
 @router.message(SchedulerState.waiting_time)
@@ -158,7 +186,7 @@ async def save_time(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "set_text")
-async def input_text(call: CallbackQuery, state: FSMContext):
+async def set_text(call: CallbackQuery, state: FSMContext):
     await state.set_state(SchedulerState.waiting_text)
     await call.message.answer("Kirim pesan scheduler")
 
@@ -179,11 +207,11 @@ async def toggle_scheduler(call: CallbackQuery):
     new = "off" if current == "on" else "on"
     await set_setting(pool, "scheduler", new)
 
-    await call.answer(f"Scheduler: {new}")
+    await call.answer(f"Scheduler {new}")
 
 
 # =========================
-# AUTO SPEED INFO
+# SPEED INFO
 # =========================
 @router.callback_query(F.data == "speed_info")
 async def speed_info(call: CallbackQuery):
@@ -192,38 +220,16 @@ async def speed_info(call: CallbackQuery):
 
     mc, delay = get_auto_settings(total)
 
+    kb = back_btn()
+
     await call.message.edit_text(
-        f"⚡ AUTO SPEED\n\n👥 {total}\n🔥 {mc}\n⏱ {delay}"
+        f"⚡ Speed\n👥 {total}\n🔥 {mc}\n⏱ {delay}",
+        reply_markup=kb
     )
 
 
 # =========================
-# BROADCAST START
-# =========================
-@router.callback_query(F.data == "admin_broadcast")
-async def start_bc(call: CallbackQuery, state: FSMContext):
-    if not is_admin(call.from_user.id):
-        return
-
-    await state.set_state(BroadcastState.waiting_message)
-    await call.message.edit_text("Kirim pesan broadcast")
-
-
-@router.message(BroadcastState.waiting_message)
-async def preview(message: Message, state: FSMContext):
-    await state.update_data(msg=message)
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Kirim", callback_data="bc_send")],
-        [InlineKeyboardButton(text="Batal", callback_data="bc_cancel")]
-    ])
-
-    await message.copy_to(message.chat.id, reply_markup=kb)
-    await state.set_state(BroadcastState.confirm)
-
-
-# =========================
-# SEND SAFE
+# BROADCAST SAFE (ANTI FLOOD)
 # =========================
 async def send_safe(bot, msg, user_id):
     try:
@@ -238,72 +244,42 @@ async def send_safe(bot, msg, user_id):
         return "fail"
 
 
-# =========================
-# BROADCAST ENGINE
-# =========================
-async def run_broadcast(bot, msg, users, pool, progress):
+async def run_broadcast(bot, msg, users, pool):
     total = len(users)
+    MAX, delay = get_auto_settings(total)
 
-    MAX_CONCURRENT, BASE_DELAY = get_auto_settings(total)
-
+    sem = asyncio.Semaphore(MAX)
     success = failed = blocked = 0
-    sem = asyncio.Semaphore(MAX_CONCURRENT)
-    delay = BASE_DELAY
 
-    async def worker(user):
+    async def worker(u):
         nonlocal success, failed, blocked, delay
 
         async with sem:
-            r = await send_safe(bot, msg, user["user_id"])
+            r = await send_safe(bot, msg, u["user_id"])
 
             if r == "ok":
                 success += 1
             elif r == "blocked":
                 blocked += 1
-                await pool.execute("DELETE FROM users WHERE user_id=$1", user["user_id"])
+                await pool.execute("DELETE FROM users WHERE user_id=$1", u["user_id"])
+            elif r == "retry":
+                delay += 0.02
             else:
                 failed += 1
-                delay += 0.01
 
             await asyncio.sleep(delay)
 
-    tasks = [asyncio.create_task(worker(u)) for u in users]
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*[worker(u) for u in users])
 
     return total, success, failed, blocked
 
 
-@router.callback_query(F.data == "bc_send")
-async def send_bc(call: CallbackQuery, state: FSMContext, bot: Bot):
-    data = await state.get_data()
-    msg = data["msg"]
-
-    pool = await get_pool()
-    users = await pool.fetch("SELECT user_id FROM users")
-
-    progress = await call.message.edit_text("🚀 Sending...")
-
-    total, success, failed, blocked = await run_broadcast(
-        bot, msg, users, pool, progress
-    )
-
-    await state.clear()
-
-    await progress.edit_text(
-        f"✅ DONE\n👥 {total}\n✅ {success}\n❌ {failed}\n🚫 {blocked}"
-    )
-
-
-@router.callback_query(F.data == "bc_cancel")
-async def cancel_bc(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await call.message.edit_text("❌ Dibatalkan")
-
-
 # =========================
-# SCHEDULER LOOP
+# SCHEDULER LOOP (ANTI DOUBLE SEND)
 # =========================
 async def scheduler_loop(bot: Bot):
+    last_sent = None
+
     while True:
         pool = await get_pool()
 
@@ -313,16 +289,16 @@ async def scheduler_loop(bot: Bot):
 
         now = datetime.now().strftime("%H:%M")
 
-        if enabled == "on" and now == time_set:
+        if enabled == "on" and now == time_set and last_sent != now:
             users = await pool.fetch("SELECT user_id FROM users")
 
-            for user in users:
+            for u in users:
                 try:
-                    await bot.send_message(user["user_id"], text)
+                    await bot.send_message(u["user_id"], text)
                     await asyncio.sleep(0.05)
                 except:
                     pass
 
-            await asyncio.sleep(60)
+            last_sent = now
 
         await asyncio.sleep(10)
