@@ -5,7 +5,7 @@ from database import get_pool
 router = Router()
 
 
-@router.message(F.text == "🏆 Top Code")
+@router.message(F.text == "top_file")
 async def top_code(message: Message):
 
     pool = await get_pool()
