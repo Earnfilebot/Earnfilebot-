@@ -23,7 +23,7 @@ async def top_file(call: CallbackQuery):
         SELECT
             code,
             download_count,
-            total_media,
+            media_count,
             is_paid,
             price
         FROM files
@@ -63,7 +63,7 @@ async def top_file(call: CallbackQuery):
             f"{rank}. 🔑 <code>{row['code']}</code>\n"
             f"   {status}\n"
             f"   📥 Dibuka : {row['download_count']}x\n"
-            f"   📦 Media : {row['total_media']} file\n\n"
+            f"   📦 Media : {row['media_count']} file\n\n"
         )
 
 
