@@ -38,6 +38,7 @@ from handlers.check_sub import router as check_sub_router
 from handlers.upfile import router as upfile_router
 from handlers.getfile import router as getfile_router
 from handlers.search_code import router as search_router
+from handlers.search_price import router as search_price_router
 from handlers.top import router as top_router
 from handlers.new_code import router as new_code_router
 from handlers.page import router as page_router
@@ -62,6 +63,7 @@ dp.include_router(start_router)
 dp.include_router(check_sub_router)
 dp.include_router(upfile_router)
 dp.include_router(getfile_router)
+dp.include_router(search_price_router)
 dp.include_router(search_router)
 dp.include_router(top_router)
 dp.include_router(new_code_router)
