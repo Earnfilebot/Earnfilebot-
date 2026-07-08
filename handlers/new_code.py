@@ -13,7 +13,7 @@ router = Router()
 # =========================
 # MENU NEW CODE
 # =========================
-@router.message(F.text == "🆕 New Code")
+@router.message(F.text == "new_code")
 async def new_code(message: Message):
 
     pool = await get_pool()
