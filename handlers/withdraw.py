@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from states.withdraw import WithdrawState
 from database import get_pool
 
+
 router = Router()
 
 WIB = ZoneInfo("Asia/Jakarta")
@@ -24,6 +25,10 @@ def withdraw_is_open() -> bool:
     return 9 <= now.hour < 19
 
 
+# =========================
+# MENU WITHDRAW
+# =========================
+
 @router.callback_query(F.data == "withdraw")
 async def withdraw_menu(call: CallbackQuery):
 
@@ -31,7 +36,6 @@ async def withdraw_menu(call: CallbackQuery):
 
     kb = InlineKeyboardBuilder()
 
-    # Rekening / E-Wallet
     kb.button(
         text="🏦 Rekening / E-Wallet",
         callback_data="withdraw_account"
@@ -56,6 +60,7 @@ async def withdraw_menu(call: CallbackQuery):
             callback_data="withdraw_closed"
         )
 
+
     kb.button(
         text="📜 Riwayat Withdraw",
         callback_data="withdraw_history"
@@ -68,13 +73,16 @@ async def withdraw_menu(call: CallbackQuery):
 
     kb.adjust(1)
 
+
     status = "🟢 BUKA" if open_now else "🔴 TUTUP"
+
 
     text = (
         "💸 <b>WITHDRAW SALDO</b>\n"
         "━━━━━━━━━━━━━━\n\n"
 
         f"📌 Status : <b>{status}</b>\n"
+
         "🕘 Jadwal Layanan\n"
         "• Senin - Jumat\n"
         "• 09:00 - 19:00 WIB\n"
@@ -95,6 +103,7 @@ async def withdraw_menu(call: CallbackQuery):
         "• Prioritas di atas withdraw reguler"
     )
 
+
     await call.message.edit_text(
         text,
         parse_mode="HTML",
@@ -102,10 +111,6 @@ async def withdraw_menu(call: CallbackQuery):
     )
 
     await call.answer()
-
-# =========================
-# WITHDRAW REGULER
-# =========================
 
 @router.callback_query(F.data == "withdraw_create")
 async def withdraw_create(
@@ -212,18 +217,28 @@ async def input_withdraw_amount(
     state: FSMContext
 ):
 
+    if not message.text:
+
+        return await message.answer(
+            "❌ Kirim nominal withdraw."
+        )
+
+
     amount_text = (
         message.text
         .replace(".", "")
         .replace(",", "")
+        .replace("Rp", "")
+        .replace("rp", "")
         .strip()
     )
+
 
     if not amount_text.isdigit():
 
         return await message.answer(
             "❌ Nominal tidak valid.\n\n"
-            "Kirim hanya angka.\n"
+            "Kirim angka saja.\n"
             "Contoh: 100000"
         )
 
@@ -236,9 +251,6 @@ async def input_withdraw_amount(
         return await message.answer(
             "❌ Minimal withdraw adalah Rp 100.000."
         )
-
-
-    data = await state.get_data()
 
 
     pool = await get_pool()
@@ -254,6 +266,10 @@ async def input_withdraw_amount(
     )
 
 
+    if balance is None:
+        balance = 0
+
+
     if balance < amount:
 
         return await message.answer(
@@ -264,7 +280,14 @@ async def input_withdraw_amount(
         )
 
 
-    fee = 2000
+    data = await state.get_data()
+
+
+    fee = data.get(
+        "withdraw_fee",
+        2000
+    )
+
 
     total_cut = amount + fee
 
@@ -274,9 +297,10 @@ async def input_withdraw_amount(
         return await message.answer(
             (
                 "❌ Saldo tidak cukup untuk fee admin.\n\n"
-                f"Withdraw : Rp {amount:,}\n"
-                f"Fee : Rp {fee:,}\n"
-                f"Total : Rp {total_cut:,}"
+
+                f"💰 Withdraw : Rp {amount:,}\n"
+                f"💸 Fee : Rp {fee:,}\n"
+                f"📉 Total potong : Rp {total_cut:,}"
             ).replace(",", ".")
         )
 
@@ -333,7 +357,9 @@ async def withdraw_confirm(
 
     data = await state.get_data()
 
+
     if not data.get("withdraw_amount"):
+
         return await call.answer(
             "Data withdraw tidak ditemukan.",
             show_alert=True
@@ -371,10 +397,12 @@ async def withdraw_confirm(
 
 
     amount = data["withdraw_amount"]
-    fee = data["withdraw_fee"]
+    fee = data.get(
+        "withdraw_fee",
+        2000
+    )
 
 
-    # cek saldo terakhir
     balance = await pool.fetchval(
         """
         SELECT balance
@@ -385,7 +413,7 @@ async def withdraw_confirm(
     )
 
 
-    if balance < amount + fee:
+    if balance is None or balance < amount + fee:
 
         await state.clear()
 
@@ -395,44 +423,120 @@ async def withdraw_confirm(
         )
 
 
-    # =========================
-    # POTONG SALDO
-    # =========================
+    try:
 
-    await pool.execute(
-        """
-        UPDATE users
-        SET balance = balance - $1
-        WHERE telegram_id=$2
-        """,
-        amount + fee,
-        call.from_user.id
-    )
+        async with pool.acquire() as conn:
+
+            async with conn.transaction():
+
+                # POTONG SALDO
+
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET balance = balance - $1
+                    WHERE telegram_id=$2
+                    """,
+                    amount + fee,
+                    call.from_user.id
+                )
 
 
-    # =========================
-    # SIMPAN REQUEST WITHDRAW
-    # =========================
+                # SIMPAN WITHDRAW
+                # SESUAI DATABASE KAMU
 
-    await pool.execute(
-        """
-        INSERT INTO withdrawals
-        (
-            user_id,
-            account_id,
-            amount,
-            fee,
-            status,
-            created_at
+                await conn.execute(
+                    """
+                    INSERT INTO withdrawals
+                    (
+                        seller_id,
+                        amount,
+                        method,
+                        account_name,
+                        account_number,
+                        status,
+                        created_at
+                    )
+                    VALUES
+                    ($1,$2,$3,$4,$5,'pending',NOW())
+                    """,
+                    call.from_user.id,
+                    amount,
+                    account["method_name"],
+                    account["account_name"],
+                    account["account_number"]
+                )
+
+
+    except Exception as e:
+
+        print(
+            "WITHDRAW CREATE ERROR:",
+            e
         )
-        VALUES
-        ($1,$2,$3,$4,'pending',NOW())
-        """,
-        call.from_user.id,
-        data["withdraw_account_id"],
-        amount,
-        fee
-    )
+
+        return await call.answer(
+            "Terjadi kesalahan saat membuat withdraw.",
+            show_alert=True
+        )
+
+
+    # =========================
+    # NOTIF ADMIN
+    # =========================
+
+    from main import bot
+    from config import ADMIN_IDS
+
+
+    for admin_id in ADMIN_IDS:
+
+        try:
+
+            kb_admin = InlineKeyboardBuilder()
+
+            kb_admin.button(
+                text="✅ Proses",
+                callback_data=f"withdraw_process:{call.from_user.id}"
+            )
+
+            kb_admin.button(
+                text="❌ Reject",
+                callback_data=f"withdraw_reject:{call.from_user.id}"
+            )
+
+            kb_admin.adjust(2)
+
+
+            await bot.send_message(
+                admin_id,
+                (
+                    "🚨 <b>REQUEST WITHDRAW BARU</b>\n"
+                    "━━━━━━━━━━━━━━\n\n"
+
+                    f"👤 User ID : <code>{call.from_user.id}</code>\n"
+                    f"📱 Username : @{call.from_user.username or '-'}\n\n"
+
+                    f"🏦 Metode : <b>{account['method_name']}</b>\n"
+                    f"👤 Nama : <b>{account['account_name']}</b>\n"
+                    f"💳 Nomor : <code>{account['account_number']}</code>\n\n"
+
+                    f"💰 Nominal : <b>Rp {amount:,}</b>\n"
+                    f"💸 Fee : <b>Rp {fee:,}</b>\n\n"
+
+                    "⏳ Status : <b>PENDING</b>"
+                ).replace(",", "."),
+                parse_mode="HTML",
+                reply_markup=kb_admin.as_markup()
+            )
+
+
+        except Exception as e:
+
+            print(
+                "WITHDRAW ADMIN NOTIFY ERROR:",
+                e
+            )
 
 
     await state.clear()
