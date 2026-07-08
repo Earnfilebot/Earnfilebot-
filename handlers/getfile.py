@@ -91,12 +91,39 @@ async def receive_code(message: Message, state: FSMContext):
         code
     )
 
+    # =========================
+    # FILE NOT FOUND
+    # =========================
     if not file:
         await message.answer("❌ CODE TIDAK DITEMUKAN")
         await state.clear()
         return
 
-    media = safe_json(file.get("media"))
+    # =========================
+    # EXPIRED CHECK
+    # =========================
+    import time
+
+    expires_at = file["expires_at"]
+
+    if expires_at and expires_at < int(time.time()):
+        await message.answer("❌ File sudah kadaluarsa.")
+        await state.clear()
+        return
+
+    # =========================
+    # VIEW COUNTER
+    # =========================
+    await pool.execute(
+        """
+        UPDATE files
+        SET view_count = view_count + 1
+        WHERE code=$1
+        """,
+        code
+    )
+
+    media = safe_json(file["media"])
 
     if not media:
         await message.answer("❌ FILE KOSONG")
@@ -106,14 +133,14 @@ async def receive_code(message: Message, state: FSMContext):
     # =========================
     # FILE PAID CHECK
     # =========================
-    is_paid = file.get("is_paid", False)
-    price = file.get("price") or 0
+    is_paid = file["is_paid"] or False
+    price = file["price"] or 0
 
     vip = await pool.fetchval(
         """
         SELECT 1
         FROM users
-        WHERE telegram_id=$1
+        WHERE id=$1
           AND vip=TRUE
           AND vip_until > NOW()
         """,
@@ -178,7 +205,7 @@ async def receive_code(message: Message, state: FSMContext):
     fid = first["file_id"]
     ftype = (first.get("type") or "document").lower()
 
-    share_media = file.get("share_media", True)
+    share_media = file["share_media"] if file["share_media"] is not None else True
     share_status = "PUBLIC" if share_media else "PRIVATE"
     protect = not share_media
 
