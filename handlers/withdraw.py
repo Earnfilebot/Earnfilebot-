@@ -614,3 +614,127 @@ async def withdraw_cancel(
     )
 
     await call.answer()
+
+# =========================
+# ADMIN PROSES WITHDRAW
+# =========================
+
+@router.callback_query(F.data.startswith("withdraw_process:"))
+async def withdraw_process(call: CallbackQuery):
+
+    user_id = int(call.data.split(":")[1])
+
+    pool = await get_pool()
+
+    await pool.execute(
+        """
+        UPDATE withdrawals
+        SET status='success'
+        WHERE seller_id=$1
+        AND status='pending'
+        """,
+        user_id
+    )
+
+    await call.message.edit_text(
+        (
+            "✅ <b>WITHDRAW DIPROSES</b>\n\n"
+            f"👤 User ID : <code>{user_id}</code>\n"
+            "Status : SUCCESS"
+        ),
+        parse_mode="HTML"
+    )
+
+    await call.answer("Withdraw berhasil diproses")
+
+
+    try:
+        await call.bot.send_message(
+            user_id,
+            (
+                "✅ <b>WITHDRAW BERHASIL DIPROSES</b>\n\n"
+                "Saldo withdraw sudah dikirim oleh admin."
+            ),
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        print("NOTIF USER ERROR:", e)
+
+
+
+# =========================
+# ADMIN REJECT WITHDRAW
+# =========================
+
+@router.callback_query(F.data.startswith("withdraw_reject:"))
+async def withdraw_reject(call: CallbackQuery):
+
+    user_id = int(call.data.split(":")[1])
+
+    pool = await get_pool()
+
+
+    withdraw = await pool.fetchrow(
+        """
+        SELECT amount
+        FROM withdrawals
+        WHERE seller_id=$1
+        AND status='pending'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        user_id
+    )
+
+
+    if withdraw:
+
+        await pool.execute(
+            """
+            UPDATE users
+            SET balance = balance + $1
+            WHERE telegram_id=$2
+            """,
+            withdraw["amount"],
+            user_id
+        )
+
+
+    await pool.execute(
+        """
+        UPDATE withdrawals
+        SET status='rejected'
+        WHERE seller_id=$1
+        AND status='pending'
+        """,
+        user_id
+    )
+
+
+    await call.message.edit_text(
+        (
+            "❌ <b>WITHDRAW DITOLAK</b>\n\n"
+            f"👤 User ID : <code>{user_id}</code>\n"
+            "Saldo dikembalikan."
+        ),
+        parse_mode="HTML"
+    )
+
+
+    await call.answer("Withdraw ditolak")
+
+
+    try:
+
+        await call.bot.send_message(
+            user_id,
+            (
+                "❌ <b>WITHDRAW DITOLAK</b>\n\n"
+                "Saldo kamu sudah dikembalikan."
+            ),
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        print("NOTIF USER ERROR:", e)
