@@ -35,6 +35,10 @@ def home_kb():
                 InlineKeyboardButton(
                     text="🔎 Search Code",
                     callback_data="search_code"
+                ),
+                InlineKeyboardButton(
+                    text="💰 Search Harga",
+                    callback_data="search_price"
                 )
             ],
 
