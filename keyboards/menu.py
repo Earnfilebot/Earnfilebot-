@@ -5,8 +5,10 @@ from aiogram.types import (
 
 
 def home_kb():
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
+
             [
                 InlineKeyboardButton(
                     text="📤 Upload File",
@@ -17,6 +19,25 @@ def home_kb():
                     callback_data="getfile"
                 )
             ],
+
+            [
+                InlineKeyboardButton(
+                    text="🏆 Top File",
+                    callback_data="top_file"
+                ),
+                InlineKeyboardButton(
+                    text="🆕 New Code",
+                    callback_data="new_code"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    text="🔎 Search Code",
+                    callback_data="search_code"
+                )
+            ],
+
             [
                 InlineKeyboardButton(
                     text="👤 Account",
@@ -27,17 +48,20 @@ def home_kb():
                     callback_data="vvip"
                 )
             ],
+
             [
                 InlineKeyboardButton(
                     text="💸 Withdraw",
                     callback_data="withdraw"
                 )
             ],
+
             [
                 InlineKeyboardButton(
                     text="ℹ️ Bantuan",
                     callback_data="help"
                 )
             ]
+
         ]
     )
