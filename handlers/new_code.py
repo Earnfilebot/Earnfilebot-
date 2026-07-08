@@ -22,7 +22,7 @@ async def new_file(call: CallbackQuery):
         """
         SELECT
             code,
-            total_media,
+            media_count,
             created_at
         FROM files
         ORDER BY created_at DESC
@@ -61,7 +61,7 @@ async def new_file(call: CallbackQuery):
 
         text += (
             f"{i}. 🔑 <code>{row['code']}</code>\n"
-            f"📦 Media : {row['total_media']} file\n"
+            f"📦 Media : {row['media_count']} file\n"
             f"🕒 {waktu}\n\n"
         )
 
