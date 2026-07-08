@@ -74,5 +74,6 @@ async def notify_user(message: Message, state: FSMContext):
         return await message.reply(
             "👋 Halo!\n\n"
             "📤 Jika ingin upload file, tekan tombol UPFILE.\n"
-            "📥 Jika ingin membuka file, tekan tombol GETFILE."
+            "📥 Jika ingin membuka file, tekan tombol GETFILE.\n"
+            "👇🏼 Klik menu Dan klik bantuan jika tidak faham"
         )
