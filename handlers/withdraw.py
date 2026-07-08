@@ -1,5 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from config import ADMIN_IDS
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
@@ -592,12 +593,24 @@ async def withdraw_cancel(
 
     await state.clear()
 
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="🔙 Menu Withdraw",
+        callback_data="withdraw"
+    )
+
+    kb.adjust(1)
+
     await call.message.edit_text(
         (
-            "❌ <b>Withdraw dibatalkan.</b>\n\n"
-            "Kamu kembali ke menu withdraw."
+            "❌ <b>WITHDRAW DIBATALKAN</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "Permintaan withdraw dibatalkan.\n"
+            "Saldo kamu tidak berubah."
         ),
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
     )
 
     await call.answer()
