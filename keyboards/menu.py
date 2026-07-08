@@ -36,7 +36,7 @@ def home_kb():
             [
                 InlineKeyboardButton(
                     text="ℹ️ Bantuan",
-                    callback_udata="help"
+                    callback_data="help"
                 )
             ]
         ]
