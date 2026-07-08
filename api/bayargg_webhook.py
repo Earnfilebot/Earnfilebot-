@@ -15,7 +15,7 @@ from config import BAYARGG_SECRET
 router = APIRouter(prefix="/bayargg", tags=["BayarGG"])
 
 SECRET_KEY = BAYARGG_SECRET.encode()
-ADMIN_CHAT_ID = -1004395938795
+ADMIN_CHAT_ID = -1003894841696
 
 
 def secure_compare(a: str, b: str) -> bool:
