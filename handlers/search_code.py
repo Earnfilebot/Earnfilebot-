@@ -1,15 +1,27 @@
 from aiogram import Router, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
+
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from database import get_pool
 
+
 router = Router()
 
 
+# =========================
+# STATE
+# =========================
+
 class SearchCodeState(StatesGroup):
     waiting_code = State()
+
 
 
 # =========================
@@ -26,14 +38,19 @@ async def search_start(
         SearchCodeState.waiting_code
     )
 
+
     await call.message.answer(
-        "🔎 <b>Masukkan CODE</b>\n\n"
+        "🔎 <b>SEARCH CODE</b>\n"
+        "━━━━━━━━━━━━━━━\n\n"
+        "Silakan masukkan CODE file.\n\n"
         "Contoh:\n"
         "<code>DecoderFileBot9KLWL057NH</code>",
         parse_mode="HTML"
     )
 
+
     await call.answer()
+
 
 
 # =========================
@@ -46,7 +63,12 @@ async def search_process(
     state: FSMContext
 ):
 
+    if not message.text:
+        return
+
+
     code = message.text.strip()
+
 
     pool = await get_pool()
 
@@ -60,7 +82,8 @@ async def search_process(
             total_media,
             download_count,
             created_at,
-            is_paid
+            is_paid,
+            price
         FROM files
         WHERE code=$1
         """,
@@ -77,35 +100,32 @@ async def search_process(
         )
 
 
-    waktu = file["created_at"].strftime(
-        "%d-%m-%Y %H:%M"
+
+    waktu = (
+        file["created_at"].strftime(
+            "%d-%m-%Y %H:%M"
+        )
+        if file["created_at"]
+        else "-"
     )
+
 
 
     status = (
-        "💰 Berbayar"
+        f"💰 Berbayar Rp {file['price']:,}".replace(",", ".")
         if file["is_paid"]
-        else
-        "🆓 Gratis"
+        else "🆓 Gratis"
     )
 
 
-    title = (
-        file["title"]
-        if file["title"]
-        else
-        "-"
-    )
 
-    category = (
-        file["category"]
-        if file["category"]
-        else
-        "-"
-    )
+    title = file["title"] or "-"
+
+    category = file["category"] or "-"
 
 
-    kb = InlineKeyboardMarkup(
+
+    keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
 
             [
@@ -126,19 +146,29 @@ async def search_process(
     )
 
 
-    await message.answer(
+
+    text = (
         "🔎 <b>CODE DITEMUKAN</b>\n"
         "━━━━━━━━━━━━━━━\n\n"
+
         f"📌 Judul : {title}\n"
         f"📂 Kategori : {category}\n\n"
+
         f"🔑 CODE:\n"
         f"<code>{file['code']}</code>\n\n"
+
         f"📦 Media : {file['total_media']} file\n"
         f"📥 Download : {file['download_count']}x\n"
         f"📌 Status : {status}\n"
-        f"🕒 Dibuat : {waktu}",
+        f"🕒 Dibuat : {waktu}"
+    )
+
+
+
+    await message.answer(
+        text,
         parse_mode="HTML",
-        reply_markup=kb
+        reply_markup=keyboard
     )
 
 
