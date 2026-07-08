@@ -68,7 +68,7 @@ async def new_code(message: Message):
             [
                 InlineKeyboardButton(
                     text="⬅️ Kembali",
-                    callback_data="back_menu"
+                    callback_data="home"
                 )
             ]
         ]
@@ -81,14 +81,3 @@ async def new_code(message: Message):
         reply_markup=keyboard
     )
 
-
-
-# =========================
-# BUTTON KEMBALI
-# =========================
-@router.callback_query(F.data == "back_menu")
-async def back_menu(call: CallbackQuery):
-
-    await call.message.delete()
-
-    await call.answer()
