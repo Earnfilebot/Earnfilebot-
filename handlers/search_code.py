@@ -79,7 +79,7 @@ async def search_process(
             code,
             title,
             category,
-            total_media,
+            media_count,
             download_count,
             created_at,
             is_paid,
@@ -157,7 +157,7 @@ async def search_process(
         f"🔑 CODE:\n"
         f"<code>{file['code']}</code>\n\n"
 
-        f"📦 Media : {file['total_media']} file\n"
+        f"📦 Media : {file['media_count']} file\n"
         f"📥 Download : {file['download_count']}x\n"
         f"📌 Status : {status}\n"
         f"🕒 Dibuat : {waktu}"
