@@ -13,8 +13,8 @@ router = Router()
 # =========================
 # MENU NEW CODE
 # =========================
-@router.message(F.text == "new_code")
-async def new_code(message: Message):
+@router.callback_query(F.data == "new_code")
+async def new_file(call: CallbackQuery):
 
     pool = await get_pool()
 
