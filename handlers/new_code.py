@@ -1,10 +1,10 @@
 from aiogram import Router, F
 from aiogram.types import (
-    Message,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CallbackQuery
 )
+
 from database import get_pool
 
 router = Router()
@@ -33,9 +33,12 @@ async def new_file(call: CallbackQuery):
 
     if not rows:
 
-        return await message.answer(
+        await call.message.answer(
             "❌ Belum ada code baru."
         )
+
+        return await call.answer()
+
 
 
     text = (
@@ -75,9 +78,11 @@ async def new_file(call: CallbackQuery):
     )
 
 
-    await message.answer(
+    await call.message.answer(
         text,
         parse_mode="HTML",
         reply_markup=keyboard
     )
 
+
+    await call.answer()
