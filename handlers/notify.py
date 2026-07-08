@@ -11,19 +11,19 @@ router = Router()
 async def notify_user(message: Message, state: FSMContext):
     """
     Handler global:
-    - Kirim media -> suruh tekan UPFILE
-    - Kirim kode/link file -> suruh tekan GETFILE
-    - Chat biasa -> balas otomatis
+    - Kirim media -> arahkan ke UPFILE
+    - Kirim kode/link -> arahkan ke GETFILE
+    - Chat biasa -> arahkan ke HELP
     """
 
-    # Jangan ganggu kalau user sedang di state lain
+    # Jangan ganggu jika user sedang menggunakan fitur lain
     current_state = await state.get_state()
     if current_state:
         return
 
-    # =========================
-    # USER KIRIM MEDIA
-    # =========================
+    # =====================================
+    # USER MENGIRIM MEDIA
+    # =====================================
     if (
         message.video
         or message.photo
@@ -33,17 +33,18 @@ async def notify_user(message: Message, state: FSMContext):
         or message.voice
     ):
         return await message.reply(
-            "📤 Untuk mengupload file, silakan tekan tombol UPFILE terlebih dahulu."
+            "📤 <b>Upload File</b>\n\n"
+            "Untuk mengupload file, silakan tekan tombol <b>UPFILE</b> terlebih dahulu.\n\n"
+            "❓ Jika masih bingung cara menggunakannya, silakan buka menu <b>HELP / BANTUAN</b> untuk melihat panduan lengkap."
         )
 
-    # =========================
-    # USER KIRIM TEXT
-    # =========================
+    # =====================================
+    # USER MENGIRIM TEXT
+    # =====================================
     if message.text:
 
         text = message.text.strip()
 
-        # Deteksi kode atau link getfile
         is_getfile_code = False
 
         if "getfile_" in text.lower():
@@ -62,18 +63,31 @@ async def notify_user(message: Message, state: FSMContext):
         ):
             is_getfile_code = True
 
-        # Jika kirim kode file
+        # =====================================
+        # USER MENGIRIM KODE FILE
+        # =====================================
         if is_getfile_code:
             return await message.reply(
-                "📥 Untuk membuka file, silakan tekan tombol GETFILE terlebih dahulu, lalu kirim kode file."
+                "📥 <b>Get File</b>\n\n"
+                "Untuk membuka file, silakan tekan tombol <b>GETFILE</b> terlebih dahulu, kemudian kirim kode file tersebut.\n\n"
+                "❓ Jika masih bingung, silakan buka menu <b>HELP / BANTUAN</b> untuk melihat panduan lengkap."
             )
 
-        # =========================
+        # =====================================
         # CHAT BIASA
-        # =========================
+        # =====================================
         return await message.reply(
             "👋 Halo!\n\n"
-            "📤 Jika ingin upload file, tekan tombol UPFILE.\n"
-            "📥 Jika ingin membuka file, tekan tombol GETFILE.\n"
-            "👇🏼 Klik menu Dan klik bantuan jika tidak faham"
+            "Silakan pilih menu sesuai kebutuhan:\n\n"
+            "📤 <b>UPFILE</b>\n"
+            "Untuk upload file dan menghasilkan uang.\n\n"
+            "📥 <b>GETFILE</b>\n"
+            "Untuk membuka file menggunakan kode.\n\n"
+            "❓ <b>HELP / BANTUAN</b>\n"
+            "Berisi panduan lengkap mulai dari:\n"
+            "• Cara Upload File\n"
+            "• Cara Get File\n"
+            "• Cara Mendapatkan Cuan\n"
+            "• Cara Withdraw\n"
+            "• Informasi VVIP"
         )
