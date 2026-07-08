@@ -1,10 +1,18 @@
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
+
 from database import get_pool
 
 router = Router()
 
 
+# =========================
+# MENU TOP FILE
+# =========================
 @router.callback_query(F.data == "top_file")
 async def top_file(call: CallbackQuery):
 
@@ -26,9 +34,13 @@ async def top_file(call: CallbackQuery):
 
 
     if not rows:
-        return await message.answer(
+
+        await call.message.answer(
             "❌ Belum ada data code."
         )
+
+        return await call.answer()
+
 
 
     text = (
@@ -39,7 +51,13 @@ async def top_file(call: CallbackQuery):
 
     for rank, row in enumerate(rows, start=1):
 
-        status = "💰 VIP" if row["is_paid"] else "🆓 FREE"
+        status = (
+            "💰 PAID"
+            if row["is_paid"]
+            else
+            "🆓 FREE"
+        )
+
 
         text += (
             f"{rank}. 🔑 <code>{row['code']}</code>\n"
@@ -49,7 +67,24 @@ async def top_file(call: CallbackQuery):
         )
 
 
-    await message.answer(
-        text,
-        parse_mode="HTML"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Kembali",
+                    callback_data="home"
+                )
+            ]
+        ]
     )
+
+
+    await call.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
+    await call.answer()
