@@ -16,9 +16,9 @@ class SearchCodeState(StatesGroup):
 # BUTTON SEARCH CODE
 # =========================
 
-@router.message(F.text == "🔎 Search Code")
+@router.callback_query(F.data == "search_code")
 async def search_start(
-    message: Message,
+    call: CallbackQuery,
     state: FSMContext
 ):
 
@@ -26,12 +26,14 @@ async def search_start(
         SearchCodeState.waiting_code
     )
 
-    await message.answer(
+    await call.message.answer(
         "🔎 <b>Masukkan CODE</b>\n\n"
         "Contoh:\n"
         "<code>DecoderFileBot9KLWL057NH</code>",
         parse_mode="HTML"
     )
+
+    await call.answer()
 
 
 # =========================
