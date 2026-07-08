@@ -6,7 +6,7 @@ router = Router()
 
 
 @router.callback_query(F.data == "top_file")
-async def top_code(message: Message):
+async def top_file(call: CallbackQuery):
 
     pool = await get_pool()
 
