@@ -24,7 +24,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # =========================
 BAYARGG_API_KEY = os.getenv("BAYARGG_API_KEY")
 BAYARGG_MERCHANT = os.getenv("BAYARGG_MERCHANT")
-
+BAYARGG_WEBHOOK_SECRET = os.getenv("BAYARGG_WEBHOOK_SECRET")
 # =========================
 # CHANNEL / GROUP
 # =========================
