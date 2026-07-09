@@ -2,6 +2,24 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
+__all__ = [
+    "WIB",
+    "WITHDRAW_OPEN_HOUR",
+    "WITHDRAW_CLOSE_HOUR",
+    "MIN_WITHDRAW",
+    "WITHDRAW_FEE",
+    "INSTANT_AMOUNT",
+    "INSTANT_FEE",
+    "INSTANT_MIN_BALANCE",
+    "WITHDRAW_NOMINALS",
+    "withdraw_is_open",
+    "rupiah",
+    "mask_name",
+    "mask_account",
+    "mask_id",
+]
+
+
 # =========================
 # TIMEZONE
 # =========================
@@ -22,8 +40,7 @@ WITHDRAW_CLOSE_HOUR = 19
 # =========================
 
 MIN_WITHDRAW = 100_000
-WITHDRAW_FEE = 2_000
-
+WITHDRAW_FEE = 5_000
 
 INSTANT_AMOUNT = 50_000
 INSTANT_FEE = 10_000
@@ -41,19 +58,14 @@ WITHDRAW_NOMINALS = (
 
 
 # =========================
-# CHECK JAM OPERASIONAL
+# JAM OPERASIONAL
 # =========================
 
 def withdraw_is_open() -> bool:
-    """
-    Withdraw buka:
-    Senin - Jumat
-    09:00 - 19:00 WIB
-    """
 
     now = datetime.now(WIB)
 
-    # Sabtu Minggu tutup
+    # Sabtu & Minggu tutup
     if now.weekday() >= 5:
         return False
 
@@ -78,10 +90,6 @@ def rupiah(amount: int) -> str:
 # =========================
 
 def mask_name(name: str) -> str:
-    """
-    Bayu Anggara
-    B**u A*****a
-    """
 
     if not name:
         return "-"
@@ -91,17 +99,12 @@ def mask_name(name: str) -> str:
     for word in name.split():
 
         if len(word) <= 2:
-            result.append(
-                word[0] + "*"
-            )
-
+            result.append(word[0] + "*")
         else:
             result.append(
                 word[0]
-                +
-                "*" * (len(word) - 2)
-                +
-                word[-1]
+                + "*" * (len(word) - 2)
+                + word[-1]
             )
 
     return " ".join(result)
@@ -112,25 +115,19 @@ def mask_name(name: str) -> str:
 # =========================
 
 def mask_account(number: str) -> str:
-    """
-    081234567890
-    0812****7890
-    """
 
     if not number:
         return "-"
 
     number = str(number)
 
-    if len(number) <= 6:
+    if len(number) <= 8:
         return "*" * len(number)
 
     return (
         number[:4]
-        +
-        "*" * (len(number) - 8)
-        +
-        number[-4:]
+        + "*" * (len(number) - 8)
+        + number[-4:]
     )
 
 
@@ -139,10 +136,6 @@ def mask_account(number: str) -> str:
 # =========================
 
 def mask_id(user_id) -> str:
-    """
-    6847035364
-    684*****364
-    """
 
     if not user_id:
         return "-"
@@ -154,8 +147,6 @@ def mask_id(user_id) -> str:
 
     return (
         uid[:3]
-        +
-        "*****"
-        +
-        uid[-3:]
+        + "*****"
+        + uid[-3:]
     )
