@@ -32,6 +32,16 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1004395938795"))
 GROUP_ID = int(os.getenv("GROUP_ID", str(CHANNEL_ID)))
 
 # =========================
+# WITHDRAW
+# =========================
+WITHDRAW_CHANNEL_ID = int(
+    os.getenv(
+        "WITHDRAW_CHANNEL_ID",
+        str(CHANNEL_ID)
+    )
+)
+
+# =========================
 # ADMIN
 # =========================
 ADMIN_IDS = [
