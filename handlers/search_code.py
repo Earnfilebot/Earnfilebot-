@@ -40,11 +40,13 @@ async def search_start(
 
 
     await call.message.answer(
-        "🔎 <b>SEARCH CODE</b>\n"
+        "🔎 <b>PENCARIAN FILE</b>\n"
         "━━━━━━━━━━━━━━━\n\n"
-        "Silakan masukkan CODE file.\n\n"
+        "Masukkan kata kunci pencarian.\n\n"
         "Contoh:\n"
-        "<code>DecoderFileBot9KLWL057NH</code>",
+        "<code>viral</code>\n"
+        "<code>drakor</code>\n"
+        "<code>bokep viral</code>",
         parse_mode="HTML"
     )
 
