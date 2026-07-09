@@ -67,13 +67,13 @@ async def search_process(
         return
 
 
-    code = message.text.strip()
+    keyword = message.text.strip()
 
 
     pool = await get_pool()
 
 
-    file = await pool.fetchrow(
+    files = await pool.fetch(
         """
         SELECT
             code,
@@ -85,91 +85,86 @@ async def search_process(
             is_paid,
             price
         FROM files
-        WHERE code=$1
+        WHERE
+            code ILIKE $1
+            OR title ILIKE $1
+            OR category ILIKE $1
+        ORDER BY created_at DESC
+        LIMIT 20
         """,
-        code
+        f"%{keyword}%"
     )
 
 
-    if not file:
+    await state.clear()
 
-        await state.clear()
+
+    if not files:
 
         return await message.answer(
-            "❌ CODE tidak ditemukan."
+            "❌ Tidak ada file yang cocok."
         )
-
-
-
-    waktu = (
-        file["created_at"].strftime(
-            "%d-%m-%Y %H:%M"
-        )
-        if file["created_at"]
-        else "-"
-    )
-
-
-
-    status = (
-        f"💰 Berbayar Rp {file['price']:,}".replace(",", ".")
-        if file["is_paid"]
-        else "🆓 Gratis"
-    )
-
-
-
-    title = file["title"] or "-"
-
-    category = file["category"] or "-"
-
-
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-
-            [
-                InlineKeyboardButton(
-                    text="📥 Ambil File",
-                    callback_data=f"page:{code}:1"
-                )
-            ],
-
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Kembali",
-                    callback_data="home"
-                )
-            ]
-
-        ]
-    )
 
 
 
     text = (
-        "🔎 <b>CODE DITEMUKAN</b>\n"
+        "🔎 <b>HASIL PENCARIAN</b>\n"
         "━━━━━━━━━━━━━━━\n\n"
-
-        f"📌 Judul : {title}\n"
-        f"📂 Kategori : {category}\n\n"
-
-        f"🔑 CODE:\n"
-        f"<code>{file['code']}</code>\n\n"
-
-        f"📦 Media : {file['media_count']} file\n"
-        f"📥 Download : {file['download_count']}x\n"
-        f"📌 Status : {status}\n"
-        f"🕒 Dibuat : {waktu}"
+        f"Keyword : <code>{keyword}</code>\n\n"
     )
 
+
+    buttons = []
+
+
+    for i, file in enumerate(files, 1):
+
+        title = file["title"] or "-"
+
+        category = file["category"] or "-"
+
+
+        status = (
+            f"💰 Rp {file['price']:,}".replace(",", ".")
+            if file["is_paid"]
+            else "🆓 Gratis"
+        )
+
+
+        text += (
+            f"<b>{i}. {title}</b>\n"
+            f"📂 {category}\n"
+            f"🔑 <code>{file['code']}</code>\n"
+            f"📦 {file['media_count']} file\n"
+            f"📌 {status}\n\n"
+        )
+
+
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"📥 Ambil {i}",
+                    callback_data=f"page:{file['code']}:1"
+                )
+            ]
+        )
+
+
+
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ Kembali",
+                callback_data="home"
+            )
+        ]
+    )
 
 
     await message.answer(
         text,
         parse_mode="HTML",
-        reply_markup=keyboard
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        )
     )
-
-
-    await state.clear()
