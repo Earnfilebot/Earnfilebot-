@@ -300,7 +300,6 @@ async def pay_file(call: CallbackQuery):
         )
 
 
-
         # =========================
         # SEND QR
         # =========================
@@ -308,6 +307,23 @@ async def pay_file(call: CallbackQuery):
             "TRY SEND QR | %s",
             invoice_id
         )
+
+        # Hapus pesan "FILE BERBAYAR"
+        try:
+
+            await call.message.delete()
+
+            logger.info(
+                "PAY MESSAGE DELETED | user=%s file=%s",
+                user_id,
+                code
+            )
+
+        except Exception:
+
+            logger.exception(
+                "DELETE PAY MESSAGE ERROR"
+            )
 
 
         msg = await call.message.answer_photo(
