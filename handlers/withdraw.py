@@ -58,7 +58,84 @@ def withdraw_is_open() -> bool:
 
     return WITHDRAW_OPEN_HOUR <= now.hour < WITHDRAW_CLOSE_HOUR
 
+# =========================
+# MASK DATA CHANNEL
+# =========================
 
+def mask_name(name: str) -> str:
+    """
+    Contoh:
+    Bayu Anggara
+    menjadi:
+    B**u A*****a
+    """
+
+    if not name:
+        return "-"
+
+    result = []
+
+    for word in name.split():
+
+        if len(word) <= 2:
+            result.append(word[0] + "*")
+
+        else:
+            result.append(
+                word[0]
+                + "*" * (len(word) - 2)
+                + word[-1]
+            )
+
+    return " ".join(result)
+
+
+
+def mask_account(number: str) -> str:
+    """
+    Contoh:
+    081234567890
+    menjadi:
+    0812****7890
+    """
+
+    if not number:
+        return "-"
+
+    number = str(number)
+
+    if len(number) <= 6:
+        return "*" * len(number)
+
+    return (
+        number[:4]
+        + "*" * (len(number) - 8)
+        + number[-4:]
+    )
+
+
+
+def mask_id(user_id) -> str:
+    """
+    Contoh:
+    6847035364
+    menjadi:
+    684*****364
+    """
+
+    if not user_id:
+        return "-"
+
+    uid = str(user_id)
+
+    if len(uid) <= 6:
+        return "*" * len(uid)
+
+    return (
+        uid[:3]
+        + "*****"
+        + uid[-3:]
+    )
 # =========================
 # MENU WITHDRAW
 # =========================
@@ -1461,11 +1538,11 @@ async def withdraw_process(call: CallbackQuery):
                 "━━━━━━━━━━━━━━\n\n"
 
                 f"🆔 Withdraw ID : <code>{withdraw_id}</code>\n"
-                f"👤 User ID : <code>{wd['seller_id']}</code>\n\n"
+                f"👤 User ID : <code>{mask_id(wd['seller_id'])}</code>\n"
 
                 f"🏦 Metode : <b>{wd['method']}</b>\n"
-                f"👤 Nama Rekening : <b>{wd['account_name']}</b>\n"
-                f"💳 Nomor : <code>{wd['account_number']}</code>\n\n"
+                f"👤 Nama Rekening : <b>{mask_name(wd['account_name'])}</b>\n"
+                f"💳 Nomor : <code>{mask_account(wd['account_number'])}</code>\n\n"
 
                 f"💰 Nominal : <b>Rp {wd['amount']:,}</b>\n"
 
