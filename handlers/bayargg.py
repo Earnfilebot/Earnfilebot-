@@ -41,7 +41,7 @@ async def bayargg_webhook(request: Request):
     body = await request.body()
 
     signature = request.headers.get(
-        "X-Callback-Signature",
+        "X-Webhook-Signature",
         ""
     )
 
@@ -73,6 +73,10 @@ async def bayargg_webhook(request: Request):
             "BODY=%s",
             body.decode(errors="ignore")
         )
+        return {
+            "success": False,
+            "message": "Invalid signature"
+        }
 
 
 
