@@ -810,7 +810,6 @@ async def withdraw_instant_confirm(
                         seller_id,
                         amount,
                         fee,
-                        total,
                         method,
                         account_name,
                         account_number,
@@ -819,7 +818,7 @@ async def withdraw_instant_confirm(
                     )
                     VALUES
                     (
-                        $1,$2,$3,$4,$5,$6,$7,
+                        $1,$2,$3,$4,$5,$6,
                         'instant_pending',
                         NOW()
                     )
@@ -828,7 +827,6 @@ async def withdraw_instant_confirm(
                     call.from_user.id,
                     amount,
                     fee,
-                    total,
                     account["method_name"],
                     account["account_name"],
                     account["account_number"]
@@ -1025,7 +1023,6 @@ async def withdraw_confirm(
         WHERE
             uwa.id=$1
             AND uwa.user_id=$2
-            AND uwa.is_active=TRUE
         """,
         data["withdraw_account_id"],
         call.from_user.id
