@@ -5,7 +5,11 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_pool
-from config import ADMIN_IDS
+
+from config import (
+    ADMIN_IDS,
+    WITHDRAW_CHANNEL_ID
+)
 
 from handlers.withdraw.utils import (
     withdraw_is_open,
@@ -21,13 +25,11 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-# =========================
-# KONFIRMASI WITHDRAW REGULER
-# =========================
+# =====================================================
+# WITHDRAW REGULER CONFIRM
+# =====================================================
 
-@router.callback_query(
-    F.data.startswith("withdraw_confirm:")
-)
+@router.callback_query(F.data.startswith("withdraw_confirm:"))
 async def withdraw_confirm(
     call: CallbackQuery
 ):
@@ -58,9 +60,9 @@ async def withdraw_confirm(
             async with conn.transaction():
 
 
-                # =====================
+                # =========================
                 # LOCK USER
-                # =====================
+                # =========================
 
                 user = await conn.fetchrow(
                     """
@@ -92,23 +94,19 @@ async def withdraw_confirm(
                     )
 
 
-
-                # =====================
-                # CEK PENDING
-                # =====================
+                # =========================
+                # CEK WITHDRAW PENDING
+                # =========================
 
                 pending = await conn.fetchval(
                     """
                     SELECT id
-                    FROM withdrawals
-
+                    FROM withdraws
                     WHERE seller_id=$1
-
                     AND status IN (
                         'pending',
                         'instant_pending'
                     )
-
                     LIMIT 1
                     """,
                     call.from_user.id
@@ -123,15 +121,13 @@ async def withdraw_confirm(
                     )
 
 
-
-                # =====================
-                # REKENING DEFAULT
-                # =====================
+                # =========================
+                # AMBIL ACCOUNT DEFAULT
+                # =========================
 
                 account = await conn.fetchrow(
                     """
                     SELECT
-
                         uwa.account_name,
                         uwa.account_number,
                         wm.name AS method_name
@@ -141,13 +137,10 @@ async def withdraw_confirm(
                     JOIN withdraw_methods wm
                     ON wm.id = uwa.method_id
 
-
                     WHERE uwa.user_id=$1
-
                     AND uwa.is_default=true
 
                     LIMIT 1
-
                     """,
                     call.from_user.id
                 )
@@ -161,17 +154,15 @@ async def withdraw_confirm(
                     )
 
 
-
-                # =====================
+                # =========================
                 # POTONG SALDO
-                # =====================
+                # =========================
 
                 await conn.execute(
                     """
                     UPDATE users
 
-                    SET balance =
-                    balance - $1
+                    SET balance = balance - $1
 
                     WHERE telegram_id=$2
                     """,
@@ -180,29 +171,29 @@ async def withdraw_confirm(
                 )
 
 
-
-                # =====================
+                # =========================
                 # INSERT WITHDRAW
-                # =====================
+                # =========================
 
                 withdraw_id = await conn.fetchval(
                     """
-                    INSERT INTO withdrawals
+                    INSERT INTO withdraws
                     (
                         seller_id,
                         amount,
-                        fee,
                         method,
                         account_name,
                         account_number,
                         status,
+                        fee,
                         created_at
                     )
 
                     VALUES
                     (
-                        $1,$2,$3,$4,$5,$6,
+                        $1,$2,$3,$4,$5,
                         'pending',
+                        $6,
                         NOW()
                     )
 
@@ -211,17 +202,16 @@ async def withdraw_confirm(
 
                     call.from_user.id,
                     amount,
-                    WITHDRAW_FEE,
                     account["method_name"],
                     account["account_name"],
-                    account["account_number"]
+                    account["account_number"],
+                    WITHDRAW_FEE
                 )
 
 
-
-                # =====================
-                # HISTORY SALDO
-                # =====================
+                # =========================
+                # WALLET LOG
+                # =========================
 
                 await conn.execute(
                     """
@@ -262,11 +252,6 @@ async def withdraw_confirm(
         )
 
 
-
-    # =====================
-    # NOTIF ADMIN
-    # =====================
-
     await send_admin_notification(
         call,
         withdraw_id,
@@ -276,9 +261,13 @@ async def withdraw_confirm(
     )
 
 
-    # =====================
-    # USER SUCCESS
-    # =====================
+    await send_withdraw_channel(
+        call,
+        withdraw_id,
+        amount,
+        WITHDRAW_FEE,
+        "pending"
+    )
 
 
     kb = InlineKeyboardBuilder()
@@ -305,8 +294,8 @@ async def withdraw_confirm(
             f"🆔 ID : <code>{withdraw_id}</code>\n\n"
 
             f"💰 Nominal : <b>{rupiah(amount)}</b>\n"
-            f"💸 Fee Telegram : <b>{rupiah(WITHDRAW_FEE)}</b>\n"
-            f"📉 Dipotong : <b>{rupiah(amount + WITHDRAW_FEE)}</b>\n\n"
+            f"💸 Fee Admin : <b>{rupiah(WITHDRAW_FEE)}</b>\n"
+            f"📉 Total Potong : <b>{rupiah(total)}</b>\n\n"
 
             "⏳ Status : MENUNGGU ADMIN"
         ),
@@ -315,11 +304,9 @@ async def withdraw_confirm(
         reply_markup=kb.as_markup()
     )
 
-
-
-# =========================
+# =====================================================
 # WITHDRAW INSTANT
-# =========================
+# =====================================================
 
 @router.callback_query(
     F.data == "withdraw_instant_confirm"
@@ -339,7 +326,6 @@ async def withdraw_instant_confirm(
         )
 
 
-
     pool = await get_pool()
 
 
@@ -353,15 +339,20 @@ async def withdraw_instant_confirm(
                 user = await conn.fetchrow(
                     """
                     SELECT balance
-
                     FROM users
-
                     WHERE telegram_id=$1
-
                     FOR UPDATE
                     """,
                     call.from_user.id
                 )
+
+
+                if not user:
+
+                    return await call.answer(
+                        "User tidak ditemukan.",
+                        show_alert=True
+                    )
 
 
                 total = (
@@ -379,50 +370,66 @@ async def withdraw_instant_confirm(
                     )
 
 
-
-                account = await conn.fetchrow(
+                pending = await conn.fetchval(
                     """
-                    SELECT
+                    SELECT id
+                    FROM withdraws
 
-                    uwa.account_name,
-                    uwa.account_number,
-                    wm.name AS method_name
+                    WHERE seller_id=$1
 
-
-                    FROM user_withdraw_accounts uwa
-
-                    JOIN withdraw_methods wm
-
-                    ON wm.id=uwa.method_id
-
-
-                    WHERE uwa.user_id=$1
-
-                    AND uwa.is_default=true
+                    AND status IN(
+                        'pending',
+                        'instant_pending'
+                    )
 
                     LIMIT 1
-
                     """,
                     call.from_user.id
                 )
 
 
+                if pending:
+
+                    return await call.answer(
+                        "Masih ada withdraw pending.",
+                        show_alert=True
+                    )
+
+
+                account = await conn.fetchrow(
+                    """
+                    SELECT
+                        uwa.account_name,
+                        uwa.account_number,
+                        wm.name AS method_name
+
+                    FROM user_withdraw_accounts uwa
+
+                    JOIN withdraw_methods wm
+                    ON wm.id = uwa.method_id
+
+                    WHERE uwa.user_id=$1
+                    AND uwa.is_default=true
+
+                    LIMIT 1
+                    """,
+                    call.from_user.id
+                )
+
 
                 if not account:
 
                     return await call.answer(
-                        "Rekening belum ada.",
+                        "Rekening belum tersedia.",
                         show_alert=True
                     )
-
 
 
                 await conn.execute(
                     """
                     UPDATE users
 
-                    SET balance =
-                    balance-$1
+                    SET balance = balance - $1
 
                     WHERE telegram_id=$2
                     """,
@@ -431,26 +438,26 @@ async def withdraw_instant_confirm(
                 )
 
 
-
                 withdraw_id = await conn.fetchval(
                     """
-                    INSERT INTO withdrawals
+                    INSERT INTO withdraws
                     (
-                    seller_id,
-                    amount,
-                    fee,
-                    method,
-                    account_name,
-                    account_number,
-                    status,
-                    created_at
+                        seller_id,
+                        amount,
+                        method,
+                        account_name,
+                        account_number,
+                        status,
+                        fee,
+                        created_at
                     )
 
                     VALUES
                     (
-                    $1,$2,$3,$4,$5,$6,
-                    'instant_pending',
-                    NOW()
+                        $1,$2,$3,$4,$5,
+                        'instant_pending',
+                        $6,
+                        NOW()
                     )
 
                     RETURNING id
@@ -458,32 +465,31 @@ async def withdraw_instant_confirm(
 
                     call.from_user.id,
                     INSTANT_AMOUNT,
-                    INSTANT_FEE,
                     account["method_name"],
                     account["account_name"],
-                    account["account_number"]
+                    account["account_number"],
+                    INSTANT_FEE
                 )
-
 
 
                 await conn.execute(
                     """
                     INSERT INTO wallet_transactions
                     (
-                    telegram_id,
-                    type,
-                    amount,
-                    description,
-                    created_at
+                        telegram_id,
+                        type,
+                        amount,
+                        description,
+                        created_at
                     )
 
                     VALUES
                     (
-                    $1,
-                    'withdraw_instant',
-                    $2,
-                    $3,
-                    NOW()
+                        $1,
+                        'withdraw_instant',
+                        $2,
+                        $3,
+                        NOW()
                     )
                     """,
 
@@ -493,7 +499,6 @@ async def withdraw_instant_confirm(
                 )
 
 
-
     except Exception:
 
         logger.exception(
@@ -501,10 +506,9 @@ async def withdraw_instant_confirm(
         )
 
         return await call.answer(
-            "Terjadi error.",
+            "Terjadi kesalahan sistem.",
             show_alert=True
         )
-
 
 
     await send_admin_notification(
@@ -516,6 +520,14 @@ async def withdraw_instant_confirm(
     )
 
 
+    await send_withdraw_channel(
+        call,
+        withdraw_id,
+        INSTANT_AMOUNT,
+        INSTANT_FEE,
+        "instant_pending"
+    )
+
 
     await call.message.edit_text(
 
@@ -523,12 +535,13 @@ async def withdraw_instant_confirm(
             "⚡ <b>WITHDRAW INSTANT BERHASIL</b>\n"
             "━━━━━━━━━━━━━━\n\n"
 
-            f"🆔 ID : <code>{withdraw_id}</code>\n"
+            f"🆔 ID : <code>{withdraw_id}</code>\n\n"
 
-            f"💰 Nominal : {rupiah(INSTANT_AMOUNT)}\n"
-            f"💸 Fee Telegram Fast : {rupiah(INSTANT_FEE)}\n\n"
+            f"💰 Nominal : <b>{rupiah(INSTANT_AMOUNT)}</b>\n"
+            f"💸 Fee Admin : <b>{rupiah(INSTANT_FEE)}</b>\n"
+            f"📉 Total Potong : <b>{rupiah(total)}</b>\n\n"
 
-            "⚡ Prioritas admin."
+            "⚡ Status : PRIORITAS ADMIN"
         ),
 
         parse_mode="HTML"
@@ -536,9 +549,9 @@ async def withdraw_instant_confirm(
 
 
 
-# =========================
-# ADMIN NOTIF
-# =========================
+# =====================================================
+# ADMIN NOTIFICATION
+# =====================================================
 
 async def send_admin_notification(
     call,
@@ -547,6 +560,23 @@ async def send_admin_notification(
     fee,
     status
 ):
+
+    kb = InlineKeyboardBuilder()
+
+
+    kb.button(
+        text="✅ APPROVE",
+        callback_data=f"wd_approve:{withdraw_id}"
+    )
+
+    kb.button(
+        text="❌ REJECT",
+        callback_data=f"wd_reject:{withdraw_id}"
+    )
+
+
+    kb.adjust(2)
+
 
     for admin_id in ADMIN_IDS:
 
@@ -564,12 +594,13 @@ async def send_admin_notification(
                     f"👤 User : <code>{call.from_user.id}</code>\n\n"
 
                     f"💰 Nominal : {rupiah(amount)}\n"
-                    f"💸 Fee : {rupiah(fee)}\n"
+                    f"💸 Fee : {rupiah(fee)}\n\n"
 
                     f"📌 Status : {status}"
                 ),
 
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=kb.as_markup()
             )
 
 
@@ -578,3 +609,48 @@ async def send_admin_notification(
             logger.exception(
                 "ADMIN NOTIFY ERROR"
             )
+
+
+
+# =====================================================
+# POST CHANNEL WITHDRAW
+# =====================================================
+
+async def send_withdraw_channel(
+    call,
+    withdraw_id,
+    amount,
+    fee,
+    status
+):
+
+    try:
+
+        await call.bot.send_message(
+
+            WITHDRAW_CHANNEL_ID,
+
+            (
+                "💸 <b>REQUEST WITHDRAW BARU</b>\n"
+                "━━━━━━━━━━━━━━\n\n"
+
+                f"🆔 ID : <code>{withdraw_id}</code>\n"
+                f"👤 User ID : <code>{call.from_user.id}</code>\n\n"
+
+                f"💰 Nominal : <b>{rupiah(amount)}</b>\n"
+                f"💸 Fee : <b>{rupiah(fee)}</b>\n\n"
+
+                f"📌 Status : ⏳ {status}\n\n"
+
+                "Menunggu proses admin."
+            ),
+
+            parse_mode="HTML"
+        )
+
+
+    except Exception:
+
+        logger.exception(
+            "CHANNEL WITHDRAW POST ERROR"
+        )
