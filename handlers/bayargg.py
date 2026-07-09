@@ -11,7 +11,10 @@ from aiogram.types import (
 )
 
 from bot import bot
-from config import BAYARGG_API_KEY, CHANNEL_ID
+from config import (
+    BAYARGG_WEBHOOK_SECRET,
+    CHANNEL_ID
+)
 from config_vip import VIP_PACKAGES
 from database import get_pool
 from utils.redis_client import redis_client
@@ -45,33 +48,10 @@ async def bayargg_webhook(request: Request):
         ""
     )
 
-
-    expected = hmac.new(
-        BAYARGG_API_KEY.encode(),
-        body,
-        hashlib.sha256
-    ).hexdigest()
-
-
-
-    # DEBUG SIGNATURE
-    if not secure_compare(
-        signature,
-        expected
-    ):
-
-        logger.warning("INVALID WEBHOOK SIGNATURE")
-        logger.warning("RECEIVED SIGNATURE=%s", signature)
-        logger.warning("EXPECTED SIGNATURE=%s", expected)
-        logger.warning("HEADER=%s", dict(request.headers))
-        logger.warning("BODY=%s", body.decode(errors="ignore"))
-
-        return {
-            "success": False,
-            "message": "Invalid signature"
-        }
-
-
+    timestamp = request.headers.get(
+        "X-Webhook-Timestamp",
+        ""
+    )
 
     try:
 
@@ -84,10 +64,39 @@ async def bayargg_webhook(request: Request):
         )
 
         return {
-            "success":False
+            "success": False
         }
 
+    # ==========================
+    # VERIFY SIGNATURE
+    # ==========================
 
+    signature_data = (
+        f"{data['invoice_id']}|"
+        f"{data['status']}|"
+        f"{data['final_amount']}|"
+        f"{timestamp}"
+    )
+
+    expected = hmac.new(
+        BAYARGG_WEBHOOK_SECRET.encode(),
+        signature_data.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if not secure_compare(signature, expected):
+
+        logger.warning("INVALID WEBHOOK SIGNATURE")
+        logger.warning("RECEIVED SIGNATURE=%s", signature)
+        logger.warning("EXPECTED SIGNATURE=%s", expected)
+        logger.warning("SIGNATURE DATA=%s", signature_data)
+        logger.warning("HEADER=%s", dict(request.headers))
+        logger.warning("BODY=%s", body.decode(errors="ignore"))
+
+        return {
+            "success": False,
+            "message": "Invalid signature"
+        }
 
     invoice_id = data.get(
         "invoice_id"
@@ -98,31 +107,23 @@ async def bayargg_webhook(request: Request):
         or ""
     ).lower()
 
-
-
     logger.info(
         "WEBHOOK | invoice=%s status=%s",
         invoice_id,
         status
     )
 
-
-
     if not invoice_id:
 
         return {
-            "success":False
+            "success": False
         }
-
-
 
     if status != "paid":
 
         return {
-            "success":True
+            "success": True
         }
-
-
 
     pool = await get_pool()
 
