@@ -60,19 +60,12 @@ async def bayargg_webhook(request: Request):
         expected
     ):
 
-        logger.warning(
-            "INVALID WEBHOOK SIGNATURE"
-        )
+        logger.warning("INVALID WEBHOOK SIGNATURE")
+        logger.warning("RECEIVED SIGNATURE=%s", signature)
+        logger.warning("EXPECTED SIGNATURE=%s", expected)
+        logger.warning("HEADER=%s", dict(request.headers))
+        logger.warning("BODY=%s", body.decode(errors="ignore"))
 
-        logger.warning(
-            "HEADER=%s",
-            dict(request.headers)
-        )
-
-        logger.warning(
-            "BODY=%s",
-            body.decode(errors="ignore")
-        )
         return {
             "success": False,
             "message": "Invalid signature"
