@@ -8,6 +8,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
+from database import get_pool
+from states.withdraw import WithdrawState
+from config import ADMIN_IDS
+
 router = Router()
 
 logger = logging.getLogger(__name__)
