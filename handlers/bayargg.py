@@ -313,6 +313,34 @@ async def bayargg_webhook(request: Request):
                 f"invoice:{invoice_id}"
             )
 
+            # ==========================
+            # DELETE QR MESSAGE
+            # ==========================
+            try:
+
+                if purchase["qr_chat_id"] and purchase["qr_message_id"]:
+
+                    logger.info(
+                        "TRY DELETE QR | chat=%s message=%s",
+                        purchase["qr_chat_id"],
+                        purchase["qr_message_id"]
+                    )
+
+                    await bot.delete_message(
+                        chat_id=purchase["qr_chat_id"],
+                        message_id=purchase["qr_message_id"]
+                    )
+
+                    logger.info(
+                        "QR MESSAGE DELETED | invoice=%s",
+                        invoice_id
+                    )
+
+            except Exception:
+
+                logger.exception(
+                    "DELETE QR MESSAGE ERROR"
+                )
 
             # ==========================
             # SEND OPEN FILE BUTTON
