@@ -736,7 +736,6 @@ async def withdraw_instant_confirm(
         WHERE
             uwa.id=$1
             AND uwa.user_id=$2
-            AND uwa.is_active=TRUE
         """,
         data["withdraw_account_id"],
         call.from_user.id
