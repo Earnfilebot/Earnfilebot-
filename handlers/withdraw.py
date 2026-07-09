@@ -716,13 +716,38 @@ async def withdraw_instant_confirm(
     data = await state.get_data()
 
     if data.get("withdraw_processing"):
-        return
+        return await call.answer(
+            "Sedang diproses...",
+            show_alert=True
+        )
+
+    account_id = data.get("withdraw_account_id")
+
+    # =========================
+    # SESSION EXPIRED
+    # =========================
+
+    if not account_id:
+
+        await state.clear()
+
+        return await call.answer(
+            "Session withdraw expired.\nSilakan ulangi dari menu withdraw.",
+            show_alert=True
+        )
+
 
     await state.update_data(
         withdraw_processing=True
     )
 
+
     pool = await get_pool()
+
+
+    # =========================
+    # AMBIL REKENING
+    # =========================
 
     account = await pool.fetchrow(
         """
@@ -736,27 +761,34 @@ async def withdraw_instant_confirm(
         WHERE
             uwa.id=$1
             AND uwa.user_id=$2
+        LIMIT 1
         """,
-        data["withdraw_account_id"],
+        account_id,
         call.from_user.id
     )
 
+
     if account is None:
+
         await state.clear()
+
         return await call.answer(
             "Rekening tidak ditemukan.",
             show_alert=True
         )
 
+
     amount = INSTANT_AMOUNT
     fee = INSTANT_FEE
     total = amount + fee
+
 
     try:
 
         async with pool.acquire() as conn:
 
             async with conn.transaction():
+
 
                 user = await conn.fetchrow(
                     """
@@ -768,30 +800,53 @@ async def withdraw_instant_confirm(
                     call.from_user.id
                 )
 
-                if user["balance"] < total:
+
+                if not user:
+
                     await state.clear()
+
+                    return await call.answer(
+                        "User tidak ditemukan.",
+                        show_alert=True
+                    )
+
+
+                if user["balance"] < total:
+
+                    await state.clear()
+
                     return await call.answer(
                         "Saldo tidak mencukupi.",
                         show_alert=True
                     )
+
 
                 pending = await conn.fetchval(
                     """
                     SELECT id
                     FROM withdrawals
                     WHERE seller_id=$1
-                    AND status IN ('pending','instant_pending')
+                    AND status IN (
+                        'pending',
+                        'instant_pending'
+                    )
                     LIMIT 1
                     """,
                     call.from_user.id
                 )
 
+
                 if pending:
+
                     await state.clear()
+
                     return await call.answer(
-                        "Masih ada withdraw yang sedang diproses.",
+                        "Masih ada withdraw yang diproses.",
                         show_alert=True
                     )
+
+
+                # potong saldo
 
                 await conn.execute(
                     """
@@ -802,6 +857,7 @@ async def withdraw_instant_confirm(
                     total,
                     call.from_user.id
                 )
+
 
                 withdraw_id = await conn.fetchval(
                     """
@@ -832,6 +888,7 @@ async def withdraw_instant_confirm(
                     account["account_number"]
                 )
 
+
                 await conn.execute(
                     """
                     INSERT INTO wallet_transactions
@@ -856,20 +913,28 @@ async def withdraw_instant_confirm(
                     f"Instant Withdraw #{withdraw_id}"
                 )
 
+
     except Exception as e:
 
         await state.clear()
 
-        logger.exception(e)
+        logger.exception(
+            "WITHDRAW INSTANT ERROR"
+        )
 
         return await call.answer(
-            "Terjadi kesalahan.",
+            "Terjadi kesalahan sistem.",
             show_alert=True
         )
 
+
     remaining_balance = user["balance"] - total
 
+
     await state.clear()
+
+
+    # lanjutkan kirim notif admin + pesan sukses user di bawah sini
 
     # =========================
     # NOTIF ADMIN
