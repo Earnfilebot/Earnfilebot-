@@ -284,7 +284,7 @@ async def bayargg_webhook(request: Request):
                 try:
 
                     await bot.send_message(
-                        CHANNEL_ID,
+                        -1003894841696,
                         (
                             "✅ <b>SOLD OUT FILE</b>\n\n"
                             f"📂 File : <code>{purchase['file_code']}</code>\n"
@@ -486,7 +486,7 @@ async def bayargg_webhook(request: Request):
 
 
         await bot.send_message(
-            CHANNEL_ID,
+            -1003894841696,
             (
                 "💎 <b>VIP SOLD</b>\n\n"
                 f"👤 User : <code>{trx['user_id']}</code>\n"
