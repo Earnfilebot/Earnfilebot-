@@ -49,8 +49,11 @@ from handlers.account import router as account_router
 from handlers.my_code import router as my_code_router
 from handlers.vvip import router as vvip_router
 from handlers.help import router as help_router
-from handlers.withdraw import router as withdraw_router
-from handlers.account_withdraw import router as account_withdraw_router
+from handlers.withdraw import (
+    withdraw_router,
+    withdraw_confirm_router,
+    withdraw_account_router
+)
 from handlers.admin import router as admin_router
 from handlers.notify import router as notify_router
 
@@ -75,7 +78,18 @@ dp.include_router(account_router)
 dp.include_router(my_code_router)
 dp.include_router(vvip_router)
 dp.include_router(help_router)
-dp.include_router(account_withdraw_router)
+
+# =========================
+# WITHDRAW
+# =========================
+
+dp.include_router(withdraw_account_router)
 dp.include_router(withdraw_router)
+dp.include_router(withdraw_confirm_router)
+
+# =========================
+# ADMIN
+# =========================
+
 dp.include_router(admin_router)
 dp.include_router(notify_router)
