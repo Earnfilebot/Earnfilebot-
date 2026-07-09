@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 from database import get_pool
 from states.withdraw import WithdrawState
+from aiogram.fsm.state import State, StatesGroup
 from config import ADMIN_IDS
 
 router = Router()
@@ -25,10 +26,22 @@ WIB = ZoneInfo("Asia/Jakarta")
 WITHDRAW_OPEN_HOUR = 9
 WITHDRAW_CLOSE_HOUR = 19
 
+# =========================
+# WITHDRAW INSTANT
+# =========================
+
+INSTANT_AMOUNT = 50_000
+INSTANT_FEE = 10_000
+INSTANT_MIN_BALANCE = INSTANT_AMOUNT + INSTANT_FEE
+
 
 # =========================
 # CEK JAM OPERASIONAL
 # =========================
+
+class WithdrawState(StatesGroup):
+    confirm_withdraw = State()
+    confirm_instant = State()
 
 def withdraw_is_open() -> bool:
     """
@@ -315,7 +328,7 @@ async def withdraw_create(
 
     kb.button(
         text="❌ Batal",
-        callback_data="withdraw_cancel"
+        callback_data="withdraw"
     )
 
     kb.adjust(2, 2, 2, 1)
@@ -469,7 +482,7 @@ async def withdraw_amount(
         "━━━━━━━━━━━━━━\n\n"
 
         f"💰 Nominal : <b>Rp {amount:,}</b>\n"
-        f"💸 Fee Admin : <b>Rp {fee:,}</b>\n"
+        f"💸 Fee Telegram : <b>Rp {fee:,}</b>\n"
         f"📉 Total Dipotong : <b>Rp {total:,}</b>\n\n"
 
         "Pastikan data rekening sudah benar.\n"
@@ -486,6 +499,484 @@ async def withdraw_amount(
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e).lower():
             logger.exception(e)
+
+# =========================
+# WITHDRAW INSTANT
+# =========================
+
+@router.callback_query(F.data == "withdraw_instant")
+async def withdraw_instant(
+    call: CallbackQuery,
+    state: FSMContext
+):
+    await call.answer()
+
+    # =========================
+    # CEK JAM OPERASIONAL
+    # =========================
+
+    if not withdraw_is_open():
+
+        kb = InlineKeyboardBuilder()
+
+        kb.button(
+            text="🔙 Menu Withdraw",
+            callback_data="withdraw"
+        )
+
+        return await call.message.edit_text(
+            (
+                "🔒 <b>Layanan Withdraw Instant Sedang Tutup</b>\n\n"
+                "Jam Operasional\n"
+                "• Senin -Jumat\n"
+                "• 09:00 - 19:00 WIB\n"
+                "• Sabtu & Minggu Libur"
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
+        )
+
+    pool = await get_pool()
+
+    # =========================
+    # REKENING DEFAULT
+    # =========================
+
+    account = await pool.fetchrow(
+        """
+        SELECT
+            uwa.id,
+            uwa.account_name,
+            uwa.account_number,
+            wm.name AS method_name
+        FROM user_withdraw_accounts uwa
+        JOIN withdraw_methods wm
+            ON wm.id = uwa.method_id
+        WHERE
+            uwa.user_id=$1
+            AND uwa.is_default=TRUE
+        LIMIT 1
+        """,
+        call.from_user.id
+    )
+
+    if account is None:
+
+        kb = InlineKeyboardBuilder()
+
+        kb.button(
+            text="➕ Tambah Rekening",
+            callback_data="withdraw_add_account"
+        )
+
+        kb.button(
+            text="🔙 Menu Withdraw",
+            callback_data="withdraw"
+        )
+
+        kb.adjust(1)
+
+        return await call.message.edit_text(
+            (
+                "❌ <b>Rekening Default Belum Ada</b>\n\n"
+                "Tambahkan rekening atau E-Wallet terlebih dahulu."
+            ),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
+        )
+
+    # =========================
+    # SALDO USER
+    # =========================
+
+    balance = await pool.fetchval(
+        """
+        SELECT balance
+        FROM users
+        WHERE telegram_id=$1
+        """,
+        call.from_user.id
+    ) or 0
+
+    if balance < INSTANT_MIN_BALANCE:
+
+        kb = InlineKeyboardBuilder()
+
+        kb.button(
+            text="🔙 Menu Withdraw",
+            callback_data="withdraw"
+        )
+
+        return await call.message.edit_text(
+            (
+                "❌ <b>Saldo Tidak Mencukupi</b>\n\n"
+                f"Minimal saldo untuk Withdraw Instant adalah\n"
+                f"<b>Rp {INSTANT_MIN_BALANCE:,}</b>\n\n"
+                f"Nominal : Rp {INSTANT_AMOUNT:,}\n"
+                f"Fee : Rp {INSTANT_FEE:,}"
+            ).replace(",", "."),
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
+        )
+
+    # =========================
+    # CEK PENDING
+    # =========================
+
+    pending = await pool.fetchval(
+        """
+        SELECT id
+        FROM withdrawals
+        WHERE seller_id=$1
+        AND status='pending'
+        LIMIT 1
+        """,
+        call.from_user.id
+    )
+
+    if pending:
+
+        return await call.answer(
+            "Masih ada withdraw yang sedang diproses.",
+            show_alert=True
+        )
+
+    # =========================
+    # RESET SESSION
+    # =========================
+
+    await state.clear()
+
+    await state.update_data(
+        withdraw_type="instant",
+        withdraw_account_id=account["id"],
+        withdraw_amount=INSTANT_AMOUNT,
+        withdraw_fee=INSTANT_FEE,
+        withdraw_total=INSTANT_MIN_BALANCE
+    )
+
+    # =========================
+    # KEYBOARD
+    # =========================
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="⚡ Konfirmasi Withdraw Instant",
+        callback_data="withdraw_instant_confirm"
+    )
+
+    kb.button(
+        text="❌ Batal",
+        callback_data="withdraw"
+    )
+
+    kb.adjust(1)
+
+    # =========================
+    # TAMPILKAN
+    # =========================
+
+    await call.message.edit_text(
+        (
+            "⚡ <b>WITHDRAW INSTANT</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+
+            "🚀 Dana diprioritaskan diproses admin.\n\n"
+
+            f"🏦 Metode : {account['method_name']}\n"
+            f"👤 Nama : {account['account_name']}\n"
+            f"💳 Nomor : <code>{account['account_number']}</code>\n\n"
+
+            f"💰 Saldo : <b>Rp {balance:,}</b>\n"
+            f"💵 Nominal : <b>Rp {INSTANT_AMOUNT:,}</b>\n"
+            f"💸 Fee Telegram Fast : <b>Rp {INSTANT_FEE:,}</b>\n"
+            f"📉 Total Potong : <b>Rp {INSTANT_MIN_BALANCE:,}</b>\n\n"
+
+            "Tekan tombol di bawah untuk melanjutkan."
+        ).replace(",", "."),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
+@router.callback_query(F.data == "withdraw_instant_confirm")
+async def withdraw_instant_confirm(
+    call: CallbackQuery,
+    state: FSMContext
+):
+    await call.answer()
+
+    if not withdraw_is_open():
+        await state.clear()
+        return await call.answer(
+            "Jam operasional withdraw telah berakhir.",
+            show_alert=True
+        )
+
+    data = await state.get_data()
+
+    if data.get("withdraw_processing"):
+        return
+
+    await state.update_data(
+        withdraw_processing=True
+    )
+
+    pool = await get_pool()
+
+    account = await pool.fetchrow(
+        """
+        SELECT
+            uwa.account_name,
+            uwa.account_number,
+            wm.name AS method_name
+        FROM user_withdraw_accounts uwa
+        JOIN withdraw_methods wm
+            ON wm.id = uwa.method_id
+        WHERE
+            uwa.id=$1
+            AND uwa.user_id=$2
+            AND uwa.is_active=TRUE
+        """,
+        data["withdraw_account_id"],
+        call.from_user.id
+    )
+
+    if account is None:
+        await state.clear()
+        return await call.answer(
+            "Rekening tidak ditemukan.",
+            show_alert=True
+        )
+
+    amount = INSTANT_AMOUNT
+    fee = INSTANT_FEE
+    total = amount + fee
+
+    try:
+
+        async with pool.acquire() as conn:
+
+            async with conn.transaction():
+
+                user = await conn.fetchrow(
+                    """
+                    SELECT balance
+                    FROM users
+                    WHERE telegram_id=$1
+                    FOR UPDATE
+                    """,
+                    call.from_user.id
+                )
+
+                if user["balance"] < total:
+                    await state.clear()
+                    return await call.answer(
+                        "Saldo tidak mencukupi.",
+                        show_alert=True
+                    )
+
+                pending = await conn.fetchval(
+                    """
+                    SELECT id
+                    FROM withdrawals
+                    WHERE seller_id=$1
+                    AND status IN ('pending','instant_pending')
+                    LIMIT 1
+                    """,
+                    call.from_user.id
+                )
+
+                if pending:
+                    await state.clear()
+                    return await call.answer(
+                        "Masih ada withdraw yang sedang diproses.",
+                        show_alert=True
+                    )
+
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET balance = balance - $1
+                    WHERE telegram_id=$2
+                    """,
+                    total,
+                    call.from_user.id
+                )
+
+                withdraw_id = await conn.fetchval(
+                    """
+                    INSERT INTO withdrawals
+                    (
+                        seller_id,
+                        amount,
+                        fee,
+                        total,
+                        method,
+                        account_name,
+                        account_number,
+                        status,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        $1,$2,$3,$4,$5,$6,$7,
+                        'instant_pending',
+                        NOW()
+                    )
+                    RETURNING id
+                    """,
+                    call.from_user.id,
+                    amount,
+                    fee,
+                    total,
+                    account["method_name"],
+                    account["account_name"],
+                    account["account_number"]
+                )
+
+                await conn.execute(
+                    """
+                    INSERT INTO wallet_transactions
+                    (
+                        telegram_id,
+                        type,
+                        amount,
+                        description,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        $1,
+                        'withdraw_instant',
+                        $2,
+                        $3,
+                        NOW()
+                    )
+                    """,
+                    call.from_user.id,
+                    -total,
+                    f"Instant Withdraw #{withdraw_id}"
+                )
+
+    except Exception as e:
+
+        await state.clear()
+
+        logger.exception(e)
+
+        return await call.answer(
+            "Terjadi kesalahan.",
+            show_alert=True
+        )
+
+    remaining_balance = user["balance"] - total
+
+    await state.clear()
+
+    # =========================
+    # NOTIF ADMIN
+    # =========================
+
+    created_time = datetime.now(WIB).strftime("%d-%m-%Y %H:%M:%S")
+
+    username = (
+        f"@{call.from_user.username}"
+        if call.from_user.username
+        else "-"
+    )
+
+    for admin_id in ADMIN_IDS:
+
+        try:
+
+            kb_admin = InlineKeyboardBuilder()
+
+            kb_admin.button(
+                text="✅ Proses",
+                callback_data=f"withdraw_process:{withdraw_id}"
+            )
+
+            kb_admin.button(
+                text="❌ Reject",
+                callback_data=f"withdraw_reject:{withdraw_id}"
+            )
+
+            kb_admin.adjust(2)
+
+            await call.bot.send_message(
+                admin_id,
+                (
+                    "⚡ <b>REQUEST WITHDRAW INSTANT</b>\n"
+                    "━━━━━━━━━━━━━━\n\n"
+
+                    f"🆔 Withdraw ID : <code>{withdraw_id}</code>\n"
+                    f"👤 User ID : <code>{call.from_user.id}</code>\n"
+                    f"🙍 Nama : <b>{call.from_user.full_name}</b>\n"
+                    f"📱 Username : {username}\n\n"
+
+                    f"🏦 Metode : <b>{account['method_name']}</b>\n"
+                    f"👤 Nama Rekening : <b>{account['account_name']}</b>\n"
+                    f"💳 Nomor : <code>{account['account_number']}</code>\n\n"
+
+                    f"💰 Nominal : <b>Rp {amount:,}</b>\n"
+                    f"💸 Fee : <b>Rp {fee:,}</b>\n"
+                    f"📉 Total Potong : <b>Rp {total:,}</b>\n"
+                    f"💵 Sisa Saldo : <b>Rp {remaining_balance:,}</b>\n\n"
+
+                    f"🕒 Waktu : <b>{created_time} WIB</b>\n"
+                    "⚡ <b>PRIORITAS INSTANT</b>\n"
+                    "⏳ Status : <b>PENDING</b>"
+                ).replace(",", "."),
+                parse_mode="HTML",
+                reply_markup=kb_admin.as_markup()
+            )
+
+        except Exception:
+            logger.exception("INSTANT ADMIN NOTIFY ERROR")
+
+
+    # =========================
+    # USER SUCCESS
+    # =========================
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="📜 Riwayat Withdraw",
+        callback_data="withdraw_history"
+    )
+
+    kb.button(
+        text="🔙 Menu Withdraw",
+        callback_data="withdraw"
+    )
+
+    kb.adjust(1)
+
+    await call.message.edit_text(
+        (
+            "⚡ <b>WITHDRAW INSTANT BERHASIL DIBUAT</b>\n"
+            "━━━━━━━━━━━━━━\n\n"
+
+            f"🆔 ID Withdraw : <code>{withdraw_id}</code>\n\n"
+
+            f"🏦 Metode : <b>{account['method_name']}</b>\n"
+            f"👤 Nama : <b>{account['account_name']}</b>\n"
+            f"💳 Nomor : <code>{account['account_number']}</code>\n\n"
+
+            f"💰 Nominal : <b>Rp {amount:,}</b>\n"
+            f"💸 Fee : <b>Rp {fee:,}</b>\n"
+            f"📉 Total Dipotong : <b>Rp {total:,}</b>\n"
+            f"💵 Sisa Saldo : <b>Rp {remaining_balance:,}</b>\n\n"
+
+            "⚡ Permintaan Anda masuk ke antrean PRIORITAS.\n"
+            "Admin akan memproses lebih cepat dibanding withdraw reguler."
+        ).replace(",", "."),
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
+    )
+
 
 # =========================
 # KONFIRMASI WITHDRAW
@@ -621,7 +1112,6 @@ async def withdraw_confirm(
                         seller_id,
                         amount,
                         fee,
-                        total,
                         method,
                         account_name,
                         account_number,
@@ -630,7 +1120,7 @@ async def withdraw_confirm(
                     )
                     VALUES
                     (
-                        $1,$2,$3,$4,$5,$6,$7,
+                        $1,$2,$3,$4,$5,$6,
                         'pending',
                         NOW()
                     )
@@ -639,7 +1129,6 @@ async def withdraw_confirm(
                     call.from_user.id,
                     amount,
                     fee,
-                    total,
                     account["method_name"],
                     account["account_name"],
                     account["account_number"]
@@ -833,7 +1322,7 @@ async def withdraw_process(call: CallbackQuery):
                         show_alert=True
                     )
 
-                if wd["status"] != "pending":
+                if wd["status"] not in ("pending", "instant_pending"):
                     return await call.answer(
                         "Withdraw sudah diproses.",
                         show_alert=True
@@ -969,7 +1458,7 @@ async def withdraw_reject(call: CallbackQuery):
                         show_alert=True
                     )
 
-                if wd["status"] != "pending":
+                if wd["status"] not in ("pending", "instant_pending"):
                     return await call.answer(
                         "Withdraw sudah diproses.",
                         show_alert=True
@@ -1141,6 +1630,7 @@ async def withdraw_history(call: CallbackQuery):
 
     status_map = {
         "pending": "⏳ Pending",
+        "instant_pending": "⚡ Instant Pending",
         "success": "✅ Success",
         "rejected": "❌ Rejected"
     }
