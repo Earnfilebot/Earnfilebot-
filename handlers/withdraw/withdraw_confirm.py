@@ -3,6 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
 
 from database import get_pool
 
@@ -261,13 +262,31 @@ async def withdraw_confirm(
     )
 
 
-    await send_withdraw_channel(
+    channel_message_id = await send_withdraw_channel(
         call,
         withdraw_id,
         amount,
         WITHDRAW_FEE,
         "pending"
     )
+
+
+    if channel_message_id:
+
+        async with pool.acquire() as conn:
+
+            await conn.execute(
+                """
+                UPDATE withdraws
+
+                SET channel_message_id=$1
+
+                WHERE id=$2
+                """,
+
+                channel_message_id,
+                withdraw_id
+            )
 
 
     kb = InlineKeyboardBuilder()
@@ -511,7 +530,11 @@ async def withdraw_instant_confirm(
         )
 
 
-    await send_admin_notification(
+    # =====================================================
+    # POST CHANNEL
+    # =====================================================
+
+    channel_message_id = await send_withdraw_channel(
         call,
         withdraw_id,
         INSTANT_AMOUNT,
@@ -520,14 +543,27 @@ async def withdraw_instant_confirm(
     )
 
 
-    await send_withdraw_channel(
-        call,
-        withdraw_id,
-        INSTANT_AMOUNT,
-        INSTANT_FEE,
-        "instant_pending"
-    )
+    if channel_message_id:
 
+        async with pool.acquire() as conn:
+
+            await conn.execute(
+                """
+                UPDATE withdraws
+
+                SET channel_message_id=$1
+
+                WHERE id=$2
+                """,
+
+                channel_message_id,
+                withdraw_id
+            )
+
+
+    # =====================================================
+    # USER SUCCESS
+    # =====================================================
 
     await call.message.edit_text(
 
@@ -626,7 +662,22 @@ async def send_withdraw_channel(
 
     try:
 
-        await call.bot.send_message(
+        kb = InlineKeyboardBuilder()
+
+        kb.button(
+            text="✅ APPROVE",
+            callback_data=f"wd_approve:{withdraw_id}"
+        )
+
+        kb.button(
+            text="❌ REJECT",
+            callback_data=f"wd_reject:{withdraw_id}"
+        )
+
+        kb.adjust(2)
+
+
+        msg = await call.bot.send_message(
 
             WITHDRAW_CHANNEL_ID,
 
@@ -640,13 +691,17 @@ async def send_withdraw_channel(
                 f"💰 Nominal : <b>{rupiah(amount)}</b>\n"
                 f"💸 Fee : <b>{rupiah(fee)}</b>\n\n"
 
-                f"📌 Status : ⏳ {status}\n\n"
+                "📌 Status : ⏳ PENDING\n\n"
 
                 "Menunggu proses admin."
             ),
 
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
         )
+
+
+        return msg.message_id
 
 
     except Exception:
@@ -654,3 +709,5 @@ async def send_withdraw_channel(
         logger.exception(
             "CHANNEL WITHDRAW POST ERROR"
         )
+
+        return None
