@@ -18,7 +18,7 @@ class WithdrawState(StatesGroup):
 
     select_account = State()
     input_amount = State()
-    confirm = State()
+    confirm_withdraw = State()
 
 
     # =========================
