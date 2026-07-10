@@ -163,6 +163,7 @@ async def pay_file(call: CallbackQuery):
             description=f"File {code}",
             customer_name=call.from_user.full_name
         )
+        final_amount = data.get("final_amount", price)
 
 
         logger.info(
@@ -335,7 +336,7 @@ async def pay_file(call: CallbackQuery):
             caption=(
                 "💳 <b>PAYMENT QRIS</b>\n\n"
                 f"🧾 Invoice : <code>{invoice_id}</code>\n"
-                f"💰 Harga : Rp {price:,}\n\n"
+                f"💰 Total Bayar : Rp {final_amount:,}\n\n"
                 "Scan QR untuk melakukan pembayaran."
             ).replace(",", "."),
 
