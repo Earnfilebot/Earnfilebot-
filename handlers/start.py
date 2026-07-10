@@ -240,16 +240,19 @@ async def process_start(message, loading, user_id, username):
         (
             telegram_id,
             username,
+            chat_id,
             balance
         )
         VALUES
-        ($1,$2,0)
+        ($1,$2,$3,0)
         ON CONFLICT (telegram_id)
         DO UPDATE SET
-            username=EXCLUDED.username
+            username = EXCLUDED.username,
+            chat_id = EXCLUDED.chat_id
         """,
         user_id,
-        username
+        username,
+        message.chat.id
     )
 
     user = await pool.fetchrow(
