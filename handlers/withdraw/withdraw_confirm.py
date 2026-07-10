@@ -141,7 +141,7 @@ async def withdraw_confirm(call: CallbackQuery):
                     """
                     INSERT INTO withdraws
                     (
-                        seller_id,
+                        user_id,
                         amount,
                         method,
                         account_name,
