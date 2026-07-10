@@ -85,7 +85,7 @@ async def withdraw_confirm(call: CallbackQuery):
                     """
                     SELECT id
                     FROM withdraws
-                    WHERE seller_id=$1
+                    WHERE user_id=$1
                     AND status IN (
                         'pending',
                         'instant_pending'
@@ -316,7 +316,7 @@ async def withdraw_instant_confirm(call: CallbackQuery):
                     """
                     SELECT id
                     FROM withdraws
-                    WHERE seller_id=$1
+                    WHERE user_id=$1
                     AND status IN (
                         'pending',
                         'instant_pending'
@@ -372,7 +372,7 @@ async def withdraw_instant_confirm(call: CallbackQuery):
                     """
                     INSERT INTO withdraws
                     (
-                        seller_id,
+                        user_id,
                         amount,
                         method,
                         account_name,
