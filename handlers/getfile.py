@@ -140,7 +140,7 @@ async def receive_code(message: Message, state: FSMContext):
         """
         SELECT 1
         FROM users
-        WHERE id=$1
+        WHERE telegram_id=$1
           AND vip=TRUE
           AND vip_until > NOW()
         """,
