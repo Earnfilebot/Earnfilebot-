@@ -48,7 +48,14 @@ async def check_payment(call: CallbackQuery):
                 show_alert=True
             )
 
-        status = str(data.get("status", "")).lower()
+        status = str(
+            data.get("status")
+            or data.get("payment_status")
+            or ""
+        ).lower()
+
+        logger.info(f"BAYARGG CHECK RESPONSE | {data}")
+        logger.info(f"PARSED STATUS | {status}")
 
         # =========================
         # AMBIL TRANSAKSI DB
@@ -90,7 +97,7 @@ async def check_payment(call: CallbackQuery):
         # =========================
         # BELUM BAYAR
         # =========================
-        if status != "paid":
+        if status not in ["paid", "success"]:
             return await call.answer(
                 status_map.get(status, "⏳ Menunggu pembayaran"),
                 show_alert=True
